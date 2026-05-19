@@ -7,6 +7,40 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### RESUMEN SESIÓN 2026-05-19
+
+**Objetivo de la sesión:** Conseguir fader bidireccional funcional — Logic mueve S2, S2 reporta posición a Logic.
+
+**Resuelto ✅**
+
+| Fix | Archivos | Descripción |
+|-----|----------|-------------|
+| Motor apretado en tope mecánico | `Motor.cpp`, `config.h` | Stall detection 400ms en GOING_TO_MIN — evita sobrecalentamiento DRV8833 |
+| Protección global topes | `Motor.cpp`, `config.h` | `ADC_SPIKE_GUARD` + guard global en todos los estados del motor |
+| FaderTouch falso positivo | `Motor.cpp` | Desacoplado del control motor — interferencia eléctrica en tope inferior causaba bloqueo total |
+| Motor auto-interrupción | `Motor.cpp` | `MOVING_TO_TARGET` añadido a `inCalibFlow` — propio movimiento no se confunde con usuario |
+| Fader feedback S2→Logic | `Motor.cpp`, `Motor.h`, `RS485Handler.cpp` | `isManualTouchDetected()` exportado, `touchState` basado en delta ADC (no FaderTouch) |
+| Latencia feedback | `RS485.cpp` (S3) | Bypass EMA cuando `touchState=1` → posición directa a Logic sin filtro |
+| S3 HALT agresivo | `RS485.cpp` (S3) | HALT solo durante calibración activa — movimiento normal no dispara LED rojo |
+| Re-calibración innecesaria | `MIDIProcessor.cpp` (S3) | `_calibPendingFrom` eliminado de handler 0x21 y primer PitchBend |
+| Ciclo RS485 más rápido | `config.h` (S3) | `POLL_CYCLE_MS` 20→10ms (100Hz con 1 slave) |
+| SAT roto | — | Resuelto espontáneamente en hardware durante la sesión |
+| Docs S2 README | `S2/README.md` | Specs corregidos: Lolin S2 Mini, Type-C USB OTG, 27 GPIO |
+| Docs S3 README | `S3/README.md` | Alt text imagen corregido: ESP32-S3-DevKitC-1 |
+
+**Pendiente 🔴**
+
+| Pendiente | MCU | Descripción |
+|-----------|-----|-------------|
+| Boot goToMin | S2 | Fader no baja a 0 en boot — fix diseñado (`_bootGoToMinDone`), pendiente aplicar |
+| Fader feedback validación | S2+S3 | `touchState=1` en logs pero sin confirmar en hardware que Logic recibe PitchBend |
+| Boot secuencial 4 fases | S3 | Nueva arquitectura boot: detección → calibración → validación → Logic ready |
+| P4 config.h PSRAM | P4 | Actualizar config.h con PSRAM 32MB y comentarios LVGL |
+
+**Commits:** `06d9562`, `b336c1d`, `7732728`, `f74ac0e`, `3c515e9`, `425a423`, `3957009`
+
+---
+
 ### S3 — Boot secuencial 4 fases (2026-05-19) — 🔴 PENDIENTE
 
 **Objetivo:** S2 calibrado y validado ANTES de que Logic conecte (0x21).
