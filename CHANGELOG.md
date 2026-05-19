@@ -7,6 +7,47 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### S3 — Boot secuencial 4 fases (2026-05-19) — 🔴 PENDIENTE
+
+**Objetivo:** S2 calibrado y validado ANTES de que Logic conecte (0x21).
+
+```
+FASE 1: DETECCIÓN ESCLAVO (0-2s)
+├─ S3 envía probe RS485 a S2 (ping simple)
+├─ S2 responde SlavePacket (confirma online)
+├─ Si timeout > 3 reintentos → ERROR CRÍTICO (LED rojo + log)
+└─ Si OK → Fase 2
+
+FASE 2: CALIBRACIÓN (2-10s)
+├─ S3 envía FLAG_CALIB a S2
+├─ S2 ejecuta calibración motor (baja a min, sube a max)
+├─ S2 responde con min/max ADC
+├─ S3 almacena calibración, valida rangos (min<max)
+├─ Si calibración falla → LED rojo + ERROR, requiere reset S3
+└─ Si OK → Fase 3
+
+FASE 3: VALIDACIÓN (10-15s)
+├─ S3 envía setTarget(8192) a S2 (posición media)
+├─ S2 mueve fader, reporta faderPos
+├─ S3 valida respuesta (faderPos ≈ 8192 ±500)
+├─ Si responde → LED verde (S2 listo)
+└─ Si timeout → LED rojo (S2 no responde)
+
+FASE 4: LOGIC READY (15s+)
+├─ S3 espera Logic 0x21
+├─ Cuando Logic conecta: S2 ya está calibrado y validado
+└─ RS485 polling activo, todo funcional
+```
+
+---
+
+### P4 — config.h PSRAM 32MB + comentarios LVGL (2026-05-19) — 🔴 PENDIENTE
+
+- Actualizar `P4/src/config.h` con detalles PSRAM 32MB y periféricos
+- Añadir comentarios sobre PSRAM abundante para LVGL
+
+---
+
 ### S2/S3 — Fader feedback S2→Logic — pendiente validación (2026-05-19) — 🔴 PENDIENTE
 
 **Diagnóstico en curso:** `[S2-RESP] touchState=1` y `[S3-RX] touchState=1` añadidos para confirmar la cadena RS485. No validado en hardware todavía.
