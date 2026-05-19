@@ -158,6 +158,11 @@ static uint16_t   _userDropTarget       = 0;            // ADC capturado cuando 
 static uint16_t   _s3Target             = 0;            // Target actual de S3 (para MOVING_TO_TARGET)
 static uint32_t   _atTargetStartTime    = 0;            // timestamp cuando llegó a AT_TARGET
 
+// Motor — detección stall en GOING_TO_MIN (2026-05-19)
+static constexpr uint32_t GOTO_MIN_STALL_MS  = 400;   // ms sin movimiento ADC = fader en tope físico
+static uint32_t           _goToMinStallStart = 0;
+static uint16_t           _goToMinLastADC    = 0;
+
 // Motor — detección movimiento manual (delta ADC rápido)
 static uint16_t   _motor_lastADCForDelta = 0;  // ADC anterior para calcular delta
 static bool       _motor_manualTouchDetected = false;  // Flag toque manual en curso

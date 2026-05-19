@@ -375,22 +375,36 @@ void update() {
         }
         break;
 
-    case MotorState::GOING_TO_MIN:
-        // Bajando a 0. Detectar llegada.
-        if (_motor_adcPos <= (MOTOR_ADC_MIN + 10)) {  // Llegó a 0
+    case MotorState::GOING_TO_MIN: {
+        // Llegada por threshold o por stall (fader en tope físico, ADC no baja más)
+        bool arrived = (_motor_adcPos <= (MOTOR_ADC_MIN + 60));
+
+        if (abs((int)_motor_adcPos - (int)_goToMinLastADC) > 15) {
+            _goToMinLastADC    = _motor_adcPos;
+            _goToMinStallStart = millis();
+        } else if (_goToMinStallStart > 0 &&
+                   millis() - _goToMinStallStart > GOTO_MIN_STALL_MS) {
+            arrived = true;
+            log_d("[MOTOR-STATE] GOING_TO_MIN stall detectado (adc=%d)", _motor_adcPos);
+        }
+
+        if (arrived) {
             _hwOff();
+            _goToMinStallStart = 0;
+            _goToMinLastADC    = 0;
             if (_pendingCalib) {
                 _pendingCalib = false;
-                _motor_state = MotorState::CALIBRATING;
+                _motor_state  = MotorState::CALIBRATING;
                 startCalib();
                 log_d("[MOTOR-STATE] GOING_TO_MIN → CALIBRATING");
             } else {
-                _motor_state = MotorState::AT_TARGET;
+                _motor_state       = MotorState::AT_TARGET;
                 _atTargetStartTime = millis();
                 log_d("[MOTOR-STATE] GOING_TO_MIN → AT_TARGET (llegó a 0)");
             }
         }
         break;
+    }
 
     case MotorState::CALIBRATING:
         // Máquina calibración en curso
