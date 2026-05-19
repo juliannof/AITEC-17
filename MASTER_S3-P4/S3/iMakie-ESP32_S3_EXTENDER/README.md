@@ -15,6 +15,10 @@ Controlador Mackie MCU extendido para Logic Pro. Controla 1 track S2 (ID=1) vía
 - **Slaves controlados:** 1 (ID=1) en RS485 bus B (NUM_SLAVES=1, ver config.h)  
 - **Transport buttons:** 5 (RW/FF/STOP/PLAY/REC)
 
+
+<img alt="ESP32-S3-DevKitC-1" src="https://naylampmechatronics.com/img/cms/001206/Pinout%20ESP32-S3-DevKitC-1.jpg">
+
+
 ---
 
 ## Hardware S3
