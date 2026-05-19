@@ -1,9 +1,9 @@
 # MOTOR — Control DRV8833 y Calibración (S2 Slave)
 
-Documentación exhaustiva del subsistema de motor fader. Incluye hardware, máquina de calibración, control de posición y diagnóstico.
+Documentación exhaustiva del subsistema de motor fader. Incluye hardware, máquina de calibración, control de posición, protección de topes y diagnóstico.
 
 **Responsable:** iMakie Development Team  
-**Última actualización:** 2026-05-16  
+**Última actualización:** 2026-05-19  
 **Estado:** En producción (17 faders activos)
 
 ---
@@ -23,17 +23,37 @@ Documentación exhaustiva del subsistema de motor fader. Incluye hardware, máqu
 | **Rango PWM** | 0-255 (8-bit) |
 | **PWM operacional** | 100-160 (calibrado) |
 
+**CRÍTICO — analogWrite vs LEDC:**
+LovyanGFX backlight (GPIO3) agota los canales LEDC del ESP32-S2. El motor DEBE usar `analogWrite()` (API simple, sin conflictos de recursos). La migración a LEDC fue intentada y revertida (2026-05-10).
+
 ### 1.2 Sensor de Posición
 
 **ADS1115 I2C ADC (16-bit, ±4.096V)**
-- Rango capturado: 24–26476 (raw)
+- Rango físico real: ~44–26450 (varía por unidad)
 - ISR-driven, 860 SPS
 - Latencia: 0-2µs (no polling)
 - Mejora: 6-15× vs ADC nativo
 
 Ver **FADER.md** para especificación completa de ADS1115.
 
-### 1.3 Orden de Inicialización en setup() — CRÍTICO (2026-05-16)
+### 1.3 Rango ADC y Topes Físicos
+
+El fader tiene topes mecánicos físicos. El ADC no llega a 0 ni a 32767 — los valores reales dependen del hardware individual:
+
+| Parámetro | Valor típico | Notas |
+|-----------|--------------|-------|
+| `MOTOR_ADC_MIN` | 20 | Cota baja para rechazar ruido (config.h) |
+| `MOTOR_ADC_MAX` | 27000 | Cota alta esperada (config.h) |
+| Tope físico inferior | ~44 (varía) | ADC real cuando fader toca fondo |
+| Tope físico superior | ~26450 (varía) | ADC real cuando fader toca techo |
+| `_calibratedFaderMin` | bot + margen | Calculado en calibración |
+| `_calibratedFaderMax` | top - margen | Calculado en calibración |
+
+**MOTOR_ADC_MIN ≠ tope físico inferior.** MOTOR_ADC_MIN es solo un filtro de ruido. El tope físico real se determina en calibración (SETTLE_DOWN → `_calibratedFaderMin`).
+
+Esta distinción causó el bug de motor caliente (2026-05-19): la condición `ADC <= MOTOR_ADC_MIN + 10 = 30` nunca se cumplía porque el fader físico no baja de ~44. El motor seguía empujando indefinidamente contra el tope.
+
+### 1.4 Orden de Inicialización en setup() — CRÍTICO (2026-05-16)
 
 **Líneas exactas de main.cpp:**
 
@@ -127,7 +147,7 @@ ESCENARIOS DURANTE OPERACIÓN:
       │  └─ Motor::requestCalibration()  ← procesado ANTES de desconexión
       │     ├─ Si ADC ≠ 0: Motor::goToMin() baja a 0
       │     └─ Si ADC = 0: startCalib() directo
-      ├─ Motor transiciona: GOING_TO_MIN → WAITING_FOR_CALIB → CALIBRATING
+      ├─ Motor transiciona: GOING_TO_MIN → CALIBRATING
       └─ BuildResponse() reporta CALIB_DONE cuando completa
       
   2️⃣  S3 conectado + usuario NO toca (post-calibración):
@@ -168,11 +188,14 @@ static uint32_t _motor_manualTouchStartTime;
 static uint16_t _motor_lastADCForDelta;
 
 // Máquina estados
-static MotorState _motor_state;            ← IDLE, GOING_TO_MIN, WAITING_FOR_CALIB, CALIBRATING, MOVING_TO_TARGET, AT_TARGET
+static MotorState _motor_state;            ← IDLE, GOING_TO_MIN, CALIBRATING, MOVING_TO_TARGET, AT_TARGET
 
 // Flags
 static bool _pendingCalib;                 ← requestCalibration() pone en true
 static bool _motor_goingToMin;             ← goToMin() pone en true
+
+// Protección hardware (2026-05-19)
+static bool _motor_hw_active;              ← true cuando _hwUp()/_hwDown() activos
 ```
 
 ---
@@ -263,42 +286,6 @@ Próximo boot:
   → _pwm_min=123, _pwm_max=157 ← usa valores persistentes
 ```
 
-**Código relevante:**
-
-Motor.cpp (líneas 297-315):
-```cpp
-void initPWM() {
-    Preferences prefs;
-    prefs.begin("ptxx", true);  // read-only
-    uint8_t pwmMin = prefs.getUChar("pwmMin", 0);
-    uint8_t pwmMax = prefs.getUChar("pwmMax", 0);
-    prefs.end();
-
-    if (pwmMin > 0 && pwmMax > 0 && pwmMin < pwmMax) {
-        _pwm_min = pwmMin;      // ← Usa valor de SAT
-        _pwm_max = pwmMax;      // ← Usa valor de SAT
-        log_i("[MOTOR] PWM: %u-%u (NVS)", _pwm_min, _pwm_max);
-    } else {
-        _pwm_min = 0;
-        _pwm_max = 0;           // ← Fallback a config.h en Motor.cpp init
-        log_e("[MOTOR] PWM NVS inválido");
-    }
-}
-```
-
-SatMenu.cpp (guardado):
-```cpp
-// Dentro de saveConfig()
-_prefs.putUChar("pwmMin",  _cfg.pwmMin);   // Persistencia
-_prefs.putUChar("pwmMax",  _cfg.pwmMax);   // Persistencia
-```
-
-**¿Por qué es importante?**
-- Cada S2 puede tener motor con características diferentes (fricción, inercia, etc.)
-- SAT calibra PWM Min/Max para ese motor específico en la sesión física
-- NVS persiste calibración entre reboots → no necesita recalibrar PWM cada boot
-- Motor::initPWM() es el puente entre SAT y motor en el siguiente boot
-
 ### 2.3 Parámetros de Control (config.h)
 
 ```cpp
@@ -311,9 +298,6 @@ static constexpr uint16_t DEAD_ZONE                = 50;    // error < esto → 
 
 // Motor — spike guard (rechaza cambios > este valor)
 static constexpr uint16_t ADC_SPIKE_GUARD          = 500;   // cuentas entre lecturas
-
-// Motor — EMA filter
-static constexpr float    FADER_EMA_ALPHA_FAST     = 0.20f; // 75% histórico, 25% nuevo
 ```
 
 ---
@@ -326,18 +310,22 @@ static constexpr float    FADER_EMA_ALPHA_FAST     = 0.20f; // 75% histórico, 2
 setup() LÍNEA 233: Motor::goToMin()
   ↓
 _motor_goingToMin = true
-_hwDown(_pwm_max)  ← Motor comienza a bajar
+_hwDown(_pwm_max) → _motor_hw_active = true
 log: "goToMin: bajando a posición 0..."
   ↓
 setup() termina, entra a loop()
   ↓
-loop() tick 1-N: Motor::update() ejecuta lógica goToMin:
-  if (_motor_adcPos <= MOTOR_ADC_MIN + 10) {  // ADC ≈ 20-30
-    _hwOff()           ← Motor se apaga
-    _motor_goingToMin = false
-    log: "goToMin: llegó a 0 (ADC=XX)"
-    return
-  }
+loop() tick 1-N: Motor::update()
+  ↓ PROTECCIÓN STALL (global, antes del switch):
+    ADC se mueve → timer stall no corre
+    ADC llega al tope físico (~44) → ADC se estabiliza
+    400ms sin cambio → _hwOff() + _motor_hw_active=false
+  
+  ↓ GOING_TO_MIN (state machine):
+    Condición alternativa: ADC <= MOTOR_ADC_MIN + 60 = 80 (threshold generoso)
+    O stall propio (400ms) → hwOff + transición
+    Si _pendingCalib → CALIBRATING
+    Si no → AT_TARGET
   ↓
 Fader en 0, motor apagado, esperando órdenes S3
 ```
@@ -348,163 +336,185 @@ Fader en 0, motor apagado, esperando órdenes S3
 
 | Estado | Valor | Notas |
 |--------|-------|-------|
-| Fader posición | ADC ≈ 20-30 (posición 0) | Físicamente abajo |
-| Motor | Apagado (EN=LOW) | No consume corriente |
+| Fader posición | ADC ≈ 44 (tope físico) | Físicamente abajo |
+| Motor | Apagado (EN=LOW, `_motor_hw_active=false`) | No consume corriente |
 | Fase motor | `CalibPhase::IDLE` | Listo para calibración |
 | PWM_MIN/MAX | Cargado de NVS | Conoce su rango PWM |
 | ADC | Listo (FaderADC activo) | Leyendo continuamente |
 
 **Siguiente paso:** Espera FLAG_CALIB de S3 para calibración completa
 
-```
-S3 envía MasterPacket con FLAG_CALIB
-  ↓
-RS485Handler::onMasterData() detecta FLAG_CALIB
-  ↓
-Motor::startCalib() → transición IDLE → KICK_UP
-  ↓
-~8 segundos: calibración completa (sube, baja, mide ruido)
-  ↓
-Motor::update() → DONE
-  ↓
-Fader listo para recibir PitchBend de Logic
-```
-
-**Ventajas de goToMin():**
-- ✅ Fader garantizado en 0 al boot
-- ✅ Rápido (~1-2s) vs calibración (~8s)
-- ✅ Posición conocida antes de calibración
-- ✅ Motor listo para órdenes S3 inmediatamente
-
 ---
 
-## 2.5 Máquina de Estados Motor v2 — Usuario Master (2026-05-16 10:52)
+## 2.5 Máquina de Estados Motor v3 (2026-05-16 / actualizado 2026-05-19)
 
-**Prioridad correcta:**
-```
-Usuario tocando > S3 commands > Motor autónomo
-```
-
-**Principios (actualizado 2026-05-16 10:52):**
-- **Usuario es el master absoluto** — puede tomar control en cualquier momento
-- S3 controla SOLO si usuario no toca el fader
-- Si usuario mueve → Motor para INMEDIATAMENTE, ADC actual = nuevo target
-- Si usuario suelta → Motor queda en posición, S3 puede mandar nuevo target
-- Sin comando S3 y sin usuario: fader en 0 (IDLE → GOING_TO_MIN → AT_TARGET)
-- Estados: IDLE → GOING_TO_MIN → WAITING_FOR_CALIB → CALIBRATING → IDLE
-- Alternativa: IDLE → GOING_TO_MIN → AT_TARGET (usuario soltó)
-- CONNECTED a S3: NO baja a 0 automáticamente, espera órdenes
-- DISCONNECTED de S3: baja a 0 (goToMin loop)
-
-### **2.5.1 Estados y Transiciones**
+### 2.5.1 Estados y Transiciones
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │ IDLE                                                        │
-│ - Fader en 0, esperando órdenes S3 o usuario             │
-│ - Si ADC > 30: bajar a 0 (GOING_TO_MIN)                  │
-│ - Si ADC ≤ 30: apagar motor                               │
+│ - Fader en 0, esperando órdenes S3 o usuario               │
+│ - Si ADC > MIN+10 y !_connected: → GOING_TO_MIN            │
+│ - Si ADC ≤ MIN+10 o connected: apagar motor                 │
 └─────────────────────────────────────────────────────────────┘
-    ↓ (ADC > 30)
+    ↓ (ADC > MIN+10 y !connected)
 ┌─────────────────────────────────────────────────────────────┐
 │ GOING_TO_MIN                                                │
-│ - Motor baja con PWM_MAX                                   │
-│ - Si llega a 0:                                            │
-│   ├─ Si _pendingCalib: → WAITING_FOR_CALIB               │
-│   └─ Sino: → AT_TARGET                                    │
-└─────────────────────────────────────────────────────────────┘
-    ↓ (FLAG_CALIB pendiente)
-┌─────────────────────────────────────────────────────────────┐
-│ WAITING_FOR_CALIB                                           │
-│ - En 0, esperando que startCalib() se ejecute             │
-│ - Cuando _pendingCalib activado: → CALIBRATING            │
+│ - Motor baja con PWM_MAX                                    │
+│ - Doble detección de llegada (2026-05-19):                  │
+│   • Por threshold: ADC <= MOTOR_ADC_MIN + 60                │
+│   • Por stall: ADC sin cambio 400ms (tope físico)           │
+│ - Si _pendingCalib: → CALIBRATING                           │
+│ - Si no: → AT_TARGET                                        │
+│ - GLOBAL STALL PROTECT también activo (ver §2.6)            │
 └─────────────────────────────────────────────────────────────┘
     ↓ (_pendingCalib = true)
 ┌─────────────────────────────────────────────────────────────┐
 │ CALIBRATING                                                 │
-│ - Máquina calibración en curso (KICK_UP → DONE)          │
-│ - Si DONE o ERROR: → IDLE                                 │
+│ - Máquina calibración en curso (KICK_UP → DONE)            │
+│ - GLOBAL STALL PROTECT NO activo (CALIB tiene el suyo)     │
+│ - Si DONE o ERROR: → IDLE                                   │
 └─────────────────────────────────────────────────────────────┘
     ↓ (calibración completa)
 └──────────→ IDLE (vuelve al inicio)
 
 ┌─────────────────────────────────────────────────────────────┐
 │ MOVING_TO_TARGET (desde S3 setTarget)                      │
-│ - Motor se mueve a posición S3                             │
-│ - Si llega: → AT_TARGET                                    │
+│ - Motor se mueve a posición S3                              │
+│ - GLOBAL STALL PROTECT activo (2026-05-19)                 │
+│ - Si error < DEAD_ZONE: → AT_TARGET                         │
 └─────────────────────────────────────────────────────────────┘
     ↓ (error < DEAD_ZONE)
 ┌─────────────────────────────────────────────────────────────┐
 │ AT_TARGET                                                   │
-│ - Posición objetivo alcanzada, esperando nuevo comando S3  │
-│ - Si timeout (30s): → IDLE                                │
-│ - Si usuario suelta en Y: → GOING_TO_MIN (_userDropTarget) │
+│ - Posición objetivo alcanzada, esperando nuevo comando S3   │
+│ - Motor apagado (_motor_hw_active = false)                  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### **2.5.2 Funciones Públicas (API v2 — 2026-05-16 10:52)**
+### 2.5.2 Funciones Públicas (API v3)
 
 ```cpp
-// Motor state machine
 void requestCalibration();           // FLAG_CALIB desde RS485
 void setTargetFromS3(uint16_t adc);  // setTarget ADC desde RS485 — GUARDED por usuario
 void setUserDropTarget(uint16_t adc); // Usuario soltó fader en ADC
-void setConnected(bool connected);   // Notifica estado conexión S3 (NEW 2026-05-16)
-MotorState getState();                // Consulta estado motor
+void setConnected(bool connected);   // Notifica estado conexión S3
+MotorState getState();               // Consulta estado motor
 void setADCDelta(uint16_t currentADC); // Detecta movimiento usuario (delta OR capacitivo)
 ```
 
-### **2.5.3 Escenarios de Uso**
+---
 
-**Escenario 1: Boot sin comando S3**
-```
-setup() → Motor en IDLE
-loop(): ADC > 30 → GOING_TO_MIN → baja a 0 → IDLE
-Motor queda en 0, esperando S3
-```
+## 2.6 PROTECCIÓN DE TOPES MECÁNICOS (2026-05-19)
 
-**Escenario 2: Usuario suelta fader en posición Y**
-```
-IDLE (fader en 0) 
-  → usuario arrastra a Y
-  → usuario suelta
-  → setUserDropTarget(Y) 
-  → GOING_TO_MIN (ahora target=Y)
-  → llega a Y
-  → AT_TARGET (esperando S3)
-```
+### 2.6.1 Problema: Motor Caliente en Tope
 
-**Escenario 3: S3 ordena calibración (FLAG_CALIB)**
-```
-IDLE (fader en posición X) 
-  → requestCalibration() detecta X ≠ 0
-  → GOING_TO_MIN + _pendingCalib=true
-  → llega a 0
-  → WAITING_FOR_CALIB
-  → startCalib() ejecuta
-  → CALIBRATING 
-  → ~8s después: DONE
-  → IDLE
-```
+**Evento:** Motor aplicando PWM_MAX contra tope físico sin detener → sobrecalentamiento DRV8833 y motor DC.
 
-**Escenario 4: S3 ordena setTarget(P) mientras está en AT_TARGET**
-```
-AT_TARGET (posición Y)
-  → setTargetFromS3(P) desde RS485
-  → MOVING_TO_TARGET (target=P)
-  → llega a P
-  → AT_TARGET
-```
+**Causa raíz del bug original (commit 06d9562):**
+- `MOTOR_ADC_MIN = 20` (umbral de ruido, no tope físico)
+- Condición de salida GOING_TO_MIN: `ADC <= MOTOR_ADC_MIN + 10 = 30`
+- Tope físico real: ADC ≈ 44
+- `44 <= 30` → NUNCA true → motor apretado indefinidamente
 
-### **2.5.4 Variables Internas**
+**Lección:** `MOTOR_ADC_MIN` es un filtro de ruido, NO el tope físico. Siempre usar detección dinámica (stall) para topes.
+
+### 2.6.2 Solución 1 — Stall en GOING_TO_MIN (commit 06d9562, 2026-05-19)
+
+Detección en el propio estado:
 
 ```cpp
-static MotorState _motor_state;        // Estado actual
-static bool _pendingCalib;             // Flag: calibración en espera
-static uint16_t _userDropTarget;       // ADC donde usuario soltó
-static uint16_t _s3Target;             // Target actual de S3
-static uint32_t _atTargetStartTime;    // timestamp llegada a AT_TARGET
+case MotorState::GOING_TO_MIN: {
+    bool arrived = (_motor_adcPos <= (MOTOR_ADC_MIN + 60)); // threshold generoso
+
+    // Stall: ADC no cambia en GOTO_MIN_STALL_MS → fader en tope físico
+    if (abs((int)_motor_adcPos - (int)_goToMinLastADC) > 15) {
+        _goToMinLastADC    = _motor_adcPos;
+        _goToMinStallStart = millis();
+    } else if (_goToMinStallStart > 0 &&
+               millis() - _goToMinStallStart > GOTO_MIN_STALL_MS) {
+        arrived = true;
+    }
+
+    if (arrived) {
+        _hwOff();
+        // → CALIBRATING o AT_TARGET según _pendingCalib
+    }
+}
 ```
+
+**Parámetros (config.h):**
+```cpp
+static constexpr uint32_t GOTO_MIN_STALL_MS  = 400;  // ms sin ADC change → llegó
+static uint32_t           _goToMinStallStart = 0;
+static uint16_t           _goToMinLastADC    = 0;
+```
+
+### 2.6.3 Solución 2 — Protección Global (commit actual, 2026-05-19)
+
+Capa de seguridad adicional que actúa ANTES del switch de estados, protege TODOS los estados de movimiento excepto CALIBRATING:
+
+```cpp
+void update() {
+    // ─── Protección global topes mecánicos ──────────────────────
+    if (_motor_hw_active && _motor_state != MotorState::CALIBRATING) {
+        if (abs((int)_motor_adcPos - (int)_stallProtectLastADC) > 10) {
+            _stallProtectLastADC = _motor_adcPos;
+            _stallProtectStart   = millis();
+        } else if (_stallProtectStart > 0 &&
+                   millis() - _stallProtectStart > STALL_PROTECT_MS) {
+            _hwOff();  // _motor_hw_active = false → no refire
+            log_e("[MOTOR] STALL — tope físico, motor apagado (adc=%d)", _motor_adcPos);
+        }
+    } else if (!_motor_hw_active) {
+        _stallProtectStart   = 0;
+        _stallProtectLastADC = _motor_adcPos;
+    }
+    // ─────────────────────────────────────────────────────────────
+
+    switch (_motor_state) { ... }
+}
+```
+
+**Parámetros (config.h):**
+```cpp
+static constexpr uint32_t STALL_PROTECT_MS     = 400;   // ms sin ADC change → apagar
+static bool               _motor_hw_active     = false; // seteado por _hwUp/_hwDown/_hwOff
+static uint32_t           _stallProtectStart   = 0;
+static uint16_t           _stallProtectLastADC = 0;
+```
+
+**El flag `_motor_hw_active` es fuente de verdad del estado hardware:**
+
+```cpp
+static void _hwOff()         { ...; _motor_hw_active = false; }
+static void _hwUp(uint8_t p) { ...; _motor_hw_active = true;  }
+static void _hwDown(uint8_t p){ ...; _motor_hw_active = true; }
+```
+
+### 2.6.4 Cobertura de Protección
+
+| Estado | GOING_TO_MIN stall | Global stall | Notas |
+|--------|-------------------|--------------|-------|
+| `GOING_TO_MIN` | ✅ 400ms | ✅ 400ms | Doble protección |
+| `MOVING_TO_TARGET` | ❌ No tiene | ✅ 400ms | Global es única protección |
+| `CALIBRATING` | ❌ | ❌ Excluido | Usa `CALIB_STUCK_TIMEOUT = 1000ms` propio |
+| `IDLE` | N/A | ✅ (motor off en IDLE) | Motor normalmente apagado |
+| `AT_TARGET` | N/A | ✅ (motor off) | Motor normalmente apagado |
+
+**¿Por qué excluir CALIBRATING?**
+
+La calibración deliberadamente empuja el motor contra los topes superior e inferior para medir los extremos físicos. Cada fase (KICK_UP, GOING_UP, KICK_DOWN, GOING_DOWN) tiene su propio `CALIB_STUCK_TIMEOUT = 1000ms` que detecta si el motor NO se mueve en 1 segundo y transiciona o reporta error. Aplicar el global (400ms) interferiría con estas fases legítimas.
+
+### 2.6.5 Cómo se Re-arma el Stall Timer
+
+Cuando el motor se apaga por stall (`_hwOff()` → `_motor_hw_active = false`):
+1. En el siguiente tick de `update()`, `!_motor_hw_active` → rama `else if`
+2. `_stallProtectStart = 0` y `_stallProtectLastADC = _motor_adcPos` se resetean
+3. Si en el mismo ciclo se vuelve a llamar `_hwDown()` → `_motor_hw_active = true` otra vez
+4. El timer arranca desde 0 nuevamente
+
+No hay posibilidad de "re-fire en el mismo tick" porque `_hwOff()` → `_motor_hw_active=false` → rama `else if` en lugar de la rama `if`.
 
 ---
 
@@ -579,57 +589,32 @@ S3 envía MasterPacket con FLAG_CALIB
   ↓
 S2 RS485Handler::onMasterData() detecta FLAG_CALIB
   ↓
-Motor::requestCalibration()  ← NUEVA FUNCIÓN — reemplaza startCalib()
+Motor::requestCalibration()
   ├─ Si fader EN 0:
   │   └─ Motor::startCalib() → KICK_UP inmediatamente
   └─ Si fader NO EN 0:
-      └─ Motor::goToMin() primero
-         ├─ Baja a 0
-         ├─ Motor queda en AT_TARGET
-         └─ startCalib() se ejecuta en siguiente ciclo
+      ├─ _pendingCalib = true
+      ├─ Motor::goToMin() baja (stall detection activo)
+      └─ Al llegar: _pendingCalib → startCalib()
 ```
 
-**Código requestCalibration() — implementación idempotente (2026-05-16 19:26):**
+**Código requestCalibration():**
 ```cpp
 void requestCalibration() {
-    // S3 ordena FLAG_CALIB cada ciclo → evalúa estado ACTUAL, NO persistente
-    // IDEMPOTENTE: sin _pendingCalib, evalúa cada llamada (no se bloquea)
     if (_motor_adcPos <= (MOTOR_ADC_MIN + 10)) {
-        // Ya en 0 → calibra directamente (si no ya calibrando)
         if (_motor_state != MotorState::CALIBRATING) {
             _motor_state = MotorState::CALIBRATING;
             startCalib();
-            log_i("[MOTOR] requestCalibration: fader ya en 0, calibrando");
         }
     } else {
-        // No en 0 → baja primero, luego calibra (si no ya bajando)
         if (_motor_state != MotorState::GOING_TO_MIN) {
+            _pendingCalib = true;
             _motor_state = MotorState::GOING_TO_MIN;
             goToMin();
-            log_i("[MOTOR] requestCalibration: bajando a 0 primero, luego calibrar");
         }
     }
 }
 ```
-
-**CRÍTICO:** Sin `_pendingCalib` — S3 llama cada ciclo:
-- S3: FLAG_CALIB=1 → llama `Motor::requestCalibration()`
-- S2 evalúa **estado actual SIEMPRE**: ¿ADC en 0? → calibra; ¿No? → baja
-- No se bloquea: si fader no llega a 0 por fricción → Motor sigue intentando
-- Si estado ya alcanzado (GOING_TO_MIN/CALIBRATING) → no reinicia, no spam
-
-**Manual (SAT menu):**
-```
-Usuario: Encoder push >3s → SAT menu
-         Motor → Calibración
-         → Motor::requestCalibration()  ← Mismo flujo
-```
-
-**Ventajas requestCalibration() vs startCalib():**
-- ✅ Garantiza fader en 0 ANTES de calibración
-- ✅ No necesita "esperar" que usuario lo coloque
-- ✅ Arquitectura clean: S3 no necesita conocer posición actual
-- ✅ Reutiliza goToMin() (MASTER control)
 
 ### 3.4 Guard Cooldown (2026-05-16)
 
@@ -640,62 +625,27 @@ Motor::startCalib() {
         log_w("[CALIB] Enfriamiento activo, rechazando FLAG_CALIB");
         return;
     }
-    
-    // Inicializar máquina
-    _motor_phase = CalibPhase::KICK_UP;
-    _motor_calibStart = millis();
-    _motor_phaseStart = millis();
-    log_i("[CALIB] Iniciando KICK_UP");
+    // ...
 }
 ```
 
 **config.h:**
 ```cpp
 static constexpr uint32_t CALIB_COOLDOWN_MS        = 2000;  // ms espera mínima (2026-05-16)
-static uint32_t   _motor_lastCalibDone  = 0;    // timestamp último finish
+static uint32_t           _motor_lastCalibDone      = 0;    // timestamp último finish
 ```
 
-**Razón:** S3 continuaba enviando FLAG_CALIB después de calibración exitosa → bucle infinito. Cooldown previene reinicios involuntarios.
-
-### 3.5 Validación Post-Calibración
+### 3.5 Parámetros de Calibración (config.h)
 
 ```cpp
-// Después de SETTLE_DOWN, validar rango capturado
-
-uint16_t min_margin = 100;
-uint16_t max_margin = 100;
-
-_calibratedFaderMin = _motor_adcBot + min_margin;
-_calibratedFaderMax = _motor_adcTop - max_margin;
-
-uint16_t span = _calibratedFaderMax - _calibratedFaderMin;
-
-if (span < 1000) {
-    // Rango muy pequeño → error
-    _motor_phase = CalibPhase::ERROR;
-    log_e("[CALIB] FAIL: span=%d (< 1000)", span);
-    return;
-}
-
-log_i("[CALIB] ✓ DONE: min=%d max=%d span=%d", 
-      _calibratedFaderMin, _calibratedFaderMax, span);
-
-_motor_phase = CalibPhase::DONE;
-_motor_lastCalibDone = millis();  // Registrar timestamp para cooldown
-```
-
-### 3.6 Parámetros de Calibración (config.h)
-
-```cpp
-// Motor — calibración (constantes)
-static constexpr uint16_t ADC_STABILITY_THRESHOLD  = 100;     // cambio máximo para "estable"
-static constexpr uint32_t CALIB_STABLE_TIME        = 500;     // ms para confirmar estable
-static constexpr uint32_t CALIB_SETTLE_MS          = 200;     // ms para medir ruido
-static constexpr uint32_t CALIB_MIN_TRAVEL_MS      = 300;     // ms mínimo de viaje
-static constexpr uint32_t CALIB_TIMEOUT            = 6000;    // ms timeout total
-static constexpr uint32_t CALIB_STUCK_TIMEOUT      = 1000;    // ms sin movimiento = atascado
-static constexpr uint32_t CALIB_COOLDOWN_MS        = 2000;    // ms espera antes de reintentar
-static constexpr uint8_t  PWM_SLEW                 = 5;       // cambio PWM máximo/tick
+static constexpr uint16_t ADC_STABILITY_THRESHOLD  = 100;    // cambio máximo para "estable"
+static constexpr uint32_t CALIB_STABLE_TIME        = 500;    // ms para confirmar estable
+static constexpr uint32_t CALIB_SETTLE_MS          = 200;    // ms para medir ruido
+static constexpr uint32_t CALIB_MIN_TRAVEL_MS      = 300;    // ms mínimo de viaje
+static constexpr uint32_t CALIB_TIMEOUT            = 6000;   // ms timeout total
+static constexpr uint32_t CALIB_STUCK_TIMEOUT      = 1000;   // ms sin movimiento = atascado
+static constexpr uint32_t CALIB_COOLDOWN_MS        = 2000;   // ms espera antes de reintentar
+static constexpr uint8_t  PWM_SLEW                 = 5;      // cambio PWM máximo/tick
 ```
 
 ---
@@ -713,30 +663,47 @@ Acceder: Encoder push >3 segundos en display normal
   - SAT solo dibuja estado (no controla)
   - Presionar REC: reinicia calibración si falla
 - **Motor Drive** — Test PWM manual (slider 0-255)
-- **Brightness** — Test backlight
-- **RS485 On/Off** — Simula desconexión (debug)
-- **LEDs Test** — Secuencia RGB por índice
-- **WiFi OTA** — Carga firmware vía WiFi
-- **Reboot** — Reinicia
 
 ### 4.2 Motor Calibración en SAT (2026-05-12 19:07)
 
-**Arquitectura:**
 - `main.cpp` ejecuta `Motor::update()` cada frame (incluso con SAT abierto)
 - SAT **NO** ejecuta Motor::update() (evita race conditions)
 - Motor::setADC() actualizado siempre en main.cpp
 - SAT solo dibuja `Motor::getCalibState()`
 
-**Ventaja:** Garantiza que calibración en SAT = calibración en loop principal.
+**Nota:** La protección global de topes también está activa durante Test Mode SAT. Si se presiona REC/SOLO contra el tope físico más de 400ms, el motor se apagará automáticamente.
 
 ---
 
 ## 5. DIAGNÓSTICO Y DEBUGGING
 
-### 5.1 Expected Logs — Calibración Exitosa
+### 5.1 Expected Logs — Boot Normal (con stall detection)
 
 ```
-[CALIB] Iniciando KICK_UP
+[MOTOR] goToMin: bajando a posición 0 (MASTER)...
+[MOTOR-STATE] GOING_TO_MIN stall detectado (adc=44)    ← stall local GOING_TO_MIN
+[MOTOR-STATE] GOING_TO_MIN → AT_TARGET (llegó a 0)
+```
+
+O si _pendingCalib:
+```
+[MOTOR-STATE] GOING_TO_MIN stall detectado (adc=44)
+[MOTOR-STATE] GOING_TO_MIN → CALIBRATING
+[CALIB] Iniciada
+[CALIB] KICK_UP adc=44 ...
+```
+
+### 5.2 Expected Logs — Stall Global Activado
+
+```
+[MOTOR] STALL — tope físico, motor apagado (adc=44)
+```
+Este log indica que la protección global disparó (MOVING_TO_TARGET pegó contra un tope, o GOING_TO_MIN llegó antes del stall local).
+
+### 5.3 Expected Logs — Calibración Exitosa
+
+```
+[CALIB] Iniciada
 [CALIB] KICK_UP → GOING_UP (ADC=26200)
 [CALIB] GOING_UP → SETTLE_UP (estable en 26400)
 [CALIB] SETTLE_UP: ruido_top=±8 cuentas
@@ -744,105 +711,34 @@ Acceder: Encoder push >3 segundos en display normal
 [CALIB] KICK_DOWN → GOING_DOWN (ADC=500)
 [CALIB] GOING_DOWN → SETTLE_DOWN (estable en 100)
 [CALIB] SETTLE_DOWN: ruido_bot=±5 cuentas
-[CALIB] ✓ DONE: min=200 max=26300 span=26100
+[CALIB] OK  MIN=44 MAX=26448 span=26404
 ```
 
-### 5.2 Expected Logs — Fallo Calibración
-
-```
-[CALIB] Iniciando KICK_UP
-[CALIB] KICK_UP timeout (motor no se mueve)
-[CALIB] ✗ ERROR: motor atascado o desconectado
-```
-
-### 5.3 Checklist Troubleshooting
+### 5.4 Checklist Troubleshooting
 
 | Síntoma | Causa Probable | Verificación |
 |---------|----------------|--------------|
-| Motor inmóvil | EN (GPIO14) no LOW en init() | Ver `Motor::init()` en código |
+| Motor caliente / apretado contra tope | Stall no activo o MOTOR_ADC_MIN muy bajo | Ver §2.6 — protección global activa desde 2026-05-19 |
+| `[MOTOR] STALL` en log pero motor no detiene | Flag `_motor_hw_active` no seteado | Verificar que `_hwDown/_hwUp` setean `_motor_hw_active=true` |
+| Motor inmóvil | EN (GPIO14) no LOW en init() | Ver `Motor::init()` |
 | Movimiento invertido | IN1/IN2 lógica invertida | Test manual con PWM → observar dirección |
-| PWM insuficiente | PWM_MIN/MAX mal calibrados | Test Mode SAT: slider 0-255 |
+| PWM insuficiente | PWM_MIN/MAX mal calibrados | Test Mode SAT |
 | Calibración timeout | Motor atascado o sensor roto | Check ADS1115 lectura en Test Mode |
 | Reinicios infinitos | S3 envía FLAG_CALIB continuamente | Verificar cooldown guard (2000ms) |
-| Dead zone agresiva | DEAD_ZONE > 50 cuentas | Ajustar config.h, recompilar |
+| GOING_TO_MIN no transiciona | `_pendingCalib` no seteado | Verificar `requestCalibration()` setea `_pendingCalib=true` |
 
 ---
 
-## 6. CONTROL EMA FILTER
+## 6. DETECCIÓN DE USUARIO — Master Control (2026-05-16 10:52)
 
-Motor recibe feedback suavizado (ruido reducido ±3 cuentas vs ±30 nativo):
-
-```cpp
-// En FaderADC.cpp
-filteredPos = filteredPos + (rawPos - filteredPos) * FADER_EMA_ALPHA_FAST;
-// FADER_EMA_ALPHA_FAST = 0.20f (75% histórico, 25% nuevo)
-
-// En Motor.cpp
-Motor::setADC(uint16_t pos) {
-    _motor_adcPos = pos;  // Usa filteredPos enviado por FaderADC
-    // Luego calcula error vs target
-}
-```
-
-**Ventaja:** Suaviza sin crear dead zones excesivas.
-
----
-
-## 7. HISTÓRIA DE FIXES (2026-05-16)
-
-### 2026-05-16 08:29 — Guard Cooldown & Auto-Calib Disable
-
-**Problema:** S3 continuamente enviaba FLAG_CALIB después de calibración → motor reiniciaba calibración infinitamente.
-
-**Root Cause:** S2 no tenía mecanismo para rechazar FLAG_CALIB si ya completó recientemente.
-
-**Fix:**
-1. Añadido `CALIB_COOLDOWN_MS = 2000` en config.h
-2. Añadido `_motor_lastCalibDone` timestamp
-3. Guard en `Motor::startCalib()`: rechaza si (now - _motor_lastCalibDone < 2000ms)
-4. Desactivado auto-calibración en S2 main.cpp → S3 es autoridad única
-
-**Commit:** `e0af808` + `7514f2b` + `9341f3b`
-
-### 2026-05-09 23:50 — Lógica IN1/IN2 Invertida
-
-**Problema:** Motor subía cuando debería bajar (lógica invertida).
-
-**Fix:** Corregir _hwUp() y _hwDown() → UP=IN2 PWM, DOWN=IN1 PWM
-
-### Pre-2026-05-09 — PWM Insuficiente
-
-**Problema:** Motor muy lento o sin movimiento.
-
-**Fix:** Calibrar PWM_MIN=100, PWM_MAX=160 (testeo en bench).
-
----
-
-## 3. DETECCIÓN DE USUARIO — Master Control (2026-05-16 10:52)
-
-### 3.1 Mecanismo: Sensor Capacitivo + Delta ADC
-
-**Dos detecciones en paralelo:**
+### 6.1 Mecanismo: Sensor Capacitivo + Delta ADC
 
 | Método | Fuente | Umbral | Ventaja |
 |--------|--------|--------|---------|
 | **Capacitivo** | FaderTouch::isTouched() | Contacto físico | Preciso, sin lag |
 | **Delta ADC** | setADCDelta(currentADC) | > 500 cuentas/tick | Detecta velocidad rápida |
 
-**Lógica:**
-```cpp
-bool userTouch = (delta > MANUAL_TOUCH_THRESHOLD) || FaderTouch::isTouched();
-
-if (userTouch && !_motor_manualTouchDetected) {
-    // Usuario toma control
-    _motor_manualTouchDetected = true;
-    Motor::stop();  // Para motor INMEDIATAMENTE
-    _motor_state = MotorState::AT_TARGET;
-    _motor_targetADC = currentADC;  // ADC actual = nueva posición
-}
-```
-
-### 3.2 Flujo: Usuario Toma Control
+### 6.2 Flujo: Usuario Toma Control
 
 ```
 Loop() — usuario mueve fader rápido:
@@ -852,24 +748,19 @@ Loop() — usuario mueve fader rápido:
   Motor::stop()  ← Motor para INMEDIATAMENTE
   _motor_state = AT_TARGET  ← Usuario define posición
   _motor_targetADC = currentADC  ← Nuevo target aceptado
-  log: "Usuario master: adc=12345"
     ↓
   RS485Handler::buildResponse():
     touchState = FaderTouch::isTouched() ? 1 : 0
-    faderPos = Motor::getRawADC()  ← Nueva posición
     → envía SlavePacket a S3
       ↓
-  S3 recibe touchState=1 + nueva faderPos
-    → Logic entiende "usuario movió fader"
-    → Logic NOT envía nuevo target (respeta usuario)
-      ↓
-  Usuario suelta fader (después de MANUAL_TOUCH_DEBOUNCE_MS):
+  S3 recibe touchState=1 → Logic entiende "usuario movió fader"
+    ↓
+  Usuario suelta fader (después de MANUAL_TOUCH_DEBOUNCE_MS=200ms):
     _motor_manualTouchDetected = false
-    Motor queda en AT_TARGET (nueva posición del usuario)
-    S3 ahora puede mandar nuevo target
+    S3 puede mandar nuevo target
 ```
 
-### 3.3 Guardia en setTargetFromS3()
+### 6.3 Guardia en setTargetFromS3()
 
 ```cpp
 void setTargetFromS3(uint16_t adcTarget) {
@@ -881,55 +772,39 @@ void setTargetFromS3(uint16_t adcTarget) {
 }
 ```
 
-**Interpretación:**
-- Si `_motor_manualTouchDetected` activo → usuario moviendo → IGNORA S3
-- Si `FaderTouch::isTouched()` → dedo en fader → IGNORA S3
-- Sino → usuario liberó → S3 PUEDE controlar
+---
 
-### 3.4 Conexión S3 (setConnected)
+## 7. HISTORIA DE FIXES
 
-**Nueva variable:**
-```cpp
-static bool _connected = false;  // Estado conexión S3
-```
+### 2026-05-19 — Protección Global Topes Mecánicos
 
-**Guards en IDLE y goToMin():**
+**Problema:** Motor caliente al apretarse contra tope físico. GOING_TO_MIN nunca transicionaba porque `MOTOR_ADC_MIN + 10 = 30` era inalcanzable (tope físico real ≈ 44).
 
-**IDLE:**
-```cpp
-if (!_connected && _motor_adcPos > (MOTOR_ADC_MIN + 10)) {
-    // Sin S3 → bajar a 0
-    _motor_state = MotorState::GOING_TO_MIN;
-} else {
-    // CONNECTED → motor quieto
-    _hwOff();
-}
-```
+**Fix 1 (commit 06d9562):** Stall detection en GOING_TO_MIN — si ADC sin cambio 400ms → transición a CALIBRATING o AT_TARGET.
 
-**goToMin():**
-```cpp
-if (_connected) return;  // No ejecutar si S3 conectado
-```
+**Fix 2 (commit actual):** Protección global en `Motor::update()` — cubre todos los estados de movimiento excepto CALIBRATING. Flag `_motor_hw_active` como fuente de verdad del estado HW.
 
-**Flujo:**
-```
-Boot: _connected = false
-  → IDLE detecta ADC > 30
-  → Baja a 0 (GOING_TO_MIN)
-  → Llega a 0 (AT_TARGET)
-  
-RS485Handler recibe MasterPacket con connected=1
-  → Motor::setConnected(true)
-  → update() IDLE: !_connected es false → no baja
-  → Motor quieto, espera target S3
-  
-S3 ordena setTargetFromS3()
-  → Motor va a target (MOVING_TO_TARGET → AT_TARGET)
-  
-RS485 timeout 500ms
-  → checkTimeout() → Motor::setConnected(false)
-  → update() IDLE: !_connected es true → baja a 0
-```
+**Lección permanente:** MOTOR_ADC_MIN es filtro de ruido, NO tope físico. Los topes siempre se detectan dinámicamente por stall.
+
+### 2026-05-18 — _pendingCalib: GOING_TO_MIN → CALIBRATING (commit a04e58f)
+
+**Problema:** FLAG_CALIB one-shot de S3 → S2 bajaba a 0 pero no calibraba al llegar (sin `_pendingCalib`).
+
+**Fix:** `requestCalibration()` setea `_pendingCalib=true` + GOING_TO_MIN. `update()` case GOING_TO_MIN verifica `_pendingCalib` → transiciona a CALIBRATING.
+
+### 2026-05-16 08:29 — Guard Cooldown & Auto-Calib Disable
+
+**Problema:** S3 continuamente enviaba FLAG_CALIB después de calibración → motor reiniciaba calibración infinitamente.
+
+**Fix:** Cooldown 2000ms en `Motor::startCalib()`, auto-calibración S2 desactivada.
+
+### 2026-05-16 10:52 — Usuario como Master (v2)
+
+**Fix:** Variables `_connected`, `setTargetFromS3()` con guards usuario, `setADCDelta()` integra FaderTouch.
+
+### 2026-05-09 23:50 — Lógica IN1/IN2 Invertida
+
+**Fix:** UP=IN2 PWM, DOWN=IN1 PWM.
 
 ---
 
@@ -937,11 +812,5 @@ RS485 timeout 500ms
 
 - **FADER.md** — Documentación ADS1115, calibración bidireccional, EMA filter
 - **CLAUDE.md** — Directivas obligatorias (NUNCA compilar, orden init, etc.)
-- **STATUS.md** — Bugs conocidos, pendientes críticos
 - **config.h (S2)** — Fuente de verdad para constantes motor
-
----
-
-## Últimas Actualizaciones
-
-- **(2026-05-16)** Creado Motor.md como documento exhaustivo, trasladado contenido de CLAUDE.md
+- **CHANGELOG.md** — Historial detallado de fixes y validaciones

@@ -43,18 +43,21 @@ static void _hwOff() {
     analogWrite(MOTOR_IN1, 0);
     analogWrite(MOTOR_IN2, 0);
     digitalWrite(MOTOR_EN, LOW);
+    _motor_hw_active = false;
 }
 
 static void _hwUp(uint8_t pwm) {
     analogWrite(MOTOR_IN1, pwm);
     analogWrite(MOTOR_IN2, 0);
     digitalWrite(MOTOR_EN, HIGH);
+    _motor_hw_active = true;
 }
 
 static void _hwDown(uint8_t pwm) {
     analogWrite(MOTOR_IN1, 0);
     analogWrite(MOTOR_IN2, pwm);
     digitalWrite(MOTOR_EN, HIGH);
+    _motor_hw_active = true;
 }
 
 // ─── Helper ───────────────────────────────────────────────────
@@ -360,6 +363,24 @@ void update() {
     //     → IDLE → GOING_TO_MIN (baja a 0)
     //     → Motor::goToMin() loop indefinido (MASTER)
     // └────────────────────────────────────────────────────────────────────────────────
+    // ─── Protección global topes mecánicos (2026-05-19) ──────────
+    // Motor HW activo + ADC sin cambio en STALL_PROTECT_MS → fader en tope → apagar
+    // CALIBRATING excluido: usa CALIB_STUCK_TIMEOUT propio por fase
+    if (_motor_hw_active && _motor_state != MotorState::CALIBRATING) {
+        if (abs((int)_motor_adcPos - (int)_stallProtectLastADC) > 10) {
+            _stallProtectLastADC = _motor_adcPos;
+            _stallProtectStart   = millis();
+        } else if (_stallProtectStart > 0 &&
+                   millis() - _stallProtectStart > STALL_PROTECT_MS) {
+            _hwOff();  // _motor_hw_active = false → no refire inmediato
+            log_e("[MOTOR] STALL — tope físico, motor apagado (adc=%d)", _motor_adcPos);
+        }
+    } else if (!_motor_hw_active) {
+        _stallProtectStart   = 0;
+        _stallProtectLastADC = _motor_adcPos;
+    }
+    // ─────────────────────────────────────────────────────────────
+
     switch (_motor_state) {
 
     case MotorState::IDLE:

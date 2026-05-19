@@ -320,10 +320,13 @@ filteredPos = filteredPos + (rawPos - filteredPos) * FADER_EMA_ALPHA;
 
 | Problema | Síntoma | Causa | Fix | Estado |
 |----------|---------|-------|-----|--------|
+| Motor caliente / apretado en tope | Motor sin parar en posición 0 | `MOTOR_ADC_MIN+10` inalcanzable (tope físico ≠ ADC mín teórico) | Stall detection + protección global (2026-05-19) | ✅ Fijo |
 | Motor no se mueve | Inmóvil en calibración | GPIO14 (EN) no LOW en init | Usar `digitalWrite(MOTOR_EN, LOW)` ANTES de analogWrite | **CRÍTICO** |
 | Movimiento invertido | Sube cuando debe bajar | _hwUp/_hwDown invertidos | IN1/IN2 lógica invertida | ✅ Fijo |
 | PWM insuficiente | Motor lento o sin movimiento | PWM_MIN/MAX mal calibrados | Test en bench: PWM_MIN=100, PWM_MAX=160 | ✅ Fijo |
 | Conflicto LEDC | Motor jitter o falla | LovyanGFX backlight agota canales LEDC | Usar `analogWrite()` (no ledcWrite) | ✅ Fijo |
+
+**Nota sobre topes mecánicos:** El fader tiene topes físicos de goma/plástico que limitan el recorrido. El ADC en el tope inferior es ~44, no 0. Cualquier lógica que espere `ADC == 0` fallará. Siempre usar detección por stall (ADC estable > Nms) para detectar llegada a tope. Ver **MOTOR.md §2.6** para implementación completa.
 
 ---
 
@@ -730,6 +733,20 @@ S3 respuesta:
 **Síntoma:** Cada vez que Logic desconecta (PB -8192), S3 detecta "no calibrado" → FLAG_CALIB automático → S2 calibra innecesariamente.
 
 **Fix:** Clipear negativos a 0, mapear 0..8191 → 0..27000.
+
+### 2026-05-19 — Protección topes mecánicos (stall detection)
+
+**Problema:** Motor se calentó al apretarse contra el tope físico inferior. La condición `ADC <= MOTOR_ADC_MIN + 10 = 30` nunca se cumplía porque el tope físico real del fader entrega ADC ≈ 44.
+
+**Causa raíz:** `MOTOR_ADC_MIN = 20` es un umbral de filtro de ruido, no el valor ADC del tope físico. Confundir ambos causó que la condición de salida de GOING_TO_MIN nunca se activara.
+
+**Lección permanente:** Los topes mecánicos siempre se detectan por **stall** (ADC estable varios cientos de ms), nunca por valor absoluto de ADC.
+
+**Fixes:**
+1. GOING_TO_MIN: stall local 400ms → transiciona a CALIBRATING o AT_TARGET
+2. Global en `Motor::update()`: protege GOING_TO_MIN y MOVING_TO_TARGET — si `_motor_hw_active` y ADC sin cambio 400ms → apaga motor
+
+**Commits:** `06d9562` (stall GOING_TO_MIN), `xxxxxxx` (protección global)
 
 ### 2026-05-16 07:48 — Guard cooldown S2 Motor
 

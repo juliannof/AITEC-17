@@ -7,6 +7,73 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### S2 MOTOR — Protección global topes mecánicos (2026-05-19 15:49) — ✅ COMPLETADO
+
+**Commits:** `06d9562` (stall GOING_TO_MIN), `[commit actual]` (protección global + docs)
+
+**Incidente:** Motor se calentó al quedar apretado contra el tope mecánico inferior. Motor DC en stall consume corriente máxima sin girar → sobrecalentamiento DRV8833 y bobinas.
+
+**Causa raíz:**
+- `MOTOR_ADC_MIN = 20` es filtro de ruido, NO el valor ADC del tope físico
+- Tope físico real: ADC ≈ 44 (varía por unidad)
+- Condición GOING_TO_MIN: `ADC <= MOTOR_ADC_MIN + 10 = 30`
+- `44 <= 30` → NUNCA true → motor apretado indefinidamente
+
+**Lección permanente:**
+> `MOTOR_ADC_MIN` es solo un guardia de ruido. Los topes mecánicos siempre se detectan por **stall** (ADC estable > N ms), nunca por valor absoluto de ADC. Un motor DC en stall es equivalente a un cortocircuito térmico — siempre apagar en ≤500ms.
+
+**Fix 1 — Stall en GOING_TO_MIN (commit `06d9562`):**
+
+`config.h`:
+```cpp
+static constexpr uint32_t GOTO_MIN_STALL_MS  = 400;
+static uint32_t           _goToMinStallStart = 0;
+static uint16_t           _goToMinLastADC    = 0;
+```
+
+`Motor.cpp` case `GOING_TO_MIN`:
+- Threshold generoso `ADC <= MOTOR_ADC_MIN + 60` OR stall 400ms
+- Si `_pendingCalib`: → CALIBRATING; si no: → AT_TARGET
+
+**Fix 2 — Protección Global (commit actual):**
+
+`config.h`:
+```cpp
+static constexpr uint32_t STALL_PROTECT_MS     = 400;
+static bool               _motor_hw_active     = false;  // fuente de verdad HW
+static uint32_t           _stallProtectStart   = 0;
+static uint16_t           _stallProtectLastADC = 0;
+```
+
+`Motor.cpp` `_hwOff/_hwUp/_hwDown` → setean `_motor_hw_active`
+
+`Motor.cpp update()` antes del switch:
+- Si `_motor_hw_active` y estado ≠ CALIBRATING: ADC sin cambio > 400ms → `_hwOff()`
+- CALIBRATING excluido: usa `CALIB_STUCK_TIMEOUT = 1000ms` propio
+
+**Cobertura resultante:**
+
+| Estado | Protección |
+|--------|-----------|
+| `GOING_TO_MIN` | Stall local 400ms + Global 400ms |
+| `MOVING_TO_TARGET` | Global 400ms |
+| `CALIBRATING` | `CALIB_STUCK_TIMEOUT = 1000ms` por fase |
+| `IDLE / AT_TARGET` | Motor apagado, no aplica |
+
+**Documentación actualizada:**
+- ✅ `docs/MOTOR.md` — nueva sección §2.6 "Protección de Topes Mecánicos" (exhaustiva)
+- ✅ `docs/FADER.md` — §3.4 y §10 actualizados con lección y referencias
+- ✅ `CHANGELOG.md` — esta entrada
+
+**⚠️ VALIDACIÓN HARDWARE PENDIENTE:**
+- [ ] Flash S2 con cambios actuales
+- [ ] Boot → fader baja a 0 → motor se apaga (log `GOING_TO_MIN → AT_TARGET` o `→ CALIBRATING`)
+- [ ] Motor NO se calienta
+- [ ] S3 manda FLAG_CALIB: `GOING_TO_MIN → CALIBRATING` tras stall detection
+- [ ] MOVING_TO_TARGET con target inalcanzable → motor apagado en 400ms (log `[MOTOR] STALL`)
+
+---
+
 ### S2 SLAVE — Placa Lolin D1 Mini S2 especificación completa (2026-05-16 21:00) — ✅ COMPLETADO
 
 **Commit:** 40337a8
