@@ -35,7 +35,11 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 | Boot goToMin | S2 | Fader no baja a 0 en boot — fix diseñado (`_bootGoToMinDone`), pendiente aplicar |
 | Fader feedback validación | S2+S3 | `touchState=1` en logs pero sin confirmar en hardware que Logic recibe PitchBend |
 | Boot secuencial 4 fases | S3 | Nueva arquitectura boot: detección → calibración → validación → Logic ready |
-| P4 config.h PSRAM | P4 | Actualizar config.h con PSRAM 32MB y comentarios LVGL |
+| MIDI deadband PitchBend | S3 | Deadband 150 cuentas → reducir tráfico 850→100 msgs/s |
+| Validación hardware flujo completo | S3 | Handshake, RS485, calibración, fader bidireccional, transport |
+| Validación hardware multimedia | P4 | Display LVGL, Touch GT911, NeoTrellis, PSRAM profiling |
+| P4 config.h PSRAM + periféricos | P4 | PSRAM 32MB, MIPI-CSI, I2S, TWAI, aceleradores JPEG/H.264 |
+| P4 Task Architecture docs | P4 | ARCHITECTURE_P4.md — dual-core, race conditions, ISR |
 
 **Commits:** `06d9562`, `b336c1d`, `7732728`, `f74ac0e`, `3c515e9`, `425a423`, `3957009`
 
@@ -75,10 +79,53 @@ FASE 4: LOGIC READY (15s+)
 
 ---
 
-### P4 — config.h PSRAM 32MB + comentarios LVGL (2026-05-19) — 🔴 PENDIENTE
+### P4 — config.h PSRAM 32MB + periféricos + aceleradores (2026-05-19) — 🔴 PENDIENTE
 
-- Actualizar `P4/src/config.h` con detalles PSRAM 32MB y periféricos
-- Añadir comentarios sobre PSRAM abundante para LVGL
+**Archivo:** `MASTER_S3-P4/P4/src/config.h`
+
+- Documentar PSRAM 32MB con comentarios para LVGL
+- Añadir sección periféricos: MIPI-CSI, I2S audio, TWAI (CAN)
+- Añadir sección aceleradores multimedia: JPEG, PPA, ISP, H.264
+
+---
+
+### S3 — MIDI Traffic Optimization: PitchBend deadband (2026-05-19) — 🔴 PENDIENTE
+
+**Archivo:** `MASTER_S3-P4/S3/iMakie-ESP32_S3_EXTENDER/src/main.cpp` línea 85
+
+- Implementar deadband 150 cuentas ADC antes de enviar PitchBend a Logic
+- Objetivo: reducir tráfico 850→~100 msgs/s en S3
+- Requiere validación hardware en rig S3-Logic
+
+---
+
+### S3 — Validación hardware flujo completo (2026-05-19) — 🔴 PENDIENTE
+
+- [ ] Handshake Mackie: Logic 0x21 → S3 echo + conexión
+- [ ] RS485 polling: ciclo ~300µs (NUM_SLAVES=1)
+- [ ] Calibración automática: cascada, timeout handling
+- [ ] Fader: PitchBend bidireccional, deadband 150
+- [ ] Transport: botones RW/FF/STOP/PLAY/REC → Logic feedback
+
+---
+
+### P4 — Validación hardware multimedia (2026-05-19) — 🔴 PENDIENTE
+
+- [ ] Display IPS 480×800 con LVGL v9
+- [ ] Touch GT911 calibración multi-punto
+- [ ] NeoTrellis 4×8 (seesaw dual 0x2F/0x2E)
+- [ ] PSRAM 32MB: profiling LovyanGFX sprites + LVGL
+
+---
+
+### P4 — Task Architecture documentation (2026-05-19) — 🔴 PENDIENTE
+
+**Archivo:** `docs/ARCHITECTURE_P4.md`
+
+- Dual-core Core0/Core1 sincronización
+- Race conditions conocidas (flags `g_switchToPage`)
+- VU meter decay timing
+- ISR priorities
 
 ---
 
