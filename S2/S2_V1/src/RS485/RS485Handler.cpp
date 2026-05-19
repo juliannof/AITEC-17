@@ -26,10 +26,10 @@ namespace RS485Handler {
 //  onMasterData
 // =============================================================
 void onMasterData(const MasterPacket& pkt) {
-    // Log no bloqueante cada 1s — diagnóstico RS485 recepción
+    // Log cada 5s — diagnóstico RS485 recepción (reducido 2026-05-19)
     static unsigned long lastLog = 0;
-    if (millis() - lastLog > 1000) {
-        log_i("[RS485 RX] Master packet: id=%d target=%d connected=%d", pkt.id, pkt.faderTarget, pkt.connected);
+    if (millis() - lastLog > 5000) {
+        log_d("[RS485 RX] id=%d target=%d connected=%d touch=%d", pkt.id, pkt.faderTarget, pkt.connected, Motor::isManualTouchDetected());
         lastLog = millis();
     }
 
@@ -138,7 +138,8 @@ SlavePacket buildResponse(FaderADC& faderADC, SatMenu& satMenu) {
     static Motor::CalibState _last_cs = Motor::CalibState::IDLE;
 
     SlavePacket resp = {};
-    resp.touchState    = FaderTouch::isTouched() ? 1 : 0;
+    resp.touchState    = Motor::isManualTouchDetected() ? 1 : 0;  // FaderTouch reemplazado — delta-based (2026-05-19)
+    if (resp.touchState) log_w("[S2-RESP] touchState=1 faderPos=%d", Motor::getRawADC());
     resp.buttons       = ButtonManager::getButtonFlags();
     resp.encoderDelta  = (int8_t)constrain(Encoder::getCount(), -127, 127);
     resp.encoderButton = ButtonManager::getEncoderButton();

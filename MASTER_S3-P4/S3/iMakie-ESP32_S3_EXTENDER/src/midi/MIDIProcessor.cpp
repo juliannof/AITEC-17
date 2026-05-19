@@ -441,8 +441,8 @@ void processMackieSysEx(byte* payload, int len) {
                 logicConnectionState = ConnectionState::CONNECTED;
                 g_logicConnected     = 1;
                 connectedSinceTime   = millis();
-                _calibPendingFrom    = 1;
-                _calibNextTime       = millis();
+                // _calibPendingFrom = 1;   // ELIMINADO — boot auto-calib ya lo hizo (2026-05-19)
+                // _calibNextTime    = millis();
                 log_i("[MCU] 0x21 — CONNECTED");
             }
             break;
@@ -591,8 +591,8 @@ void processPitchBend(byte channel, int bendValue) {
                 selectStates[i] = false;
             }
         }
-        _calibPendingFrom = 1;
-        _calibNextTime    = millis();
+        // _calibPendingFrom = 1;   // ELIMINADO — boot auto-calib ya lo hizo (2026-05-19)
+        // _calibNextTime    = millis();
         g_switchToPage3 = true;
     }
 

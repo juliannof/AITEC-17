@@ -80,12 +80,20 @@ static void processSlaveResponse(uint8_t slaveId) {
     uint8_t midiCh = slaveId - 1;
 
     // --- Fader → Pitch Bend ---
+    // DIAG: log cada vez que touchState cambia (2026-05-19 — TEMPORAL)
+    static uint8_t _prevTouch[9] = {0};
+    if (ch.touchState != _prevTouch[slaveId]) {
+        log_w("[FADER→LOGIC] slave=%d touchState=%d faderPos=%d", slaveId, ch.touchState, ch.faderPos);
+        _prevTouch[slaveId] = ch.touchState;
+    }
+
     // NO ENVIAR si slave está en calibración (CALIB_SENDING activo) — valores raw no son válidos para Logic
     if (ch.touchState && !(ch.buttons & SLAVE_FLAG_CALIB_SENDING)) {
         uint16_t pb  = ((uint32_t)ch.faderPos * LOGIC_PITCHBEND_MAX / 27000) & 0x3FFF;
 
         // Send-only-on-change: filtrar repeticiones idénticas (reduce tráfico 850→~100 msgs/s)
         if (pb != lastSentPb[slaveId]) {
+            log_i("[FADER→LOGIC] SEND pb=%d (pos=%d lastSent=%d)", pb, ch.faderPos, lastSentPb[slaveId]);
             byte msg[3]  = { (byte)(0xE0 | midiCh), (byte)(pb & 0x7F), (byte)(pb >> 7) };
             sendMIDIBytes(msg, 3);
             lastSentPb[slaveId] = pb;

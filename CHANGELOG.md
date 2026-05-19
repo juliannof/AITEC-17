@@ -7,6 +7,182 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### S2 Motor — auto-interrupción en MOVING_TO_TARGET (2026-05-19) — ✅ APLICADO
+
+**Síntoma:** Motor se movía hacia el target, se detenía solo a mitad de camino, y rechazaba nuevos targets de S3.
+
+**Causa:** `setADCDelta()` detectaba el movimiento del propio motor como "usuario tocando" — delta=1526 > umbral=500 → `_motor_manualTouchDetected=true` → `setTargetFromS3()` rechazado → motor parado.
+
+**Fix:** `MOVING_TO_TARGET` añadido al guard `inCalibFlow` en `setADCDelta()`. Durante movimiento motorizado el delta se ignora — solo se detecta usuario cuando motor está parado (`AT_TARGET`, `IDLE`).
+
+**Diagnóstico añadido (2026-05-19):**
+- `setTargetFromS3()`: logs `log_i` visibles — acepta/rechaza target con razón
+- `_positionTick()` ON: log con pos/target/err/span
+- `[S2-RESP]` en `buildResponse()`: confirma `touchState=1` enviado
+- `[S3-RX]` en `_handleResponse()`: confirma `touchState=1` recibido
+- Profiler S3: reducido a 1000 ciclos, sin verbose
+
+---
+
+### Fader bidireccional — feedback físico + latencia (2026-05-19) — ✅ APLICADO
+
+**Síntomas resueltos:**
+- Mover el fader físico no actualizaba Logic Pro
+- Retraso perceptible al mover fader desde Logic
+- Motor no volvía a aceptar targets S3 tras primer movimiento manual
+
+**6 cambios en 5 archivos (S2 + S3):**
+
+**S2 `Motor.cpp` — `setADCDelta()`: fix timer + eliminar FaderTouch del reset**
+- `_motor_manualTouchStartTime` ahora se refresca en CADA movimiento detectado (no solo el primero)
+- Reset de `_motor_manualTouchDetected` eliminado de dependencia FaderTouch — ahora solo tiempo
+- Bug previo: con FaderTouch siempre `true`, el flag nunca se reseteaba → motor rechazaba todos los targets S3
+
+**S2 `Motor.h` + `Motor.cpp` — getter `isManualTouchDetected()`**
+- Nueva función pública: `bool Motor::isManualTouchDetected()`
+- Expone `_motor_manualTouchDetected` (delta-based) para uso externo
+
+**S2 `RS485Handler.cpp` — `touchState` desde Motor en lugar de FaderTouch**
+- `resp.touchState = Motor::isManualTouchDetected() ? 1 : 0;`
+- FaderTouch eliminado del path RS485 — completamente desacoplado
+- Ahora `touchState=1` solo cuando usuario mueve fader (delta > 500 cuentas ADC)
+
+**S3 `config.h` — `POLL_CYCLE_MS` 20 → 10**
+- Ciclo RS485: 50Hz → 100Hz con 1 slave
+- Transacción ~3ms, margen 7ms — sin riesgo de timeouts
+
+**S3 `RS485.cpp` — `_handleResponse()`: bypass EMA cuando usuario toca**
+- `touchState=1`: posición directa sin filtro → feedback inmediato a Logic
+- `touchState=0`: EMA alpha=0.15 preservado para suavizar ruido EMI durante movimiento motor
+
+**Fix adicional — `setADC()` bypass spike guard durante movimiento manual (2026-05-19)**
+
+`ADC_SPIKE_GUARD = 500` y `MANUAL_TOUCH_THRESHOLD = 500` tienen el mismo valor. Con delta > 500:
+- `setADCDelta()` detectaba movimiento → `_motor_manualTouchDetected = true` ✓
+- `setADC()` rechazaba la nueva posición (spike) → `_motor_adcPos` quedaba en el target de S3
+- `buildResponse()` enviaba posición ANTIGUA = mismo valor que S3 ya conocía → `pb == lastSentPb` → **cero mensajes MIDI**
+
+Fix: `|| _motor_manualTouchDetected` añadido al `inCalibFlow` guard de `setADC()`. Como `setADCDelta()` se llama antes en el mismo loop, el flag ya está activo cuando `setADC()` lo comprueba.
+
+**⚠️ VALIDACIÓN HARDWARE:**
+- [ ] Mover fader físico → Logic fader se mueve en tiempo real
+- [ ] Logic mueve fader → motor sigue con < 20ms de lag visible
+- [ ] Soltar fader físico 200ms → motor vuelve a seguir targets S3
+- [ ] S3 calibración boot → unaffected
+
+---
+
+### S3 — HALT eliminado en operación normal + re-calibración innecesaria (2026-05-19) — ✅ APLICADO
+
+**Síntoma:** S3 entra en HALT (loop infinito, LED rojo) al conectar Logic o al mover fader en Logic.
+
+**Causa 1 — HALT demasiado agresivo (`RS485.cpp` línea 104):**
+- Condición anterior: `if (calibrated && consecutiveTimeouts > MAX_CALIBRATION_RETRIES)`
+- Disparaba HALT con **cualquier** 6 timeouts consecutivos post-calibración — incluso durante movimiento normal de fader
+- Al mover fader, motor arranca → interferencia eléctrica → 6 timeouts → HALT inmediato
+- Fix: `if (calibrated && **calibrating** && consecutiveTimeouts > MAX_CALIBRATION_RETRIES)`
+- HALT ahora solo dispara si S3 está **activamente calibrando** (`calibrating=true`) y slave no responde
+
+**Causa 2 — Re-calibración innecesaria al conectar Logic (`MIDIProcessor.cpp`):**
+- Handler `0x21` (línea 444): `_calibPendingFrom = 1` → `tickCalibracion()` → FLAG_CALIB a S2
+- Primer PitchBend, transición `HANDSHAKE→CONNECTED` (línea 594): `_calibPendingFrom = 1` (otra vez)
+- S2 ya calibrado desde boot → startCalib() arranca motor → interferencia → 6 timeouts → HALT
+- Fix: ambas líneas comentadas — `// ELIMINADO — boot auto-calib ya lo hizo (2026-05-19)`
+- La calibración de boot (arranque S3 sin Logic) sigue siendo la única fuente de calibración
+
+**Cambios aplicados:**
+
+`RS485.cpp` (línea 104):
+```cpp
+// ANTES:
+if (_ch[_currentId].calibrated && _consecutiveTimeouts > MAX_CALIBRATION_RETRIES)
+
+// DESPUÉS:
+if (_ch[_currentId].calibrated && _ch[_currentId].calibrating && _consecutiveTimeouts > MAX_CALIBRATION_RETRIES)
+```
+
+`MIDIProcessor.cpp` (línea 444 — handler 0x21):
+```cpp
+// _calibPendingFrom = 1;   // ELIMINADO — boot auto-calib ya lo hizo (2026-05-19)
+// _calibNextTime    = millis();
+```
+
+`MIDIProcessor.cpp` (línea 594 — primer PitchBend, HANDSHAKE→CONNECTED):
+```cpp
+// _calibPendingFrom = 1;   // ELIMINADO — boot auto-calib ya lo hizo (2026-05-19)
+// _calibNextTime    = millis();
+```
+
+**⚠️ VALIDACIÓN HARDWARE:**
+- [ ] S3 boot → calibración secuencial slaves → completa sin HALT
+- [ ] Logic conecta (0x21) → S3 NO dispara re-calibración → motor no se mueve
+- [ ] Fader movido en Logic → S3 envía PitchBend → S2 motor sigue → sin HALT
+- [ ] Fader en tope: > 6 timeouts consecutivos en operación normal → sin HALT (solo warning log)
+- [ ] Si S2 desconectado físicamente DURANTE calibración boot → HALT correcto (LED rojo)
+
+---
+
+### S2 MOTOR — FaderTouch desactivado en control motor (2026-05-19) — ✅ APLICADO
+
+**Síntoma:** S2 irresponsivo tras recibir primer target de S3 con Logic conectado.
+
+**Causa raíz:** `FaderTouch::isTouched()` devuelve `true` en falso positivo constante (interferencia eléctrica en tope mecánico inferior, ADC=25). Esto bloqueaba:
+1. `setTargetFromS3()` — guard `_motor_manualTouchDetected || FaderTouch::isTouched()` siempre true → todos los targets rechazados → motor nunca se mueve
+2. `setADCDelta()` — `FaderTouch::isTouched()` disparaba "Usuario master" con `delta=2` (muy por debajo del umbral 500) → `Motor::stop()` + `_motor_state = AT_TARGET` incluso durante calibración
+
+**Fixes aplicados en `Motor.cpp`:**
+
+`setADCDelta()`:
+- Añadido guard `inCalibFlow`: si motor está en GOING_TO_MIN, CALIBRATING o calibrando → actualizar referencia ADC y retornar sin detectar usuario
+- `FaderTouch::isTouched()` comentado de detección inicial: `userTouch = delta > 500` (solo delta)
+
+`setTargetFromS3()`:
+- `FaderTouch::isTouched()` comentado del guard: solo `_motor_manualTouchDetected` bloquea targets
+
+**Estado FaderTouch:**
+- RS485 `touchState` sigue reportando `FaderTouch::isTouched()` via `buildResponse()` — Logic sigue recibiendo estado de toque para feedback visual
+- Control motor: desacoplado de FaderTouch hasta resolver fiabilidad del sensor
+- TODO: reactivar cuando FaderTouch sea estable en todo el recorrido del fader
+
+**⚠️ VALIDACIÓN HARDWARE:**
+- [ ] S3 con Logic → S2 recibe target → motor se mueve a posición
+- [ ] Usuario mueve fader (delta > 500) → motor para inmediatamente
+- [ ] Calibración → motor sube/baja sin interrupción por falso touch
+
+---
+
+### S2 MOTOR — Boot goToMin no funciona + SAT roto (2026-05-19) — 🔴 EN INVESTIGACIÓN
+
+**Síntomas observados en hardware:**
+- ❌ Fader NO baja a 0 automáticamente en boot
+- ❌ SAT no arranca (regresión — funcionaba antes)
+- ✅ S3 conecta y dispara calibración correctamente
+- ✅ Motor ejecuta calibración cuando S3 envía FLAG_CALIB
+
+**Causa raíz identificada (boot goToMin):**
+- S3 ya activo envía paquetes con `connected=1` antes de que `Motor::update()` IDLE pueda transicionar
+- Orden en `loop()`: `rs485.update()` → `onMasterData()` → `Motor::setConnected(true)` → LUEGO `Motor::update()`
+- IDLE: `if (!_connected && ...)` → siempre false → motor nunca baja a 0 en boot
+- La bajada a 0 solo ocurre cuando S3 envía FLAG_CALIB (dentro de la calibración)
+
+**Cambios de esta sesión (parciales, pendiente fix boot):**
+- `Motor.cpp initPWM()`: fallback a `PWM_MIN/PWM_MAX` de config.h si NVS vacío
+- `Motor.cpp IDLE`: inicializa `_goToMinStallStart=0`, `_goToMinLastADC=_motor_adcPos` al entrar GOING_TO_MIN
+- `main.cpp`: eliminado `Motor::goToMin()` de setup() línea 133 (era dead code — ADC no inicializado)
+
+**Fix pendiente — boot flag `_bootGoToMinDone`:**
+- `config.h`: `static bool _bootGoToMinDone = false;`
+- `Motor.cpp IDLE`: `if (_motor_adcPos > (MOTOR_ADC_MIN + 10) && (!_connected || !_bootGoToMinDone))`
+- `Motor.cpp GOING_TO_MIN arrived`: `_bootGoToMinDone = true;`
+- Objetivo: primera bajada a 0 siempre ocurre en boot, independientemente de `_connected`
+
+**⚠️ SAT roto — causa sin confirmar:**
+- Regresión detectada en hardware tras cambios de esta sesión
+- Esperando log de arranque S2 para diagnóstico
+- NO aplicar fix boot hasta resolver SAT
+
+---
+
 ### S2 MOTOR — Protección global topes mecánicos (2026-05-19 15:49) — ✅ COMPLETADO
 
 **Commits:** `06d9562` (stall GOING_TO_MIN), `[commit actual]` (protección global + docs)

@@ -101,7 +101,8 @@ void RS485Master::runTask() {
                               _currentId, _consecutiveTimeouts);
 
                     // ── Límite de reintentos (2026-05-16 19:25) ──
-                    if (_ch[_currentId].calibrated && _consecutiveTimeouts > MAX_CALIBRATION_RETRIES) {
+                    // HALT solo si calibración ACTIVA — no durante operación normal (2026-05-19)
+                    if (_ch[_currentId].calibrated && _ch[_currentId].calibrating && _consecutiveTimeouts > MAX_CALIBRATION_RETRIES) {
                         // ✗ FALLO CRÍTICO: Calibración falló después de máx reintentos (2026-05-16 19:40)
                         pixels.setPixelColor(0, pixels.Color(255, 0, 0));  // Rojo puro
                         pixels.show();
@@ -132,7 +133,7 @@ void RS485Master::runTask() {
                 if (micros() - _stateTimer >= RS485_GAP_US) {
                     rs485prof.markGapEnd();
                     _cycleCount++;
-                    rs485prof.reportIfNeeded(_cycleCount, 100, true);  // verbose=true para debug
+                    rs485prof.reportIfNeeded(_cycleCount, 1000, false);
                     _nextSlave();
                     _busState = BusState::SEND;
                 }
@@ -237,13 +238,20 @@ void RS485Master::_handleResponse() {
                 log_i("[RS485] Slave %d: calibratedMax=%d ✓", _currentId, resp->faderPos);
             }
         } else {
-            // Normal: actualizar posición con EMA filter (0.15 smoothing)
-            const float FADER_EMA_ALPHA = 0.15f;
-            _filteredFaderPos[_currentId] = _filteredFaderPos[_currentId] +
-                (int16_t)((int32_t)resp->faderPos - _filteredFaderPos[_currentId]) * FADER_EMA_ALPHA;
-            _ch[_currentId].faderPos = _filteredFaderPos[_currentId];
+            if (resp->touchState) {
+                // Usuario tocando: posición directa, sin filtro — feedback inmediato a Logic (2026-05-19)
+                _filteredFaderPos[_currentId] = resp->faderPos;
+                _ch[_currentId].faderPos      = resp->faderPos;
+            } else {
+                // Motor siguiendo target: EMA para suavizar ruido EMI
+                const float FADER_EMA_ALPHA = 0.15f;
+                _filteredFaderPos[_currentId] = _filteredFaderPos[_currentId] +
+                    (int16_t)((int32_t)resp->faderPos - _filteredFaderPos[_currentId]) * FADER_EMA_ALPHA;
+                _ch[_currentId].faderPos = _filteredFaderPos[_currentId];
+            }
         }
 
+        if (resp->touchState) log_w("[S3-RX] touchState=1 slave=%d faderPos=%d", _currentId, resp->faderPos);
         _ch[_currentId].touchState        = resp->touchState;
         _ch[_currentId].prevButtons       = _ch[_currentId].buttons;
         _ch[_currentId].buttons           = resp->buttons;  // FIX: guardar todos los bits (incluyendo CALIB_*) para que Logic no vea valores calibración

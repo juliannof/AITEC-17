@@ -46,7 +46,7 @@ extern volatile ConnectionState logicConnectionState;
 #define RS485_TX_DONE_US     30      // ← aumentado: esperar a transceiver deshabilitar
 #define RS485_RESP_TIMEOUT_US 3000   // ← aumentado: margen más generoso para ISR overhead
 #define RS485_GAP_US         300
-#define POLL_CYCLE_MS        20
+#define POLL_CYCLE_MS        10   // 100Hz con 1 slave — transacción ~3ms, margen suficiente (2026-05-19)
 
 // --- Calibración (2026-05-16 19:25) ---
 #define MAX_CALIBRATION_RETRIES 5    // máx reintentos antes de fallar slave

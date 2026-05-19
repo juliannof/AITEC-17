@@ -41,6 +41,7 @@ namespace Motor {
     float      getPosition();  // 0.0–1.0
     uint16_t   getADCMin();
     uint16_t   getADCMax();
+    bool       isManualTouchDetected();  // true si usuario movió fader (delta > umbral) (2026-05-19)
 
     // Calibración
     void       startCalib();

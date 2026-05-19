@@ -128,9 +128,8 @@ void setup() {
     Serial.printf("\n[BOOT] FW_VERSION=%s FW_BUILD_ID=%d\n", FW_VERSION, FW_BUILD_ID);
     Serial.flush();
 
-    // Leer PWM range de NVS (2026-05-10 20:20)
+    // Leer PWM range de NVS (fallback a config.h si vacío) (2026-05-19)
     Motor::initPWM();
-    Motor::goToMin();  // Llevar fader a 0 en boot (2026-05-16 10:50)
 
     // Detectar OTA-only mode
     Preferences prefs;
@@ -262,12 +261,10 @@ void loop() {
     Motor::setADCDelta(faderADC.getFaderPos());  // Detecta movimiento manual (delta ADC rápido) — 2026-05-16
     Motor::setADC(faderADC.getFaderPos());  // Motor recibe ADC ANTES de SAT check
 
-    // LOG ADC SIEMPRE (incluso en SAT) para diagnosticar si faderADC actualiza
+    // LOG ADC cada 5s (reducido para diagnóstico limpio — 2026-05-19)
     static uint32_t lastLog = 0;
-    if (millis() - lastLog > 1000) {
-        log_i("[ADS] raw=%d pos=%d motor=%d", faderADC.getRawLast(), faderADC.getFaderPos(), Motor::getRawADC());
-        // DIAGNÓSTICO RS485 (2026-05-16 18:55)
-        rs485.printStats();
+    if (millis() - lastLog > 5000) {
+        log_d("[ADS] raw=%d pos=%d motor=%d touch=%d", faderADC.getRawLast(), faderADC.getFaderPos(), Motor::getRawADC(), Motor::isManualTouchDetected());
         lastLog = millis();
     }
 
