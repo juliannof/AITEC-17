@@ -7,6 +7,12 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### S2/S3 — Fader feedback S2→Logic — pendiente validación (2026-05-19) — 🔴 PENDIENTE
+
+**Diagnóstico en curso:** `[S2-RESP] touchState=1` y `[S3-RX] touchState=1` añadidos para confirmar la cadena RS485. No validado en hardware todavía.
+
+---
+
 ### S2 Motor — auto-interrupción en MOVING_TO_TARGET (2026-05-19) — ✅ APLICADO
 
 **Síntoma:** Motor se movía hacia el target, se detenía solo a mitad de camino, y rechazaba nuevos targets de S3.

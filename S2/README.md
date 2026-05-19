@@ -2,12 +2,12 @@
 
 Controlador Mackie fader individual para iMakie. Controla 1 fader (ADS1115 16-bit), 1 motor (DRV8833), 4 botones, encoder rotatorio, y display IPS 240×280.
 
-**Placa de desarrollo:** Lolin D1 Mini S2 (basada ESP8266)  
+**Placa de desarrollo:** Lolin S2 Mini (basada ESP32-S2FN4R2)  
 **Chip:** ESP32-S2FN4R2 (Xtensa single-core 240MHz)  
 **Flash:** 4MB (QIO mode)  
 **PSRAM:** 2MB (QSPI mode)  
-**Conector:** Micro-USB CH340 UART  
-**Pines:** 25 GPIO (muchos usados en subsistemas)  
+**Conector:** Type-C USB (USB OTG nativo)  
+**Pines:** 27 GPIO (muchos usados en subsistemas)  
 **Familia Mackie:** 0x14
 
 <img alt="ESP32 S2 Mini" src="https://www.wemos.cc/en/latest/_static/boards/s2_mini_v1.0.0_4_16x9.jpg">
@@ -16,7 +16,7 @@ Controlador Mackie fader individual para iMakie. Controla 1 fader (ADS1115 16-bi
 
 ## Especificación de placa (2026-05-16)
 
-**Módulo:** Lolin D1 Mini S2 (form factor compatible ESP8266)  
+**Módulo:** Lolin S2 Mini (form factor compatible D1 mini shields)  
 **Procesador:** ESP32-S2FN4R2 Xtensa single-core 240MHz  
 **Memoria:**
 - Flash: 4MB (QIO mode)
@@ -24,8 +24,8 @@ Controlador Mackie fader individual para iMakie. Controla 1 fader (ADS1115 16-bi
 - Bootloader: 0x0 (192KB)
 - App: 0x10000 (3.8MB)
 
-**Conector:** Micro-USB CH340 (UART serial, no USB nativo)  
-**Pines disponibles:** 25 GPIO totales
+**Conector:** Type-C USB (USB OTG nativo)  
+**Pines disponibles:** 27 GPIO totales
 - Usados por iMakie: RS485(3), Motor(3), ADS1115(4), Encoder(3), Display(6), Botones(4), NeoPixel(1), Misc(2)
 - Libres: ~0 (saturado, todo asignado)
 
@@ -38,8 +38,7 @@ Controlador Mackie fader individual para iMakie. Controla 1 fader (ADS1115 16-bi
 - Single-core (vs dual-core)
 - 4MB Flash (vs 16MB S3/P4)
 - 2MB PSRAM (vs 8MB S3, 32MB P4)
-- Micro-USB CH340 (vs Type-C nativo)
-- Menos GPIO (25 vs 44 P4, 44 S3)
+- Menos GPIO (27 vs 44 P4, 44 S3)
 
 ---
 
@@ -66,9 +65,9 @@ Controlador Mackie fader individual para iMakie. Controla 1 fader (ADS1115 16-bi
   - Profiling crítico (stack vs heap)
 
 ### GPIO
-- **25 GPIO totales, 0 libres**
-  - Todos asignados: RS485, Motor, ADS1115, Display, Encoder, Botones, NeoPixel
-  - Expansión futura imposible sin reorganizar hardware
+- **27 GPIO totales, 2 libres**
+  - 25 asignados: RS485, Motor, ADS1115, Display, Encoder, Botones, NeoPixel
+  - Expansión muy limitada sin reorganizar hardware
 
 ### Alimentación
 - **500mA USB limit** compartido entre:
@@ -79,10 +78,11 @@ Controlador Mackie fader individual para iMakie. Controla 1 fader (ADS1115 16-bi
   - Margen: muy ajustado, riesgo reset si motor + display simultáneamente
 
 ### Serial/Debugging
-- **CH340 UART** (Micro-USB)
-  - Reset automático al programar (ideal para upload, incómodo para debugging)
+- **USB OTG nativo** (Type-C)
+  - ESP32-S2 tiene USB nativo — no requiere CH340 externo
+  - Project usa `-DARDUINO_USB_MODE=0` → UART para programming (desactiva CDC nativo)
   - Velocidad: 115200 baud estándar
-  - `Serial.printf()` recomendado (vs log_i/log_e inestables)
+  - `Serial.printf()` recomendado (vs log_i/log_e inestables en S2/IDF5)
 
 ---
 
@@ -259,7 +259,7 @@ board_build.arduino.memory_type = qio_qspi
 
 **Flags críticos:**
 - `-DBOARD_HAS_PSRAM` — Habilita PSRAM (2MB disponibles)
-- `-DARDUINO_USB_MODE=0` — Desactiva USB OTG (S2 no soporta)
+- `-DARDUINO_USB_MODE=0` — Desactiva CDC nativo (S2 SÍ soporta USB OTG, pero el proyecto usa UART para programming)
 - `-DCORE_DEBUG_LEVEL=3` — Logging Serial.printf() activo
 
 ### Platform y Framework
@@ -277,8 +277,8 @@ board_build.arduino.memory_type = qio_qspi
 - Single-core → sin dual-core FreeRTOS (vs P4/S3)
 - 4MB Flash → cuidado con SPIFFS/LittleFS (vs 16MB P4/S3)
 - 2MB PSRAM → buffers pequeños (evitar grandes arrays)
-- Micro-USB CH340 → reset automático al subir (vs Type-C nativo)
-- Serial.printf() recomendado (log_i/log_e inestables en S2)
+- Type-C USB OTG nativo → CDC desactivado por config, usa UART para programming
+- Serial.printf() recomendado (log_i/log_e inestables en S2/IDF5)
 
 ---
 
