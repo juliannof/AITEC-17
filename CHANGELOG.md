@@ -157,35 +157,30 @@ if (_ch[_currentId].calibrated && _ch[_currentId].calibrating && _consecutiveTim
 
 ---
 
-### S2 MOTOR — Boot goToMin no funciona + SAT roto (2026-05-19) — 🔴 EN INVESTIGACIÓN
+### S2 MOTOR — Boot goToMin no funciona (2026-05-19) — 🔴 PENDIENTE
 
 **Síntomas observados en hardware:**
 - ❌ Fader NO baja a 0 automáticamente en boot
-- ❌ SAT no arranca (regresión — funcionaba antes)
+- ✅ SAT funciona correctamente (regresión resuelta espontáneamente 2026-05-19)
 - ✅ S3 conecta y dispara calibración correctamente
 - ✅ Motor ejecuta calibración cuando S3 envía FLAG_CALIB
 
-**Causa raíz identificada (boot goToMin):**
+**Causa raíz identificada:**
 - S3 ya activo envía paquetes con `connected=1` antes de que `Motor::update()` IDLE pueda transicionar
 - Orden en `loop()`: `rs485.update()` → `onMasterData()` → `Motor::setConnected(true)` → LUEGO `Motor::update()`
 - IDLE: `if (!_connected && ...)` → siempre false → motor nunca baja a 0 en boot
 - La bajada a 0 solo ocurre cuando S3 envía FLAG_CALIB (dentro de la calibración)
 
-**Cambios de esta sesión (parciales, pendiente fix boot):**
+**Cambios aplicados en sesión anterior:**
 - `Motor.cpp initPWM()`: fallback a `PWM_MIN/PWM_MAX` de config.h si NVS vacío
 - `Motor.cpp IDLE`: inicializa `_goToMinStallStart=0`, `_goToMinLastADC=_motor_adcPos` al entrar GOING_TO_MIN
 - `main.cpp`: eliminado `Motor::goToMin()` de setup() línea 133 (era dead code — ADC no inicializado)
 
-**Fix pendiente — boot flag `_bootGoToMinDone`:**
+**Fix diseñado — boot flag `_bootGoToMinDone` (pendiente aplicar):**
 - `config.h`: `static bool _bootGoToMinDone = false;`
 - `Motor.cpp IDLE`: `if (_motor_adcPos > (MOTOR_ADC_MIN + 10) && (!_connected || !_bootGoToMinDone))`
 - `Motor.cpp GOING_TO_MIN arrived`: `_bootGoToMinDone = true;`
 - Objetivo: primera bajada a 0 siempre ocurre en boot, independientemente de `_connected`
-
-**⚠️ SAT roto — causa sin confirmar:**
-- Regresión detectada en hardware tras cambios de esta sesión
-- Esperando log de arranque S2 para diagnóstico
-- NO aplicar fix boot hasta resolver SAT
 
 ---
 
