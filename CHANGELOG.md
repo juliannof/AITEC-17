@@ -648,10 +648,11 @@ CALIBRATING → DONE → S3 recibe min/max en SlavePacket
   - ISR priorities
 
 - [ ] **S3 — Nombre de pista en slaves (S2) no garantizado** 🔴
-  - Problema: S3 envía nombre de pista pero no está garantizado que todos los slaves lo reciban/muestren
-  - Ubicación: `MASTER_S3-P4/S3/iMakie-ESP32_S3_EXTENDER/src/` (buscar envío nombre)
-  - Afecta: S2 display, confiabilidad RS485 protocolo
-  - Requiere: auditoría protocolo RS485, validación hardware, sincronización paquetes
+  - Problema: S3 envía nombre de pista pero slaves (S2) muestran "Pan" y "Seleccion" en lugar del nombre real
+  - Síntoma: Display S2 muestra nombres fijos en lugar de nombres enviados por S3
+  - Ubicación: `MASTER_S3-P4/S3/iMakie-ESP32_S3_EXTENDER/src/` (búsqueda: trackName, nombre pista)
+  - Afecta: S2 display, confiabilidad RS485 protocolo, protocolo SysEx Mackie
+  - Requiere: auditoría protocolo RS485, validación envío paquetes nombre, sincronización S3→S2
 
 ---
 
