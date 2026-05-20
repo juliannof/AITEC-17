@@ -647,12 +647,15 @@ CALIBRATING → DONE → S3 recibe min/max en SlavePacket
   - VU meter decay timing
   - ISR priorities
 
-- [ ] **S3 — Nombre de pista en slaves (S2) no garantizado** 🔴
-  - Problema: S3 envía nombre de pista pero slaves (S2) muestran "Pan" y "Seleccion" en lugar del nombre real
-  - Síntoma: Display S2 muestra nombres fijos en lugar de nombres enviados por S3
-  - Ubicación: `MASTER_S3-P4/S3/iMakie-ESP32_S3_EXTENDER/src/` (búsqueda: trackName, nombre pista)
-  - Afecta: S2 display, confiabilidad RS485 protocolo, protocolo SysEx Mackie
-  - Requiere: auditoría protocolo RS485, validación envío paquetes nombre, sincronización S3→S2
+- [ ] **S3 — Nombre de pista no se borra en slaves (S2)** 🔴
+  - Problema: S3 envía nombre de pista pero no borra el anterior → sobreposición caracteres
+  - Síntoma: Display S2 muestra "Pan" + "Seleccion" + caracteres antiguos superpuestos
+  - Causa probable: Falta buffer clear, protocolo RS485 nombre no sincroniza, o display no limpia línea antes de escribir
+  - Ubicación: 
+    - `MASTER_S3-P4/S3/iMakie-ESP32_S3_EXTENDER/src/` (envío nombre pista)
+    - `S2/S2_V1/src/Display.cpp` (renderizado nombre en pantalla)
+  - Afecta: S2 display legibilidad, protocolo RS485, protocolo SysEx Mackie
+  - Requiere: auditoría envío paquetes nombre S3, validación buffer display S2, clear línea antes escribir
 
 ---
 
