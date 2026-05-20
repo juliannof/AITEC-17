@@ -7,6 +7,27 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### BUG B3 — Fader 2 sube al inicializar Logic sin proyecto abierto (2026-05-20 17:45) — 🔴 PENDIENTE INVESTIGAR
+
+**Síntoma:** Al inicializar Logic Pro (sin ningún proyecto abierto), el fader 1 se queda en 0 pero el fader 2 sube ligeramente. El movimiento ocurre antes de que se abra ningún track.
+
+**Hipótesis principales:**
+1. **Logic restaura estado de última sesión** — GoOnline #3 envía el estado real del mezclador aunque no haya proyecto. Si la última sesión tenía fader 2 ligeramente subido, Logic lo manda. Comportamiento de Logic, no bug de firmware.
+2. **Offset de calibración entre unidades** — calibratedMin de S2 difiere del de S1. Con la misma señal PitchBend "0" de Logic, S3 mapea a un target que para S2 queda fuera de DEAD_ZONE → motor se mueve.
+3. **Diferencia en mapeo S3** — el target calculado para slot 2 tiene un offset respecto al slot 1 por alguna constante o error de índice.
+
+**Observado (2026-05-20):** Sin proyecto abierto. Fader 1 quieto en 0. Fader 2 sube un poco al conectar Logic.
+
+**Por qué importa:** Comportamiento no deseado — los faders deberían estar en 0 si Logic no tiene proyecto activo. Si es Logic quien lo envía, hay que entender qué valor manda y decidir si S3 debe ignorarlo en ese estado.
+
+**Investigación requerida:**
+- [ ] Capturar MIDI monitor en el momento exacto del movimiento — qué PitchBend recibe S3 para slot 2
+- [ ] Comparar PitchBend slot 1 vs slot 2 en GoOnline sin proyecto
+- [ ] Verificar calibratedMin/Max de ambas unidades (¿son iguales?)
+- [ ] Confirmar si el movimiento ocurre en GoOnline #1, #2 o #3
+
+---
+
 ### S2 MOTOR — Vibración en reposo: 4 fixes (2026-05-20) — ✅ CÓDIGO LISTO / 🔴 PENDIENTE FLASH Y VALIDACIÓN
 
 **Síntoma:** Uno de los dos esclavos vibraba levemente con el fader en posición de reposo, pese a tener el mismo software que el otro esclavo. El motor se activaba brevemente de forma intermitente incluso sin ningún comando de movimiento activo.
