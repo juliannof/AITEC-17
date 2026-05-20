@@ -152,6 +152,7 @@ if (_motor_hw_active) _hwOff();
 | Pines al aire sketch provisioning | Arduino | Añadir bloque safePins OUTPUT LOW al inicio de setup() |
 | Boot goToMin (`_bootGoToMinDone`) | S2 | Fader no baja a 0 en boot si S3 ya activo — fix diseñado, pendiente aplicar |
 | Fader feedback S2→Logic validación hardware | S2+S3 | Confirmar que Logic recibe PitchBend al mover fader físico |
+| ⬇️ Branding S2 — iMakie → AITEC 17 | S2 | `Display.cpp:131` boot screen + `SatMenu.cpp:224` cabecera SAT. Baja prioridad — estético |
 
 **Commits:** `2f209b9`, `605e694`, `f87ef92`
 
