@@ -378,6 +378,7 @@ void processMackieSysEx(byte* payload, int len) {
             for (int t = 0; t < 8; t++) {
                 if (!nameChanged[t]) continue;
                 trimRight(nameBufs[t]);
+                if (nameBufs[t][0] == '\0') continue;  // row 1 vacía (modo plugin/Atmos) — conservar nombre previo
                 if (trackNames[t] == nameBufs[t]) continue;
                 trackNames[t] = String(nameBufs[t]);
                 rs485.setTrackName(t + 1, nameBufs[t]);

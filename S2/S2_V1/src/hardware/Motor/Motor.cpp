@@ -495,6 +495,14 @@ void setADCDelta(uint16_t currentADC) {
         return;
     }
 
+    // Spike eléctrico: raw ADC salta más de ADC_SPIKE_GUARD desde posición filtrada
+    // setADC() ya rechaza el spike para la posición, pero sin este guard setADCDelta()
+    // re-dispara "usuario master" justo tras el debounce → bloqueo indefinido de targets S3
+    if (!_motor_manualTouchDetected && _motor_adcPos > 0 &&
+        abs((int)currentADC - (int)_motor_adcPos) > ADC_SPIKE_GUARD) {
+        return;  // No actualizar referencia — mantiene base válida para siguiente lectura
+    }
+
     uint16_t delta = abs((int)currentADC - (int)_motor_lastADCForDelta);
     _motor_lastADCForDelta = currentADC;
 
