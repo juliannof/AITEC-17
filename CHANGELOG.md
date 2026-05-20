@@ -129,7 +129,35 @@ if (_motor_hw_active) _hwOff();
 
 ---
 
-### RESUMEN SESIÓN 2026-05-20
+### RESUMEN SESIÓN 2026-05-20 (tarde)
+
+**Objetivo de la sesión:** Estabilidad motor S2 en rack + investigar OTA/WiFi.
+
+**Resuelto ✅**
+
+| Fix | MCU | Archivos | Descripción |
+|-----|-----|----------|-------------|
+| Bug B2 — nombres borrados modo plugin/Atmos | S3 | `MIDIProcessor.cpp` | Guard `nameBufs[t][0]=='\0'` en SysEx 0x12 — Logic envía row 1 vacía en modo plugin, S3 ya no borra trackNames |
+| Fader bloqueado tras movimiento manual | S2 | `Motor.cpp` | Spike guard en `setADCDelta()` — spike eléctrico (ej: ADC 7284→29) re-disparaba `_motor_manualTouchDetected` indefinidamente |
+| DEAD_ZONE 50→80 | S2 | `config.h` | Cubre ruido ADC S1 en reposo (60 cuentas) — previene `MOVING_TO_TARGET` intermitente |
+| WiFiManager eliminado | S2 | `OtaManager.cpp/h` | `launchPortal()` era código muerto — eliminado quirúrgicamente junto con `#include <WiFiManager.h>` |
+| SAT.md §7 documentado | docs | `docs/SAT.md` | Flujo OTA completo: ElegantOTA URL, credenciales NVS, provisioning sketch, pines al aire fix |
+
+**Pendiente 🔴**
+
+| Pendiente | MCU | Descripción |
+|-----------|-----|-------------|
+| Bug B3 — fader 2 sube al init Logic sin proyecto | S2+S3 | Capturar PitchBend slot 1 vs slot 2 en GoOnline sin proyecto — posible comportamiento Logic |
+| Validación vibración motor en hardware | S2 | Flash + confirmar sin vibración en ambas unidades con Logic conectado |
+| Pines al aire sketch provisioning | Arduino | Añadir bloque safePins OUTPUT LOW al inicio de setup() |
+| Boot goToMin (`_bootGoToMinDone`) | S2 | Fader no baja a 0 en boot si S3 ya activo — fix diseñado, pendiente aplicar |
+| Fader feedback S2→Logic validación hardware | S2+S3 | Confirmar que Logic recibe PitchBend al mover fader físico |
+
+**Commits:** `2f209b9`, `605e694`, `f87ef92`
+
+---
+
+### RESUMEN SESIÓN 2026-05-20 (mañana)
 
 **Objetivo de la sesión:** Conseguir P4 online + investigar flujo de nombres de pista S3→S2.
 

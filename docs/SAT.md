@@ -252,39 +252,114 @@ static void _satLedsTest(int idx, uint8_t r, uint8_t g, uint8_t b) {
 ```
 SAT menu → WiFi OTA
          ↓
-SatMenu::_satWiFiOta()
+SatMenu::_satWiFiOta()  (main.cpp)
          ↓
-// 1. Guardar flag
-Preferences prefs;
-prefs.begin("ptxx", false);
-prefs.putBool("otaMode", true);
-prefs.end();
-
-// 2. Apagar pantalla (libera PSRAM)
-setScreenBrightness(0);
-
-// 3. Cerrar SAT y reiniciar
-ESP.restart();
+prefs.putBool("otaMode", true)   ← flag NVS namespace "ptxx"
+setScreenBrightness(0)           ← apaga display
+ESP.restart()                    ← reinicia para entrar en OTA-only
 ```
 
-### 7.2 Boot OTA-Only (2026-05-16)
+### 7.2 Boot OTA-Only
 
 ```cpp
-// main.cpp setup()
+// main.cpp setup() — detecta flag al arrancar
 bool otaMode = prefs.getBool("otaMode", false);
 
 if (otaMode) {
-    // Limpiar flag INMEDIATAMENTE (una sola ejecución)
-    prefs.remove("otaMode");
-    
-    // Iniciar display mínimo (sin sprites)
-    initDisplay(true);  // true = otaOnlyMode
-    
-    // Iniciar WiFi + OTA
+    prefs.remove("otaMode");        // limpia flag (una sola ejecución)
+    initDisplay(true);              // display mínimo sin sprites (~163KB PSRAM libre)
     otaManager.begin();
     otaManager.enableForUpload(true);
-    
-    return;  // Esperar upload
+    // bucle bloqueante — nunca retorna hasta reset post-upload
+}
+```
+
+**RS485 y Motor en OTA-only:** no se inicializan. El S2 no escucha el bus ni mueve el fader durante el upload. Es el comportamiento correcto.
+
+### 7.3 ElegantOTA — Upload de Firmware
+
+```
+S2 conecta a WiFi → display muestra:
+
+  ┌─────────────────┐
+  │  OTA LISTO      │
+  │  192.168.1.XX   │
+  └─────────────────┘
+
+Abrir en navegador:
+  http://192.168.1.XX         → redirige a /update
+  http://192.168.1.XX/update  → interfaz ElegantOTA
+
+Seleccionar .bin → Upload → S2 reinicia con nuevo firmware
+```
+
+**Servidor:** puerto 80, loop bloqueante `server.handleClient()` + `ElegantOTA.loop()`  
+**Logs Serial durante upload:**
+```
+[OTA] Update started!
+[OTA] Progress: 102400 / 512000 bytes
+[OTA] Progress: 204800 / 512000 bytes
+...
+[OTA] Update finished successfully!
+```
+
+### 7.4 Credenciales NVS
+
+| Namespace | Clave | Contenido |
+|-----------|-------|-----------|
+| `ptxx` | `wifiSsid` | SSID de la red WiFi |
+| `ptxx` | `wifiPass` | Contraseña WiFi |
+| `ptxx` | `otaPass` | Contraseña OTA (por implementar en ElegantOTA) |
+| `ptxx` | `trackId` | ID de pista 1–9 |
+| `ptxx` | `otaMode` | Flag boot OTA-only (bool, auto-limpia) |
+| `wifiman` | `ssid` | Copia para WiFiManager |
+| `wifiman` | `pass` | Copia para WiFiManager |
+
+**Fuente única de verdad:** `OtaManager::_loadCredentials()` lee de `"ptxx"`.
+
+### 7.5 Provisioning — Primera Vez por USB
+
+Antes del montaje en rack, cada S2 se provisiona por USB con el sketch Arduino de provisión. Escribe credenciales en NVS y cachea la conexión WiFi para reconexión rápida.
+
+**Flujo:**
+```
+1. Conectar S2 por USB
+2. Flashear sketch provisioning (Arduino IDE)
+   → Escribe wifiSsid / wifiPass / otaPass / trackId en NVS "ptxx"
+   → Conecta a WiFi una vez para cachear BSSID/canal
+   → Desconecta (WiFi.disconnect(false)) — cache preservada
+3. Flashear firmware de producción por USB
+4. Montar en rack — actualizaciones futuras por OTA
+```
+
+**⚠️ Problema identificado — Pines al aire (2026-05-20):**
+
+En el sketch de provisión, todos los GPIO arrancan como inputs flotantes. Pines críticos con riesgo real:
+
+| Pin | GPIO | Riesgo |
+|-----|------|--------|
+| `MOTOR_EN` | 14 | Si flota HIGH → DRV8833 habilitado → motor se mueve |
+| `MOTOR_IN1` | 18 | Estado indefinido en DRV8833 |
+| `MOTOR_IN2` | 16 | Estado indefinido en DRV8833 |
+| `RS485_ENABLE` | 35 | Dirección bus indefinida → corrupción si hay slaves |
+
+**Solución — añadir al inicio de `setup()` en el sketch de provisión:**
+
+```cpp
+void setup() {
+    // GPIO a estado conocido — evita pines al aire
+    // EXCLUIDOS: 0 (bootstrap), 19-20 (USB), 26-32 (QSPI flash/PSRAM), 46 (input-only)
+    const uint8_t safePins[] = {
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+        11, 12, 13, 14, 15, 16, 17, 18, 21,
+        33, 34, 35, 36, 37, 38, 39, 40,
+        41, 42, 43, 44, 45
+    };
+    for (uint8_t pin : safePins) {
+        pinMode(pin, OUTPUT);
+        digitalWrite(pin, LOW);
+    }
+    // ... resto del setup
 }
 ```
 
@@ -365,7 +440,11 @@ Display normal
 | Menú lag | Redibujado bloqueante | Check SatMenu::update() frecuencia |
 | Calibración infinita | Motor::startCalib() no reinicia | Verificar guard cooldown 2000ms |
 | LEDs Test no responde | GPIO36 no funciona o NeoPixel error | Test con Serial, verificar Adafruit |
-| WiFi OTA boot loop | Flag otaMode no se limpia | Limpiar NVS manualmente |
+| WiFi OTA boot loop | Flag otaMode no se limpia | Raro — se auto-limpia al inicio de setup(). Si persiste: flashear por USB |
+| OTA: "Sin credenciales" | NVS vacío o namespace incorrecto | Flashear sketch provisioning por USB |
+| OTA: WiFi no conecta en 10s | SSID/pass incorrectos o red no visible | Verificar credenciales con sketch provisioning (dumpNVS) |
+| Motor se mueve durante provisioning | GPIO14 (MOTOR_EN) flotante en sketch Arduino | Añadir safePins OUTPUT LOW al inicio de setup() |
+| Upload falla a mitad | Heap insuficiente o interferencia RF | Reintentar en OTA-only mode (sin RS485/Motor activos) |
 | Encoder congelado en SAT | isEncoderConsumed() siempre true | Check SatMenu::close() resetea |
 | Pantalla negra en SAT | Sprites no restaurados | Verificar _satRestoreSprites() |
 
@@ -404,3 +483,4 @@ Display normal
 ## Últimas Actualizaciones
 
 - **(2026-05-16)** Creado SAT.md como documento exhaustivo, consolidado de CLAUDE.md y MOTOR.md
+- **(2026-05-20)** Sección 7 expandida — flujo OTA completo, ElegantOTA URL, credenciales NVS, provisioning sketch, pines al aire fix, portal WiFiManager, troubleshooting OTA

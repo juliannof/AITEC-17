@@ -2,14 +2,14 @@
 // ============================================================
 //  OtaManager.h  —  iMakie PTxx Track S2
 //
-//  Gestiona WiFi, portal de configuración (WiFiManager) y OTA.
+//  Gestiona WiFi y OTA via ElegantOTA.
+//  Credenciales provisionadas por sketch Arduino (USB, una vez).
 //
-//  MODOS DE USO (desde SAT menu):
-//   1. launchPortal()     → AP captive portal para guardar SSID/pass/OTA-pass
-//   2. enableForUpload()  → conecta red guardada + ElegantOTA activo
+//  MODO DE USO (desde SAT menu → WiFi OTA):
+//   enableForUpload()  → conecta red guardada + ElegantOTA activo
 //
 //  WiFi permanece APAGADO en operación normal.
-//  NVS namespace: "ptxx"  (mismo que el resto del proyecto)
+//  NVS namespace: "ptxx"  (mismo que sketch provisioning)
 // ============================================================
 #include <Arduino.h>
 #include <functional>
@@ -24,7 +24,6 @@ public:
     void tick();                    // Llama en loop() — maneja ArduinoOTA
 
     // ── Acciones desde SAT ────────────────────────────────────
-    void launchPortal();            // Abre AP + portal captive (bloqueante ~120 s)
     void enableForUpload(bool otaOnlyMode = false);  // Conecta red + inicia ElegantOTA
     void disable();                 // Desconecta y apaga WiFi
 

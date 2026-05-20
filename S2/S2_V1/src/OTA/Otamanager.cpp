@@ -6,7 +6,6 @@
 #include "../hardware/Motor/Motor.h"
 #include "../RS485/RS485.h"
 #include <WiFi.h>
-#include <WiFiManager.h>
 #include <WebServer.h>
 #include <ElegantOTA.h>
 #include <Preferences.h>
@@ -18,8 +17,6 @@
 #define NVS_PASS        "wifiPass"
 #define NVS_OTA_PASS    "otaPass"
 
-#define PORTAL_SSID     "iMakie-PTxx"
-#define PORTAL_TIMEOUT  120
 #define OTA_PORT        3232
 
 OtaManager otaManager;
@@ -33,62 +30,6 @@ void OtaManager::begin() {
 void OtaManager::tick() {
     // Con ElegantOTA, server.handleClient() está en loop bloqueante de enableForUpload()
     // No necesita ser llamado desde tick()
-}
-
-// ─────────────────────────────────────────────────────────────
-void OtaManager::launchPortal() {
-    log_i("[OTA] launchPortal() — inicio");
-    log_i("[OTA] Heap: %d  PSRAM: %d", ESP.getFreeHeap(), ESP.getFreePsram());
-    _status("AP: iMakie-PTxx");
-    delay(50);
-    _status("Conecta y abre 192.168.4.1");
-    delay(50);
-
-    Preferences prefs;
-    prefs.begin(NVS_NS, true);
-    uint8_t currentId = prefs.getUChar("trackId", 0);
-    prefs.end();
-    char defaultId[4];
-    snprintf(defaultId, sizeof(defaultId), "%u", currentId);
-
-    WiFiManager wm;
-    wm.setConfigPortalTimeout(PORTAL_TIMEOUT);
-    wm.setConnectTimeout(15);
-    wm.setBreakAfterConfig(true);
-
-    WiFiManagerParameter paramOtaPass("otapass", "OTA Password", "", 32);
-    WiFiManagerParameter paramTrackId("trackid", "Track ID (1-9)", defaultId, 3);
-    wm.addParameter(&paramOtaPass);
-    wm.addParameter(&paramTrackId);
-
-    wm.setAPCallback([this](WiFiManager* wm) {
-        _status("Portal activo...");
-    });
-
-    bool connected = wm.startConfigPortal(PORTAL_SSID);
-
-    if (connected || wm.getWiFiSSID().length() > 0) {
-        String ssid = wm.getWiFiSSID();
-        String pass = wm.getWiFiPass();
-        String ota  = String(paramOtaPass.getValue());
-        _saveCredentials(ssid.c_str(), pass.c_str(), ota.c_str());
-        _status("Credenciales guardadas.");
-    } else {
-        _status("Portal: sin cambios.");
-    }
-
-    uint8_t newId = (uint8_t)atoi(paramTrackId.getValue());
-    if (newId >= 1 && newId <= 9) {
-        Preferences prefs2;
-        prefs2.begin(NVS_NS, false);
-        prefs2.putUChar("trackId", newId);
-        prefs2.end();
-        static char buf[32];
-        snprintf(buf, sizeof(buf), "Track ID: %u guardado.", newId);
-        _status(buf);
-    }
-
-    _otaActive = false;
 }
 
 unsigned long ota_progress_millis = 0;
