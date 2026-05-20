@@ -647,15 +647,13 @@ CALIBRATING → DONE → S3 recibe min/max en SlavePacket
   - VU meter decay timing
   - ISR priorities
 
-- [ ] **S3 — Nombre de pista no se borra en slaves (S2)** 🔴
-  - Problema: S3 envía nombre de pista pero no borra el anterior → sobreposición caracteres
-  - Síntoma: Display S2 muestra "Pan" + "Seleccion" + caracteres antiguos superpuestos
-  - Causa probable: Falta buffer clear, protocolo RS485 nombre no sincroniza, o display no limpia línea antes de escribir
-  - Ubicación: 
-    - `MASTER_S3-P4/S3/iMakie-ESP32_S3_EXTENDER/src/` (envío nombre pista)
-    - `S2/S2_V1/src/Display.cpp` (renderizado nombre en pantalla)
-  - Afecta: S2 display legibilidad, protocolo RS485, protocolo SysEx Mackie
-  - Requiere: auditoría envío paquetes nombre S3, validación buffer display S2, clear línea antes escribir
+- [ ] **S3 — Nombre de pista no se envía siempre, escribe "Pan" o "Seleccion" sin borrar** 🔴
+  - Problema: S3 NO envía nombre de pista consistentemente. Cuando recibe CC Pan/Select, escribe estos textos en pantalla sin limpiar anterior
+  - Síntoma: Display S2 muestra "Pan" + nombre anterior superpuesto, o "Seleccion" mezclado con caracteres viejos
+  - Causa probable: S3 interpreta erróneamente CC MIDI Pan/Select como si fuera nombre de pista, no filtra, no borra antes de escribir
+  - Ubicación: `MASTER_S3-P4/S3/iMakie-ESP32_S3_EXTENDER/src/` (procesamiento MIDI CC, envío RS485 nombre pista)
+  - Afecta: Comunicación S3→S2, protocolo RS485 nombre pista, interpretación CC MIDI en S3
+  - Requiere: Auditoría S3 — qué MIDI se procesa como nombre pista, por qué CC Pan/Select llegan a display, fix filtro CC
 
 ---
 
