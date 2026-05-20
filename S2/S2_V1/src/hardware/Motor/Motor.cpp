@@ -40,9 +40,9 @@ static MotorState _motor_state = MotorState::IDLE;
 
 // ─── Funciones HW (privadas) ──────────────────────────────────
 static void _hwOff() {
+    digitalWrite(MOTOR_EN, LOW);   // EN primero: corta driver antes de cambiar PWM
     analogWrite(MOTOR_IN1, 0);
     analogWrite(MOTOR_IN2, 0);
-    digitalWrite(MOTOR_EN, LOW);
     _motor_hw_active = false;
 }
 
@@ -393,8 +393,8 @@ void update() {
             _hwDown(_pwm_max);
             log_i("[MOTOR-STATE] IDLE → GOING_TO_MIN (adc=%d)", _motor_adcPos);
         } else {
-            // CONNECTED o ya en 0: motor quieto
-            _hwOff();
+            // CONNECTED o ya en 0: motor quieto — solo apagar si estaba activo
+            if (_motor_hw_active) _hwOff();
         }
         break;
 
@@ -451,11 +451,8 @@ void update() {
         break;
 
     case MotorState::AT_TARGET:
-        // En posición objetivo, esperando comando S3
-        // Si usuario suelta en nueva posición, cambiar a GOING_TO_MIN
-        _hwOff();
-        // Timeout: si pasa tiempo sin comando S3, volver a IDLE (goToMin)
-        // Configurar en config.h: MOTOR_AT_TARGET_TIMEOUT (ej: 30000 ms)
+        // En posición — fricción mecánica mantiene el fader, motor completamente apagado
+        if (_motor_hw_active) _hwOff();
         break;
 
     default:
@@ -668,10 +665,17 @@ void setTargetFromS3(uint16_t adcTarget) {
         }
         return;
     }
+    _motor_targetADC = adcTarget;
+
+    // No reactivar si ya estamos en posición: fricción mantiene el fader sin motor
+    if (_motor_state == MotorState::AT_TARGET &&
+        abs((int)_motor_adcPos - (int)adcTarget) < DEAD_ZONE) {
+        return;
+    }
+
     if (_motor_targetADC != adcTarget || _motor_state != MotorState::MOVING_TO_TARGET) {
         log_i("[MOTOR] → MOVING_TO_TARGET adc=%d target=%d span=%d", _motor_adcPos, adcTarget, _motor_adcSpan);
     }
-    _motor_targetADC = adcTarget;
     _motor_state = MotorState::MOVING_TO_TARGET;
 }
 

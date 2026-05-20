@@ -7,6 +7,205 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### S2 MOTOR — Vibración en reposo: 4 fixes (2026-05-20) — ✅ CÓDIGO LISTO / 🔴 PENDIENTE FLASH Y VALIDACIÓN
+
+**Síntoma:** Uno de los dos esclavos vibraba levemente con el fader en posición de reposo, pese a tener el mismo software que el otro esclavo. El motor se activaba brevemente de forma intermitente incluso sin ningún comando de movimiento activo.
+
+**Por qué solo una unidad:** el software creaba las condiciones para la vibración, pero que fuera perceptible dependía de diferencias físicas entre unidades: nivel de ruido ADC intrínseco del ADS1115, valores `pwmMin/pwmMax` calibrados individualmente en NVS, tolerancias del motor DC, fricción del fader en el rail, y resonancia mecánica del ensamblaje. No indica unidad defectuosa.
+
+**Principio de diseño confirmado:** el fader se mantiene en posición por fricción mecánica. El motor no necesita estar activo para "sujetar" el fader — debe apagarse completamente al llegar a destino.
+
+---
+
+**Causa raíz 1 — `setTargetFromS3()` siempre forzaba `MOVING_TO_TARGET`:**
+
+S3 envía el mismo target cada 10ms (ciclo RS485). Aunque el fader ya estuviera en posición, `setTargetFromS3()` establecía `_motor_state = MOVING_TO_TARGET` en cada ciclo sin comprobar si el error era menor que `DEAD_ZONE`. Esto provocaba que `_positionTick()` se ejecutara cada 10ms. Si el ruido ADC hacía que `|error| ≥ 50` (DEAD_ZONE), el motor recibía un pulso breve con `PWM_MIN = 100` (39% duty) → vibración audible/táctil.
+
+```cpp
+// ANTES — sin guard de distancia:
+_motor_targetADC = adcTarget;
+_motor_state = MotorState::MOVING_TO_TARGET;  // siempre, aunque ya en posición
+
+// DESPUÉS — guard: si ya en AT_TARGET y dentro de DEAD_ZONE → no reactivar:
+_motor_targetADC = adcTarget;
+if (_motor_state == MotorState::AT_TARGET &&
+    abs((int)_motor_adcPos - (int)adcTarget) < DEAD_ZONE) {
+    return;   // fader en posición, fricción lo mantiene, motor se queda apagado
+}
+_motor_state = MotorState::MOVING_TO_TARGET;
+```
+
+**Archivo:** `S2/S2_V1/src/hardware/Motor/Motor.cpp` función `setTargetFromS3()` (línea ~671)
+
+---
+
+**Causa raíz 2 — Orden de operaciones en `_hwOff()` generaba pulso espurio:**
+
+```cpp
+// ANTES — EN se desactiva ÚLTIMO:
+analogWrite(MOTOR_IN1, 0);   // IN1=0, pero EN sigue HIGH → posible corriente residual
+analogWrite(MOTOR_IN2, 0);   // IN2=0, pero EN sigue HIGH
+digitalWrite(MOTOR_EN, LOW); // solo aquí se corta el driver
+
+// DESPUÉS — EN se desactiva PRIMERO:
+digitalWrite(MOTOR_EN, LOW);   // corta driver antes de cualquier cambio PWM
+analogWrite(MOTOR_IN1, 0);
+analogWrite(MOTOR_IN2, 0);
+```
+
+Desactivar `EN` primero garantiza que el DRV8833 deje de conducir antes de que el estado de los pines PWM cambie. Elimina el instante de transición donde `IN=0` pero `EN=HIGH` podía generar un frenado brusco o pulso inductivo.
+
+**Archivo:** `Motor.cpp` función `_hwOff()` (línea ~42)
+
+---
+
+**Causa raíz 3 — `_hwOff()` llamado cada iteración de loop en AT_TARGET e IDLE:**
+
+Los estados `AT_TARGET` e `IDLE` (rama connected) llamaban `_hwOff()` en cada iteración del loop principal (~100Hz), aunque el motor ya estuviera apagado. Esto ejecutaba `analogWrite(pin, 0)` y `digitalWrite(EN, LOW)` repetidamente — operaciones GPIO que en S2 single-core tienen overhead y pueden generar ruido en el bus I/O acoplable al DRV8833.
+
+```cpp
+// ANTES — _hwOff() incondicional cada loop:
+case MotorState::AT_TARGET:
+    _hwOff();
+    break;
+
+// DESPUÉS — solo si el driver estaba activo:
+case MotorState::AT_TARGET:
+    if (_motor_hw_active) _hwOff();
+    break;
+```
+
+Mismo cambio aplicado en `IDLE` (rama `connected`):
+```cpp
+// ANTES:
+_hwOff();
+
+// DESPUÉS:
+if (_motor_hw_active) _hwOff();
+```
+
+`_motor_hw_active` es el flag de verdad HW — se pone `true` en `_hwUp()`/`_hwDown()` y `false` en `_hwOff()`. La guardia es O(1) y segura.
+
+**Archivos:** `Motor.cpp` cases `AT_TARGET` (línea ~453) e `IDLE` (línea ~395)
+
+---
+
+**Resumen de cambios (4 en 1 archivo):**
+
+| # | Función | Línea aprox. | Cambio | Efecto |
+|---|---------|-------------|--------|--------|
+| 1 | `_hwOff()` | 42 | EN=LOW antes de IN1/IN2=0 | Elimina pulso espurio en desactivación |
+| 2 | `IDLE` (connected) | 395 | `_hwOff()` → `if (_motor_hw_active) _hwOff()` | Sin GPIO redundante cada loop |
+| 3 | `AT_TARGET` | 453 | `_hwOff()` → `if (_motor_hw_active) _hwOff()` | Sin GPIO redundante cada loop |
+| 4 | `setTargetFromS3()` | 671 | Guard DEAD_ZONE antes de `MOVING_TO_TARGET` | Motor no se reactiva con ruido ADC |
+
+**⚠️ VALIDACIÓN HARDWARE:**
+- [ ] Fader en posición, Logic conectado → sin vibración en ambas unidades
+- [ ] S3 manda nuevo target diferente → motor se mueve con normalidad
+- [ ] S3 manda mismo target repetidamente → motor permanece apagado
+- [ ] Ruido ADC no supera DEAD_ZONE con motor apagado (log: sin `MOVING_TO_TARGET` spam)
+- [ ] Calibración → sin regresión (no usa `setTargetFromS3()`)
+
+---
+
+### RESUMEN SESIÓN 2026-05-20
+
+**Objetivo de la sesión:** Conseguir P4 online + investigar flujo de nombres de pista S3→S2.
+
+**Resuelto ✅**
+
+| Fix | Archivos | Descripción |
+|-----|----------|-------------|
+| P4 arranca y envía handshake | P4 hardware | Note On F#1 (0x26, vel 127) confirmado en MIDI monitor 07:36:16 |
+| Nombres de pista visibles en S2 | — (GoOnline row 1) | Logic envía SysEx 0x12 con nombres en row 1 al GoOnline → S3 procesa → S2 muestra ✓ |
+
+**Diagnóstico nuevo 🔍**
+
+| Hallazgo | Descripción |
+|----------|-------------|
+| GoOnline SysEx 0x12 — comportamiento normal | Row 1 = nombres de pista (7 chars), row 2 = valores fader/pan. Confirmado con capturas reales P4 + Extender (07:45:16) |
+| Modo Atmos/plugin — comportamiento especial | Logic envía row 1 vacía (56 × 0x20) + row 2 con parámetros del plugin ("Angle", "LFE", "Spread"). Capturado a 07:36:59 |
+| Bug B2 identificado | En modo Atmos/plugin, row 1 vacía → S3 borra `trackNames[]` → S2 pierde nombre de pista. Fix: ignorar updates con row 1 = todo espacios |
+| Regla de diseño confirmada | S2 solo debe ver nombres de pista (row 1). Valores de row 2 nunca llegan a S2 — correcto en código actual |
+
+**Pendiente 🔴**
+
+| Pendiente | MCU | Descripción |
+|-----------|-----|-------------|
+| Vibración motor en reposo — flash + validación | S2 | Código listo (4 fixes Motor.cpp). Flash ambas unidades, confirmar sin vibración con Logic conectado |
+| B2 — Nombres borrados en modo plugin/Atmos | S3 | Row 1 vacía → S3 borra trackNames → S2 pierde nombres. Fix: guard contra row 1 todo espacios |
+| Validación nombres con cambio de nombre en Logic | S3+S2 | Confirmar que renombrar una pista en Logic actualiza S2 en tiempo real |
+
+---
+
+### S3 — Bug B2: SysEx 0x12 con row 1 vacía borra nombres de S2 — modo plugin/Atmos (2026-05-20 07:40) — 🔴 PENDIENTE
+
+**Contexto:**
+
+Logic Pro envía SysEx 0x12 (LCD Write / Scribble Strip) con dos layouts distintos:
+
+1. **Normal (GoOnline + actualizaciones de pista):** row 1 (offsets 0–55) = nombres de pista. Row 2 (offsets 56–111) = valores numéricos (fader dB, pan). S3 procesa correctamente row 1 → S2 muestra nombres ✓
+2. **Modo plugin/Atmos/spatial:** Logic envía **row 1 completamente vacía** (56 × `0x20`) y row 2 con parámetros del plugin (ej: "Angle  ", "LFE    ", "Spread "). S3 escribe cadenas vacías en `trackNames[]` → `rs485.setTrackName()` vacío → **S2 borra el nombre de pista.**
+
+**SysEx capturado (2026-05-20 07:36:59 — 43s tras handshake P4):**
+
+```
+F0 00 00 66 14 12 00  [datos…]  F7
+```
+
+Análisis byte a byte (datos = 116 bytes):
+
+```
+Offset  0–55:  20 × 56 (espacios)        → row 1 completamente vacía
+Offset 56–62:  20 × 7  (espacios)        → row 2, canal 1: sin nombre
+Offset 63–69:  41 6E 67 6C 65 20 20      → row 2, canal 2: "Angle  "
+Offset 70–76:  44 69 76 65 72 73 20      → row 2, canal 3: "Divers "
+Offset 77–83:  4C 46 45 20 20 20 20      → row 2, canal 4: "LFE    "
+Offset 84–90:  53 70 72 65 61 64 20      → row 2, canal 5: "Spread "
+Offset 91–97:  20 × 7  (espacios)        → row 2, canal 6: sin nombre
+Offset 98–104: 20 43 53 74 72 69 70      → row 2, canal 7: " CStrip"
+Offset 105–111:20 41 6E 67 2F 44 76      → row 2, canal 8: " Ang/Dv"
+Offset 112–115:20 58 2F 59               → extra: " X/Y"
+```
+
+**Comportamiento de Logic verificado (capturas 2026-05-20):**
+
+| Momento | Row 1 (offset 0–55) | Row 2 (offset 56–111) |
+|---------|--------------------|-----------------------|
+| GoOnline #3 + cualquier update normal | Nombres de pista (7 chars, truncados) | Valores numéricos (fader dB, pan) |
+| Modo Pan | Etiquetas parámetro ("Pan    ", "PanSpr ") | Valores ("0      ", "111 o  ") |
+| Modo plugin/Atmos | **VACÍA** (56 × 0x20) | Parámetros plugin ("Angle  ", "LFE    ", "Spread ") |
+
+**Regla de diseño:** S2 solo debe ver nombres de pista. Los valores de row 2 nunca deben llegar a S2. Correcto en código actual: `if (offset >= 56) break` impide que row 2 llegue a `setTrackName()`.
+
+**Bug exacto:** el `break` es correcto, pero no hay guard contra row 1 vacía. Cuando Logic envía row 1 = todo espacios (modo plugin), S3 llama `setTrackName(t, "")` → S2 borra el nombre.
+
+**Fix propuesto (pendiente implementar):**
+
+`MASTER_S3-P4/S3/iMakie-ESP32_S3_EXTENDER/src/midi/MIDIProcessor.cpp`, dentro de case 0x12, antes de llamar `rs485.setTrackName()`:
+
+```cpp
+trimRight(nameBufs[t]);
+if (nameBufs[t][0] == '\0') continue;   // ← no borrar si Logic envía espacios
+if (trackNames[t] == nameBufs[t]) continue;
+trackNames[t] = String(nameBufs[t]);
+rs485.setTrackName(t + 1, nameBufs[t]);
+```
+
+La guardia `[0] == '\0'` (después del `trimRight`) detecta nombres que eran todo espacios y los ignora, conservando el nombre previo en S2.
+
+**Archivos afectados:**
+- `MASTER_S3-P4/S3/iMakie-ESP32_S3_EXTENDER/src/midi/MIDIProcessor.cpp` — case 0x12 (línea 350–386)
+
+**Riesgo:** BAJO — solo afecta parsing de SysEx en S3. No toca RS485, Motor, calibración.
+
+**Validación requerida (post-fix):**
+- [ ] GoOnline: nombres llegan de row 1 → S2 muestra correctamente (no regresión)
+- [ ] Post-GoOnline: Logic envía actualización con nombres en row 2 → S2 actualiza
+- [ ] Modo Pan: row 1 con "Pan"/"PanSpr" → NO sobreescribe nombre de pista en S2
+
+---
+
 ### RESUMEN SESIÓN 2026-05-19
 
 **Objetivo de la sesión:** Conseguir fader bidireccional funcional — Logic mueve S2, S2 reporta posición a Logic.

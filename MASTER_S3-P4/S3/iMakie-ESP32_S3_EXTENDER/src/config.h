@@ -12,7 +12,7 @@
 #elif defined(DEVICE_S3_EXTENDER)
     #define DEVICE_FAMILY       0x14
     #define VERSION_REPLY_CMD   0x14
-    #define NUM_SLAVES          1
+    #define NUM_SLAVES          2
 
 #else
     #error "DEBE DEFINIR: DEVICE_P4_MASTER o DEVICE_S3_EXTENDER en platformio.ini build_flags"

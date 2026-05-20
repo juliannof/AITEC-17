@@ -101,7 +101,7 @@ t=122ms   Logic → S3:  GoOnline #2 (cmd 0x21) + mismo reset completo
                          Pitch Wheel ×10  — -8192 ← de nuevo todos a mínimo
 
 t=2471ms  Logic → S3:  GoOnline #3 (cmd 0x21) + estado REAL del proyecto:
-                         SysEx 0x12       — nombres reales ("Pan", "PanSpr", "0", "111 o"…)
+                         SysEx 0x12       — volcado completo estado real: nombres en row1, valores en row2 (ej: "Pan", "PanSpr", "0", "111 o" si el proyecto estaba en modo Pan)
                          Note On reales   — botones/LEDs con estado real
                          SysEx 0x72       — VU con niveles reales
                          Pitch Wheel ×10  — valores reales: 6653, -951, -6755, 3733…
@@ -131,19 +131,173 @@ Logic se está desconectando. S3:
 
 ---
 
-### 4.2 Nombres de Canal — Scribble Strip (SysEx 0x12)
+### 4.2 Scribble Strip (SysEx 0x12)
 
 ```
 Logic → S3:   F0 00 00 66 14 12 <offset> <chars...> F7
 ```
 
-Logic envía los nombres de los 8 canales. El espacio total es 56 bytes (8 canales × 7 caracteres). `offset` indica desde qué byte empieza el bloque recibido.
+**Layout del buffer:** 112 bytes totales — 2 filas × 8 canales × 7 chars.
 
-**Ejemplo:** nombre "GUITAR " en canal 3 → offset 21 (3×7), 7 bytes de texto.
+| Rango offset | Nombre | Contenido según momento |
+|-------------|--------|------------------------|
+| 0–55 | **Row 1** (top) | GoOnline: nombres de pista. Modo Pan: etiquetas ("Pan    "). Post-GoOnline: vacía. |
+| 56–111 | **Row 2** (bottom) | GoOnline: vacía o valores. Post-GoOnline: nombres de pista actualizados. |
 
-S3 reconstruye el nombre y llama `rs485.setTrackName(canal, nombre)` para enviarlo al S2 correspondiente vía RS485.
+Canal N en row 1 → offset `N×7` (N = 0–7). Canal N en row 2 → offset `56 + N×7`.  
+**Ejemplo:** canal 3 row 1 → offset 21. Canal 3 row 2 → offset 77.
 
-Caracteres codificados con `MACKIE_CHAR_MAP[64]` (espacio, símbolos, A-Z, dígitos).
+---
+
+**⚠️ Comportamiento de Logic según momento — crítico para el parser S3:**
+
+| Momento | Row 1 (offsets 0–55) | Row 2 (offsets 56–111) | S3 actual |
+|---------|---------------------|----------------------|-----------|
+| **GoOnline #3** (t≈2471ms) + cualquier actualización normal | **Nombres de pista** (7 chars, truncados) | Valores numéricos (fader, pan) | ✅ Procesa row 1 → S2 muestra nombres |
+| **Modo Pan** (cualquier momento) | Etiquetas parámetro: "Pan    ", "PanSpr " | Valores: "0      ", "111 o  " | ✅ Row 1 capturada; Row 2 ignorada (correcto) |
+| **Modo plugin/Atmos** (especial) | Vacía (56 × 0x20) | Nombres de parámetro del plugin ("Angle  ", "LFE    ", "Spread ") | ❌ Row 1 vacía → S3 borra nombre; Row 2 ignorada |
+| **Borrado** | 56 espacios | Vacía | ✅ Borra nombres correctamente |
+
+> **Bug B2 (2026-05-20):** Cuando Logic muestra parámetros de plugin en row 2 (modo Atmos, spatial audio, inserts), `if (offset >= 56) break;` en `MIDIProcessor.cpp` línea 373 impide que S3 los procese. Caso menos frecuente. Ver sección §7.
+
+---
+
+**SysEx capturados — GoOnline normal (2026-05-20 07:45:16):**
+
+Logic envía a P4 y al Extender simultáneamente con 119 bytes cada uno (offset=0):
+
+```
+F0 00 00 66 14 12 00  [112 bytes: row1 + row2]  F7
+```
+
+**P4 Master — 8 canales (07:45:16.079):**
+
+```
+Row 1 — nombres (offsets 0–55):
+  Ch1 (0–6):   41 75 64 6F 31 35 20  "Audo15 "    (Audio 15, truncado)
+  Ch2 (7–13):  41 75 64 69 6F 54 20  "AudioT "
+  Ch3 (14–20): 42 61 73 65 20 20 20  "Base   "
+  Ch4 (21–27): 41 75 64 69 6F 32 20  "Audio2 "
+  Ch5 (28–34): 4E 6F 20 20 20 20 20  "No     "
+  Ch6 (35–41): 6E 61 74 68 6C 65 20  "nathle "    (Nathalie, truncado)
+  Ch7 (42–48): 56 4F 5A 20 34 20 20  "VOZ 4  "
+  Ch8 (49–55): 61 6C 65 78 20 20 20  "alex   "
+
+Row 2 — valores fader/pan (offsets 56–111):
+  Ch1 (56–62):  2B 36 33 20 20 20 20  "+63    "
+  Ch2 (63–69):  30 20 20 20 20 20 20  "0      "
+  Ch3 (70–76):  2B 34 20 20 20 20 20  "+4     "
+  Ch4 (77–83):  2D 31 20 20 20 20 20  "-1     "
+  Ch5 (84–90):  20 20 20 20 20 20 20  "       "    (sin valor)
+  Ch6 (91–97):  2D 31 20 20 20 20 20  "-1     "
+  Ch7 (98–104): 2D 34 39 20 20 20 20  "-49    "
+  Ch8 (105–111):30 20 20 20 20 20 20  "0      "
+```
+
+**S3 Extender — 8 canales (07:45:16.115):**
+
+```
+Row 1 — nombres (offsets 0–55):
+  Ch1: 53 6F 6C 65 72 20 20  "Soler  "
+  Ch2: 4C 6F 70 65 72 20 20  "Loper  "
+  Ch3: 54 72 6E 71 69 6C 20  "Trnqil "    (Tranquil, truncado)
+  Ch4: 70 69 61 6E 6F 20 20  "piano  "
+  Ch5: 41 75 64 6F 31 32 20  "Audo12 "
+  Ch6: 54 72 54 65 42 65 20  "TrTeBe "
+  Ch7: 44 57 59 53 6C 65 20  "DWYSle "
+  Ch8: 49 6E 73 74 20 34 20  "Inst 4 "
+
+Row 2 — valores (offsets 56–111):
+  Ch1: 2B 32 35 20 20 20 20  "+25    "
+  Ch2: 2B 33 20 20 20 20 20  "+3     "
+  Ch3: 2D 33 34 20 20 20 20  "-34    "
+  Ch4: 2D 36 34 20 20 20 20  "-64    "
+  Ch5: 2B 36 33 20 20 20 20  "+63    "
+  Ch6: 30 20 20 20 20 20 20  "0      "
+  Ch7: 30 20 20 20 20 20 20  "0      "
+  Ch8: 30 20 20 20 20 20 20  "0      "
+```
+
+> Los valores de row 2 son los niveles de fader en dB (ej: `+63` = canal muy activo, `-64` = casi a mínimo). Logic muestra estos valores en el scribble strip inferior de la superficie física.
+
+---
+
+**SysEx capturado — modo Atmos/plugin especial (2026-05-20 07:36:59, al Extender):**
+
+```
+F0 00 00 66 14 12 00  [116 bytes]  F7
+```
+
+Este SysEx tenía row 1 completamente vacía y row 2 con nombres de parámetros de audio espacial:
+`"Angle  "`, `"Divers "`, `"LFE    "`, `"Spread "`, `""`, `" CStrip"`, `" Ang/Dv"` + extra `" X/Y"`.
+
+Interpretación: Logic estaba en un modo de plugin (Atmos/spatial) donde los faders controlan parámetros espaciales. En ese modo, row 1 se vacía y row 2 muestra los nombres de los parámetros del plugin. S3 borra los nombres al recibir row 1 vacía.
+
+> El parser S3 actual maneja correctamente el caso normal (GoOnline). El bug B2 solo afecta este modo especial.
+
+> Los 4 bytes extra (`20 58 2F 59` = " X/Y") van más allá del buffer de 112 posiciones — Logic puede exceder el LCD físico; el parser debe ignorar offsets ≥ 112.
+
+---
+
+**Logic usa 0x12 para múltiples tipos de contenido** (confirmado MIDI Monitor 2026-05-20):
+
+| Situación | Row usada | Ejemplo observado |
+|-----------|-----------|-------------------|
+| GoOnline — nombres Track | Row 1 | `"GUITAR "`, `"-      "` |
+| Actualización post-GoOnline | Row 2 | `"Angle  "`, `"Divers "`, `"LFE    "` |
+| Modo Pan — etiquetas | Row 1 | `"Pan    "`, `"PanSpr "`, `"-      "` |
+| Modo Pan — valores | Row 2 | `"0      "`, `"111 o  "` |
+| Mensaje de estado | Ambas rows | `"El modo"` `" Write "` `"borra v"` … |
+| Borrado | Row 1 offset 0 | 56 × `0x20` |
+
+---
+
+**Volcado completo vs. actualización parcial:**
+
+- **Volcado completo** (offset=0, hasta 112+ bytes): al GoOnline o cambio de modo. Logic envía ambas rows de una vez.
+- **Actualización parcial** (offset específico, pocos bytes): al ajustar un parámetro o renombrar una pista.
+
+```
+# Volcado completo al entrar en modo Pan (119 bytes):
+F0 00 00 66 14 12 00  <56 bytes row1>  <56 bytes row2>  F7
+
+# Actualización parcial — solo canal 4 row1 (14 bytes):
+F0 00 00 66 14 12 15  50 61 6E 53 70 72  F7
+                  ^   "PanSpr" (6 chars)
+                  offset=21 (canal 4, row 1)
+
+# Actualización parcial — nombre canal 3 en row 2 (9 bytes):
+F0 00 00 66 14 12 4D  4C 46 45 20 20 20 20  F7
+                  ^   "LFE    "
+                  offset=77 (canal 3, row 2: 56 + 3×7 = 77)
+```
+
+S3 reconstruye el nombre a partir de actualizaciones parciales y llama `rs485.setTrackName(canal, nombre)` para enviarlo al S2 correspondiente vía RS485.
+
+---
+
+**Regla de diseño — qué ve S2:**
+
+> **S2 solo recibe y muestra nombres de pista (row 1).** Nunca valores de fader/pan (row 2), nunca etiquetas de parámetro de plugin.
+
+La responsabilidad del parser S3 es filtrar el buffer 0x12 y extraer únicamente los nombres de row 1 antes de enviarlos por RS485. Row 2 se descarta siempre.
+
+**Implementación actual (`MIDIProcessor.cpp` case 0x12):**
+
+```cpp
+for (int i = 0; i < text_len; i++) {
+    byte offset = startOffset + i;
+    if (offset >= 56) break;          // row 2 descartada — solo row 1 llega a S2
+    nameBufs[offset / 7][offset % 7] = (char)payload[6 + i];
+    nameChanged[offset / 7] = true;
+}
+// ...
+rs485.setTrackName(t + 1, nameBufs[t]);  // solo row 1 va por RS485 a S2
+```
+
+El `break` en `offset >= 56` es correcto para esta regla. El problema de **bug B2** no es que los valores lleguen a S2 (no llegan), sino que en modo Atmos/plugin Logic envía row 1 vacía → S3 borra los nombres de S2. Fix pendiente: ignorar actualizaciones donde row 1 es todo espacios, conservar el nombre previo.
+
+Caracteres ASCII estándar. Caracteres de timecode con `MACKIE_CHAR_MAP[64]` (sección §4.9).
 
 ---
 
@@ -418,7 +572,27 @@ Estos mensajes se reciben y procesan correctamente, pero su efecto visual está 
 | # | Descripción | Fichero | Estado |
 |---|-------------|---------|--------|
 | B1 | SysEx 0x61 (`AllFadersToMinimum`) corta RS485 incorrectamente | `MIDIProcessor.cpp` case 0x61 | ⚠️ Pendiente |
+| B2 | Modo plugin/Atmos: Logic envía row 1 vacía → S3 borra nombres de S2 | `MIDIProcessor.cpp` case 0x12 L371 | ⚠️ Pendiente — fix: ignorar update si row 1 es todo espacios |
 | — | Detección desconexión requiere 9 canales a 0 (threshold hardcoded) | `MIDIProcessor.cpp` L27 | Revisar si aplica con <9 faders |
+
+### B2 — Detalle: borrado de nombres en modo plugin (2026-05-20)
+
+**Síntoma:** Al entrar en modo Atmos/plugin/spatial audio en Logic, los nombres de pista desaparecen de los displays S2.
+
+**Causa:** Logic envía SysEx 0x12 con row 1 completamente vacía (56 × `0x20`) y parámetros del plugin en row 2. El parser S3 procesa row 1 → sobreescribe `trackNames[]` con cadenas vacías → `rs485.setTrackName()` envía string vacío → S2 limpia su display.
+
+**Fix propuesto (pendiente):** En case 0x12, antes de llamar `rs485.setTrackName()`, comprobar si el nombre extraído es todo espacios. Si es vacío/espacios → no sobreescribir → S2 conserva el nombre anterior.
+
+```cpp
+// Guardia propuesta (pendiente implementar):
+trimRight(nameBufs[t]);
+if (nameBufs[t][0] == '\0') continue;   // ← ignorar si vacío → S2 conserva nombre
+if (trackNames[t] == nameBufs[t]) continue;
+trackNames[t] = String(nameBufs[t]);
+rs485.setTrackName(t + 1, nameBufs[t]);
+```
+
+**Riesgo:** BAJO — cambio local en S3, no afecta RS485 ni Motor. Requiere validar que el borrado intencional (track eliminada) sigue funcionando (Logic enviaría `"-      "`, no espacios puros).
 
 ---
 
