@@ -647,6 +647,12 @@ CALIBRATING → DONE → S3 recibe min/max en SlavePacket
   - VU meter decay timing
   - ISR priorities
 
+- [ ] **S3 — Nombre de pista en slaves (S2) no garantizado** 🔴
+  - Problema: S3 envía nombre de pista pero no está garantizado que todos los slaves lo reciban/muestren
+  - Ubicación: `MASTER_S3-P4/S3/iMakie-ESP32_S3_EXTENDER/src/` (buscar envío nombre)
+  - Afecta: S2 display, confiabilidad RS485 protocolo
+  - Requiere: auditoría protocolo RS485, validación hardware, sincronización paquetes
+
 ---
 
 ### DOCUMENTACIÓN HARDWARE — S3 N16R8 + P4 JC4880P443C-I-W especificaciones completas (2026-05-16 20:45) — ✅ COMPLETADO
