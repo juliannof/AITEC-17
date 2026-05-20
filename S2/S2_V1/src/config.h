@@ -104,7 +104,7 @@ static constexpr uint8_t  PWM_MAX                  = 160;  // calibrado: movimie
 static constexpr uint16_t ADC_SPIKE_GUARD          = 500;     // cuentas máximas entre lecturas (aumentado para Test Mode tolerancia 2026-05-10 22:00)
 
 // Motor — calibración (constantes)
-static constexpr uint16_t DEAD_ZONE                = 50;      // error < esto → apagar motor
+static constexpr uint16_t DEAD_ZONE                = 80;      // error < esto → apagar motor (S1 ruido=60, margen 20)
 static constexpr uint16_t ADC_STABILITY_THRESHOLD  = 100;     // cambio máximo para considerar "estable" (2026-05-12 20:35)
 static constexpr uint32_t CALIB_STABLE_TIME        = 500;     // ms para considerar estable
 static constexpr uint32_t CALIB_SETTLE_MS          = 200;     // ms para medir ruido (antes 500, era demasiado)
