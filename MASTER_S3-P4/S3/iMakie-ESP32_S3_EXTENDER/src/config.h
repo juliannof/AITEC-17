@@ -12,7 +12,7 @@
 #elif defined(DEVICE_S3_EXTENDER)
     #define DEVICE_FAMILY       0x14
     #define VERSION_REPLY_CMD   0x14
-    #define NUM_SLAVES          2
+    #define NUM_SLAVES          1
 
 #else
     #error "DEBE DEFINIR: DEVICE_P4_MASTER o DEVICE_S3_EXTENDER en platformio.ini build_flags"
@@ -49,7 +49,8 @@ extern volatile ConnectionState logicConnectionState;
 #define POLL_CYCLE_MS        10   // 100Hz con 1 slave — transacción ~3ms, margen suficiente (2026-05-19)
 
 // --- Calibración (2026-05-16 19:25) ---
-#define MAX_CALIBRATION_RETRIES 5    // máx reintentos antes de fallar slave
+#define MAX_CALIBRATION_RETRIES     5   // máx reintentos RS485 timeout durante calibración
+#define SLAVE_CALIB_SETTLE_RESPONSES 5  // respuestas estables antes de disparar auto-calib (2026-05-22)
 
 // --- Fader Logic PitchBend (2026-05-18, confirmado MIDI monitor canal 2) ---
 // signed: min=-8192 (raw 0), max=+6653 (raw 14845) → span = 6653 - (-8192) = 14845

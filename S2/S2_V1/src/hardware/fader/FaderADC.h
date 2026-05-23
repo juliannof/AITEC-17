@@ -43,4 +43,5 @@ private:
     int      _rawLast  = 0;
     uint16_t _calibratedFaderMin = 0;     // Mínimo real del fader (guardado por Motor al calibrar)
     uint16_t _calibratedFaderMax = 27000; // Máximo real del fader (default: máximo teórico)
+    static uint32_t _lastLogTime;
 };

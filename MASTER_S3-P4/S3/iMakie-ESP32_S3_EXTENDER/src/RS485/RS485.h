@@ -38,6 +38,7 @@ struct ChannelData {
     uint8_t  prevEncoderButton = 0;
     bool     calibrated       = false;
     bool     responded        = false;
+    uint8_t  stableRespCount  = 0;    // respuestas estables acumuladas (grace period auto-calib, 2026-05-22)
 
     // Calibración — rango ADC de este slave (enviado por slave post-calib)
     uint16_t calibratedMin    = 0;

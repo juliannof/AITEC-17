@@ -155,9 +155,9 @@ SlavePacket buildResponse(FaderADC& faderADC, SatMenu& satMenu) {
     // Máquina de estado: enviar min/max tras calibración
     if (cs == Motor::CalibState::DONE && _calib_send_state < 2) {
         if (_calib_send_state == 0) {
-            // Paquete 1: enviar MIN
+            // Paquete 1: enviar MIN — sin CALIB_DONE (S3 espera MAX antes de declarar OK)
             resp.faderPos = Motor::getADCMin();
-            resp.buttons |= SLAVE_FLAG_CALIB_DONE | SLAVE_FLAG_CALIB_SENDING | SLAVE_FLAG_CALIB_IS_MIN;
+            resp.buttons |= SLAVE_FLAG_CALIB_SENDING | SLAVE_FLAG_CALIB_IS_MIN;
             _calib_send_state = 1;
         } else if (_calib_send_state == 1) {
             // Paquete 2: enviar MAX

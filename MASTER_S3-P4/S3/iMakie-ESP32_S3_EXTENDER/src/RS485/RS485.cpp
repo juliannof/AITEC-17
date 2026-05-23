@@ -102,7 +102,7 @@ void RS485Master::runTask() {
 
                     // ── Límite de reintentos (2026-05-16 19:25) ──
                     // HALT solo si calibración ACTIVA — no durante operación normal (2026-05-19)
-                    if (_ch[_currentId].calibrated && _ch[_currentId].calibrating && _consecutiveTimeouts > MAX_CALIBRATION_RETRIES) {
+                    if (!_ch[_currentId].calibrated && _ch[_currentId].calibrating && _consecutiveTimeouts > MAX_CALIBRATION_RETRIES) {
                         // ✗ FALLO CRÍTICO: Calibración falló después de máx reintentos (2026-05-16 19:40)
                         pixels.setPixelColor(0, pixels.Color(255, 0, 0));  // Rojo puro
                         pixels.show();
@@ -258,12 +258,20 @@ void RS485Master::_handleResponse() {
         _ch[_currentId].encoderDelta      = resp->encoderDelta;
         _ch[_currentId].prevEncoderButton = _ch[_currentId].encoderButton;
         _ch[_currentId].encoderButton     = resp->encoderButton;
-        // Auto-calibración al primer contacto (boot pre-Logic)
-        if (!_ch[_currentId].responded && !_ch[_currentId].calibrated && !_ch[_currentId].calibrating) {
-            _ch[_currentId].calibrate   = true;
-            _ch[_currentId].calibrating = true;
-            _ch[_currentId].dirty       = true;
-            log_i("[CALIB] Slave %d primer contacto — calibración automática", _currentId);
+        // Auto-calibración con grace period — solo esclavo 1 arranca la cascada (2026-05-22)
+        // Slaves 2..N son disparados en cascada desde calibDone del anterior
+        if (_currentId == 1 && !_ch[_currentId].calibrated && !_ch[_currentId].calibrating) {
+            _ch[_currentId].stableRespCount++;
+            if (_ch[_currentId].stableRespCount >= SLAVE_CALIB_SETTLE_RESPONSES) {
+                _ch[_currentId].calibrate   = true;
+                _ch[_currentId].calibrating = true;
+                _ch[_currentId].dirty       = true;
+                log_i("[CALIB] Slave 1 estable (%d resp) — arrancando cascada de calibración",
+                      _ch[_currentId].stableRespCount);
+            } else {
+                log_d("[CALIB] Slave 1 estabilizando %d/%d",
+                      _ch[_currentId].stableRespCount, SLAVE_CALIB_SETTLE_RESPONSES);
+            }
         }
         _ch[_currentId].responded         = true;
 
@@ -301,12 +309,33 @@ void RS485Master::_handleResponse() {
                 _ch[_currentId].dirty      = true;
                 log_i("[CALIB] Slave %d ✓ CALIBRADO OK: MIN=%d MAX=%d",
                       _currentId, _ch[_currentId].calibratedMin, _ch[_currentId].calibratedMax);
+                // Cascada: disparar siguiente esclavo (2026-05-22)
+                uint8_t next = _currentId + 1;
+                if (next <= _numSlaves && !_ch[next].calibrated && !_ch[next].calibrating) {
+                    _ch[next].calibrate   = true;
+                    _ch[next].calibrating = true;
+                    _ch[next].dirty       = true;
+                    log_i("[CALIB] Cascada → Slave %d", next);
+                } else if (next > _numSlaves) {
+                    log_i("[CALIB] Cascada completa — todos los slaves calibrados");
+                }
             }
         } else if (calibError) {
             _ch[_currentId].calibrating  = false;
             _ch[_currentId].calibRetries++;
-            log_e("[CALIB] Slave %d ✗ ERROR calibración (reintento %d)",
-                  _currentId, _ch[_currentId].calibRetries);
+            if (_ch[_currentId].calibRetries >= MAX_CALIBRATION_RETRIES) {
+                // Demasiados errores: HALT (2026-05-22)
+                pixels.setPixelColor(0, pixels.Color(255, 0, 0));
+                pixels.show();
+                log_e("[CALIB] ✗ FALLO CRÍTICO Slave %d — %d errores de calibración. Sistema DETENIDO.",
+                      _currentId, _ch[_currentId].calibRetries);
+                while(1) delay(1000);
+            } else {
+                // Reset grace period: reintento tras N respuestas estables (no inmediato)
+                _ch[_currentId].stableRespCount = 0;
+                log_e("[CALIB] Slave %d ✗ ERROR calibración (%d/%d) — esperando grace period para reintento",
+                      _currentId, _ch[_currentId].calibRetries, MAX_CALIBRATION_RETRIES);
+            }
         } else {
             // S2 en tránsito — calibrating solo lo limpia CALIB_DONE o CALIB_ERROR
         }

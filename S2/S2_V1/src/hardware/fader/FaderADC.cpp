@@ -2,6 +2,7 @@
 #include "../../config.h"
 
 volatile bool FaderADC::_newData = false;
+uint32_t FaderADC::_lastLogTime = 0;
 
 void IRAM_ATTR FaderADC::_alertISR() {
     _newData = true;
@@ -59,6 +60,13 @@ void FaderADC::update() {
     _rawLast  = (int)adcRaw;
 
     _logReading(adcRaw, _faderPos);
+
+    // Log cada 500ms para debugging setup (si se quita, cambiar a log_v. Nunca borrar)
+    uint32_t now = millis();
+    if (now - _lastLogTime >= 500) {
+        _lastLogTime = now;
+        log_v("[ADC] raw=%d pos=%d min=%d max=%d", adcRaw, _faderPos, _calibratedFaderMin, _calibratedFaderMax);
+    }
 }
 
 void FaderADC::setCalibration(uint16_t minVal, uint16_t maxVal) {

@@ -7,6 +7,393 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### RESUMEN SESIÓN 2026-05-22
+
+**Objetivo de la sesión:** Corregir calibración S3 — "lanza a lo loco" + implementar cascada
+
+**Resuelto ✅**
+
+| Fix | MCU | Archivos | Descripción |
+|-----|-----|----------|-------------|
+| Grace period calibración boot | S3 | `RS485.cpp`, `RS485.h`, `config.h` | Slave 1 espera 5 respuestas estables (~50ms) antes de disparar FLAG_CALIB — evita calibrar antes de que S2 termine su `setup()` |
+| Cascada calibración | S3 | `RS485.cpp` | Slave N+1 se calibra solo cuando Slave N reporta CALIB_DONE — calibración secuencial real |
+| CALIB_ERROR sin bucle infinito | S3 | `RS485.cpp` | Error de calibración resetea grace period (no relanzamiento inmediato); HALT tras MAX_CALIBRATION_RETRIES errores |
+
+**Configuración verificada en hardware (2026-05-22):**
+- `NUM_SLAVES = 1` — confirmado correcto (2026-05-23: 1 esclavo S2 conectado al bus B durante desarrollo)
+- ~~NUM_SLAVES=4~~ — dato incorrecto en sesión anterior, corregido (2026-05-23)
+- A los ~175s de uptime: tasa de timeout 0.1-0.3% (1-2 por cada 1000 ciclos), avg RX_WAIT ~1490µs — sistema estable
+
+**Validado en hardware (2026-05-23):**
+- ✅ Grace period funciona: "Slave 1 estable (5 resp)" se dispara correctamente (t≈1083–1438ms según si Logic está conectado o no)
+- ✅ Cascada completa para 1 slave se declara correctamente
+- ✅ Spike de timeouts en conexión Logic (t≈17437–17624ms) es comportamiento esperado — handshake Mackie en Core 0
+
+**Pendiente 🔴**
+
+| # | Pendiente | Archivos | Descripción |
+|---|-----------|----------|-------------|
+| ~~B4~~ | ~~CALIBRADO OK con MAX=0~~ | ~~S2 `RS485Handler.cpp`~~ | ✅ **RESUELTO (2026-05-23)** — Fix: eliminado `SLAVE_FLAG_CALIB_DONE` del paquete MIN (estado 0 de `buildResponse()`). Ahora S3 recibe MIN→MAX→CALIB_DONE en orden correcto. Validado en hardware: `CALIBRADO OK: MIN=47 MAX=26445` con MAX correcto. |
+| B5 | **Timeout periódico exacto ~2s en S2** — ✅ Fix aplicado, pendiente validación hardware | S2 `Motor.cpp`, `FaderADC.cpp` | Causa raíz: USB CDC backpressure durante calibración — KICK_UP/KICK_DOWN generaban ~80 `log_i` en 250ms (≈16kB/s vs límite ≈12kB/s USB CDC). Bloqueo de CDC retrasaba iteraciones posteriores >3ms → timeout RS485 periódico. Fix: `log_i→log_d` en KICK_UP (Motor.cpp:85) y KICK_DOWN (Motor.cpp:161) + `log_i→log_v` en FaderADC periodic 500ms (FaderADC.cpp:68). Ver sección detallada abajo. |
+| B6 | **HALT por timeout RS485 nunca activa** — ✅ Fix aplicado, pendiente validación hardware | S3 `RS485.cpp:105` | Condición `calibrated && calibrating` siempre `false` durante calibración activa (estado real: `calibrating=true, calibrated=false`). Fix: `calibrated` → `!calibrated`. Ahora el HALT se dispara si slave no responde durante calibración activa. El HALT de `_handleResponse()` (CALIB_ERROR) es independiente y correcto — solo cubre slave que responde pero reporta error. Ver sección detallada abajo. |
+| — | Diagnóstico burst RS485 (~t=939s) | S3 `RS485.cpp` | Causa raíz del colapso simultáneo de slaves pendiente — ver análisis detallado abajo |
+
+**Commits:** pendiente
+
+---
+
+### S3 RS485 — Diagnóstico timeouts operación normal + burst de bus (2026-05-23) — 🔴 PENDIENTE CAUSA RAÍZ
+
+**Contexto:** Monitor serie capturado durante sesión 2026-05-23 con 4 slaves S2 activos. Sistema corriendo en operación normal (post-calibración, Logic conectado). Análisis de ~300 segundos de log (t=705s → t=1010s desde boot).
+
+---
+
+#### Comportamiento normal — baseline confirmado
+
+**Tasa de timeouts en reposo:** 0.1%–0.5% por cada 1000 ciclos RS485.  
+**`avg RX_WAIT`:** 1409µs–1488µs  
+**`min RX_WAIT`:** ~848µs (ciclos limpios sin colisión)  
+**`max RX_WAIT`:** ~3007µs (= `RS485_RESP_TIMEOUT_US` — ciclos con timeout)
+
+Todos los timeouts en fase normal son `#1 consecuciones`. Esto se explica por el comportamiento del contador:
+
+```
+_consecutiveTimeouts es GLOBAL (no por slave).
+Se resetea a 0 en cualquier respuesta exitosa de cualquier slave.
+→ Un timeout de Slave 3 seguido de respuesta de Slave 4: counter vuelve a 0.
+→ El siguiente timeout de Slave 2 aparece como #1 aunque Slave 3 ya falló antes.
+```
+
+**Por qué son normales:** Bus RS485 sin terminación perfecta, EMI del motor DRV8833, ADC ADS1115 en I2C compartido, ISR de encoder, SPI del display. Un slave ocupado en una ISR larga (~200µs) puede no responder a tiempo. El sistema se recupera en el siguiente ciclo.
+
+**Patrón de timeouts aislados (ejemplo real):**
+
+```
+[707954] TIMEOUT slave 3 (#1)   ← ciclo N
+...ciclo N+1: slave 3 responde OK → _consecutiveTimeouts = 0
+[709956] TIMEOUT slave 3 (#1)   ← ciclo N+3 (nuevo timeout, counter reseteado)
+```
+
+---
+
+#### Evento ID MISMATCH (t≈748s) — respuesta tardía
+
+```
+[751808][E][RS485.cpp:225] _handleResponse(): [RS485] ID MISMATCH esperado=1 recibido=4
+```
+
+**Causa:** Durante la mini-ráfaga previa a este timestamp, el slave 4 no había respondido en su ventana. Su respuesta llegó tarde al buffer UART. Cuando S3 ya había avanzado al slave 1 y abrió su ventana de recepción, la respuesta de slave 4 todavía estaba en el buffer → S3 la recibió como si fuera de slave 1 → mismatch.
+
+**Nota temporal:** En este mismo timestamp se registra `[748711] PLAY=0 STOP=1` (Logic Pro enviando STOP). La correlación puede ser coincidencia o puede indicar que el mensaje STOP generó actividad USB-MIDI que retrasó el procesamiento RS485 en S3 (mismo core).
+
+**Impacto:** Ninguno en operación — la respuesta de slave 1 real llegó en el siguiente ciclo. El paquete mal identificado fue descartado por ID mismatch.
+
+---
+
+#### Evento crítico — burst total de bus (t≈939s–944s)
+
+**Duración del evento:** ~5 segundos  
+**Ciclo Profiler 366:** `TO: 6.7% (67/1000)` — pico máximo observado  
+**Ciclo Profiler 367:** `TO: 4.4% (44/1000)` — decaimiento  
+**Ciclo Profiler 368:** `TO: 2.1% (21/1000)` — recuperación  
+**Ciclos siguientes:** retorno a baseline 0.1%–0.5%
+
+**Log del inicio del burst:**
+
+```
+[938958] TIMEOUT slave 3  (#1)   ← comienzo, normal aún
+[939303] TIMEOUT slave 1  (#1)
+[939314] TIMEOUT slave 2  (#2)   ← counter no reseteó: slave 1 también falló
+[939325] TIMEOUT slave 3  (#3)   ← counter sube: 3 slaves fallaron consecutivamente
+[939358] TIMEOUT slave 2  (#10)  ← 7 ciclos más sin respuesta (no logueados por regla ≤3 y %10)
+[939800] TIMEOUT slave 2  (#1)   ← counter reseteó: alguno respondió, luego nueva ráfaga
+[939811] TIMEOUT slave 3  (#2)
+[939822] TIMEOUT slave 4  (#3)
+[939856] TIMEOUT slave 3  (#10)  ← nueva ola: counter llega a 10 de nuevo
+...
+[940957] TIMEOUT slave 1  (#10)  ← slave 1 también con 10 consecutivos
+```
+
+**Interpretación del contador global:**  
+Cuando `_consecutiveTimeouts` llega a `#10`, significa que **10 rondas del round-robin completas fallaron sin una sola respuesta exitosa** de ninguno de los 4 slaves. Esto descarta fallo individual — todos los slaves estuvieron silentes simultáneamente durante ~200–500ms.
+
+**Regla de logging (RS485.cpp línea 99):**
+
+```cpp
+if (_consecutiveTimeouts <= 3 || _consecutiveTimeouts % 10 == 0)
+    log_w(...)
+```
+
+→ Se logea en #1, #2, #3, #10, #20, #30... El salto visible de `#3` a `#10` indica que los ciclos #4 al #9 fallaron pero no se loguearon.
+
+**Señal de recuperación:** El `avg RX_WAIT` subió de ~1420µs (baseline) a ~1599µs en ciclo 366, y no volvió al baseline hasta ~ciclo 370 (t≈951s). Los slaves tardaron ~12 segundos en estabilizarse completamente post-evento.
+
+---
+
+#### Diagnóstico de causa raíz — hipótesis ordenadas por probabilidad
+
+| # | Hipótesis | Evidencia a favor | Cómo descartar |
+|---|-----------|------------------|----------------|
+| 1 | **Spike EMI/eléctrico en bus RS485** | Todos los slaves callaron simultáneamente; recuperación espontánea; sin HALT ni error crítico | Osciloscopio en línea RS485 buscando spike de tensión |
+| 2 | **Microcorte de alimentación** en rail 3.3V de slaves | Arranque simultáneo coherente con power glitch; ~500ms duración típica de un reset | Medir 3.3V con osciloscopio o LED testigo en rail |
+| 3 | **Bloqueo de task RS485 en S3** (mutex o ISR) | `avg RX_WAIT` sube post-evento (overhead); S3 procesa USB-MIDI en mismo core | Analizar si hay actividad MIDI intensa justo antes de t=939s |
+| 4 | **Contacto mecánico inestable** (conector RS485, cable) | Coincide con duración de un perturbación mecánica (~500ms) | Apretar conectores y repetir test |
+| 5 | **Reset simultáneo de slaves** por watchdog o panic | Posible si todos los S2 tienen el mismo firmware con mismo bug | Activar log de reset reason en S2 (`esp_reset_reason()`) |
+
+---
+
+#### Impacto operativo
+
+| Aspecto | Resultado |
+|---------|-----------|
+| HALT S3 | ❌ No ocurrió — `calibrating=false` post-calibración → condición HALT no aplica |
+| LED rojo | ❌ No ocurrió |
+| Datos corruptos | ❌ No — CRC protege paquetes; timeouts solo descartan ciclos |
+| Faders físicos | ⚠️ Motor en los 4 slaves probablemente quedó en última posición ~500ms sin nuevos targets |
+| Logic Pro | ⚠️ PitchBend feedback interrumpido ~500ms (S3 no recibió `faderPos` de slaves) |
+| Recuperación | ✅ Automática y completa en ~12 segundos |
+
+---
+
+#### Acción requerida
+
+- [ ] **Identificar qué ocurrió físicamente a t≈939s** — ¿se tocó algún cable, fuente, o rack?
+- [ ] **Añadir log de reset reason en S2 boot** — `esp_reset_reason()` → `Serial.printf` → determinar si los slaves resetearon
+- [ ] **Medir rail 3.3V con osciloscopio** durante operación normal — buscar caídas de tensión al mover faders (pico motor)
+- [ ] **Correlacionar con actividad MIDI** — capturar `micros()` justo antes del burst para confirmar/descartar bloqueo de task
+- [ ] **Si bug reproducible:** considerar aumentar `RS485_RESP_TIMEOUT_US` o implementar backoff exponencial en timeouts consecutivos
+
+**Archivos involucrados (solo lectura/observación, no cambios aún):**
+- `MASTER_S3-P4/S3/iMakie-ESP32_S3_EXTENDER/src/RS485/RS485.cpp` — `runTask()`, `WAIT_RESP`, `_consecutiveTimeouts`
+- `MASTER_S3-P4/S3/iMakie-ESP32_S3_EXTENDER/src/RS485/Profiler.h` — `_reportStats()` ciclos 366-368
+
+**Riesgo actual:** BAJO — el sistema se recupera solo. Sin HALT, sin corrupción de datos. Prioridad de investigación: MEDIA (entender causa antes de desplegar en producción con 8 slaves).
+
+---
+
+### Bug B5 — Timeout periódico exacto ~2s en S2 durante calibración (2026-05-23) — ✅ Fix aplicado / 🔴 Pendiente validación hardware
+
+**Síntoma observado:**
+
+Cada exactamente ~2001ms, el Slave 1 no respondía en la ventana RS485 → S3 registraba timeout `#1 consecución`. El patrón era perfectamente periódico (no aleatorio), lo que indicaba causa determinista. La recuperación era automática en el siguiente ciclo.
+
+**Hipótesis descartadas:**
+- ❌ Timer interno S2 (no hay `setInterval` o timer en 2s en S2)
+- ❌ Display SPI3 bloqueando Core (SPI no tiene transferencias de 2s)
+- ❌ Motor update periódico (Motor::update() es continuo, no periódico)
+- ❌ WiFi scan (WiFi eliminado de S2 en sesión 2026-05-20)
+
+**Causa raíz identificada — USB CDC backpressure:**
+
+Durante la calibración, las fases `KICK_UP` y `KICK_DOWN` en `Motor.cpp` ejecutaban `log_i` en cada iteración del loop (~3ms/iteración). Esto generaba aproximadamente **80 mensajes `log_i` en los 250ms** que duran estas fases.
+
+Volumen de bytes estimado:
+```
+Mensaje típico: "[CALIB] KICK_UP adc=14232 (t=178 ms) pwm=210" → ~48 bytes
+80 mensajes × 48 bytes = ~3840 bytes en 250ms
+Tasa = ~15,360 bytes/s
+```
+
+El límite del USB CDC en el S2 (single-core, pioarduino IDF5) es aproximadamente **12,000 bytes/s**. El buffer TX de USB CDC se llenaba → las siguientes llamadas `log_i` **bloqueaban** hasta que el host vaciara el buffer. Un bloqueo de >3ms en la iteración del loop impedía responder a la ventana RS485 de S3 → timeout.
+
+El patrón exacto de 2001ms coincide con el `POLL_CYCLE_MS=10ms × ~200 ciclos` necesarios para que el backlog de CDC se propague y bloquee la siguiente iteración lo suficiente.
+
+El log periódico de `FaderADC.cpp` (500ms) también contribuía marginalmente con `log_i` → cambiado a `log_v` para eliminar su aporte.
+
+**Fix aplicado (2026-05-23):**
+
+| Archivo | Línea | Cambio | Razón |
+|---------|-------|--------|-------|
+| `S2/S2_V1/src/hardware/Motor/Motor.cpp` | 85 | `log_i` → `log_d` en KICK_UP | Elimina ~40 msgs/s durante calibración |
+| `S2/S2_V1/src/hardware/Motor/Motor.cpp` | 161 | `log_i` → `log_d` en KICK_DOWN | Elimina ~40 msgs/s durante calibración |
+| `S2/S2_V1/src/hardware/fader/FaderADC.cpp` | 68 | `log_i` → `log_v` en periodic 500ms | Elimina contribución marginal |
+
+```cpp
+// Motor.cpp línea 85 — ANTES:
+log_i("[CALIB] KICK_UP adc=%d (t=%ld ms) pwm=%d", pos, now - _motor_phaseStart, _pwm_max);
+// DESPUÉS:
+log_d("[CALIB] KICK_UP adc=%d (t=%ld ms) pwm=%d", pos, now - _motor_phaseStart, _pwm_max);
+
+// Motor.cpp línea 161 — ANTES:
+log_i("[CALIB] KICK_DOWN adc=%d (t=%ld ms) pwm=%d", pos, now - _motor_phaseStart, _pwm_max);
+// DESPUÉS:
+log_d("[CALIB] KICK_DOWN adc=%d (t=%ld ms) pwm=%d", pos, now - _motor_phaseStart, _pwm_max);
+
+// FaderADC.cpp línea 68 — ANTES:
+log_i("[ADC] raw=%d pos=%d min=%d max=%d", adcRaw, _faderPos, _calibratedFaderMin, _calibratedFaderMax);
+// DESPUÉS:
+log_v("[ADC] raw=%d pos=%d min=%d max=%d", adcRaw, _faderPos, _calibratedFaderMin, _calibratedFaderMax);
+```
+
+**Nota de diseño (FaderADC.cpp):** El comentario `// Log cada 500ms para debugging setup (si se quita, cambiar a log_v. Nunca borrar)` ya estaba presente desde sesión anterior. El `log_v` no se compila cuando `CORE_DEBUG_LEVEL < 5` → sin impacto en producción.
+
+**MCU afectadas:**
+
+| MCU | Afectado | Razón |
+|-----|----------|-------|
+| S2 (Slave) | ✅ SÍ | Cambios en Motor.cpp y FaderADC.cpp |
+| S3 (Extender) | ❌ No | Observador del síntoma (timeout), sin cambios |
+| P4 (Master) | ❌ No | No involucrado |
+
+**Riesgo:** BAJO — reducción de verbosidad de log, sin cambio funcional. `log_d` visible con `CORE_DEBUG_LEVEL=4`, `log_v` visible con `CORE_DEBUG_LEVEL=5`.
+
+**⚠️ VALIDACIÓN HARDWARE PENDIENTE:**
+- [ ] Flash S2 con Motor.cpp y FaderADC.cpp actualizados
+- [ ] Monitor serie S3 post-boot: timeouts de 2001ms deben desaparecer o volverse irregulares
+- [ ] Calibración completa: S3 recibe `CALIBRADO OK: MIN=XX MAX=XXXXX` correctamente
+- [ ] Operación normal post-calibración: tasa timeout ≤ 0.5% (baseline normal)
+
+---
+
+### Bug B6 — HALT por timeout RS485 no se dispara durante calibración (2026-05-23) — 🔴 Pendiente aplicar fix
+
+**Contexto:** La condición HALT en `S3/RS485.cpp::runTask()` está diseñada para detectar cuando un slave no responde en absoluto durante calibración activa → LED rojo + loop infinito. En la práctica, esta condición nunca se puede cumplir.
+
+**Causa raíz — condición lógicamente imposible:**
+
+```cpp
+// S3/RS485.cpp línea 105 (aproximado) — código actual:
+if (_ch[_currentId].calibrated && _ch[_currentId].calibrating && _consecutiveTimeouts > MAX_CALIBRATION_RETRIES)
+```
+
+Durante calibración activa, el estado del canal es:
+```
+calibrating = true   (S3 está esperando que el slave calibre)
+calibrated  = false  (slave AÚN no ha completado calibración)
+```
+
+La condición requiere `calibrated && calibrating` → `false && true` → **siempre false**. El HALT **nunca** se dispara durante calibración.
+
+**El HALT existente no cubre este caso:**
+
+El HALT en `_handleResponse()` (CALIB_ERROR) solo se activa cuando el slave **responde** con flag `SLAVE_FLAG_CALIB_ERROR`. Si el slave no responde en absoluto (RS485 muerto, S2 desconectado), `_handleResponse()` nunca se llama → CALIB_ERROR nunca se detecta.
+
+**Cobertura de errores actual vs. esperada:**
+
+| Escenario | _handleResponse HALT | runTask HALT (actual) | Comportamiento real |
+|-----------|---------------------|-----------------------|---------------------|
+| Slave responde con error | ✅ Se dispara | ❌ No aplica | LED rojo, correcto |
+| Slave no responde (RS485 muerto) | ❌ No se llama | ❌ Condición imposible | **Timeout infinito, sin LED rojo** |
+
+**Fix propuesto:**
+
+```cpp
+// ANTES (línea ~105 en RS485.cpp):
+if (_ch[_currentId].calibrated && _ch[_currentId].calibrating && _consecutiveTimeouts > MAX_CALIBRATION_RETRIES)
+
+// DESPUÉS:
+if (!_ch[_currentId].calibrated && _ch[_currentId].calibrating && _consecutiveTimeouts > MAX_CALIBRATION_RETRIES)
+```
+
+El cambio `calibrated` → `!calibrated` hace la condición evaluable durante calibración activa:
+```
+!calibrated && calibrating = !false && true = true && true = true ✓
+```
+
+Si el slave no responde `MAX_CALIBRATION_RETRIES` veces consecutivas **durante calibración** → LED rojo + HALT.
+
+**Archivos afectados:**
+
+| MCU | Archivo | Línea | Cambio |
+|-----|---------|-------|--------|
+| S3 (Extender) | `MASTER_S3-P4/S3/iMakie-ESP32_S3_EXTENDER/src/RS485/RS485.cpp` | ~105 | `calibrated &&` → `!calibrated &&` |
+| S2 (Slave) | — | — | Sin cambios |
+| P4 (Master) | — | — | Sin cambios |
+
+**Riesgo:** BAJO — el fix activa una rama de código que actualmente nunca se ejecuta. No afecta el camino normal (slave responde). No afecta la operación post-calibración (cuando `calibrating=false`).
+
+**Nota:** Durante operación normal (post-calibración), `calibrating=false` → condición `!calibrated && calibrating` = `X && false` = false → HALT nunca dispara en operación normal. Correcto.
+
+**⚠️ VALIDACIÓN HARDWARE PENDIENTE (post-fix):**
+- [ ] Flash S3 con fix aplicado
+- [ ] Desconectar S2 físicamente durante calibración → S3 debe mostrar LED rojo tras ~50ms (5 timeouts × 10ms)
+- [ ] Log: `[CALIB] ✗ FALLO CRÍTICO Slave 1 — comunicación perdida. Sistema DETENIDO.`
+- [ ] Operación normal con S2 conectado: sin HALT espurio
+
+---
+
+### S3 — Calibración boot con grace period + cascada (2026-05-22 18:02) — ✅ APLICADO
+
+**Dos bugs corregidos en `RS485.cpp::_handleResponse()`:**
+
+---
+
+**Bug 1 — Grace period (no esperar al esclavo):**
+
+S3 disparaba FLAG_CALIB en la **primera** respuesta válida del esclavo. El esclavo podía estar en medio de su `setup()` (ADS1115, motor, display no inicializados aún).
+
+Fix: contador `stableRespCount` — solo dispara cuando esclavo alcanza `SLAVE_CALIB_SETTLE_RESPONSES = 5` respuestas consecutivas (~50ms con `POLL_CYCLE_MS=10`).
+
+```cpp
+// config.h S3 — nueva constante:
+#define SLAVE_CALIB_SETTLE_RESPONSES 5
+
+// RS485.h ChannelData — nuevo campo:
+uint8_t stableRespCount = 0;
+
+// RS485.cpp _handleResponse() — ANTES:
+if (!_ch[id].responded && !_ch[id].calibrated && !_ch[id].calibrating)
+    → disparo inmediato en 1ª respuesta
+
+// DESPUÉS:
+if (_currentId == 1 && !_ch[id].calibrated && !_ch[id].calibrating) {
+    _ch[id].stableRespCount++;
+    if (_ch[id].stableRespCount >= SLAVE_CALIB_SETTLE_RESPONSES)
+        → disparo tras 5 respuestas estables
+}
+```
+
+---
+
+**Bug 2 — CALIB_ERROR relanzaba bucle infinito:**
+
+Cuando el esclavo reportaba `CALIB_ERROR`: `calibrating=false`, `calibrated=false` → siguiente ciclo: condición verdadera → relanzamiento inmediato → fallo → bucle.
+
+Fix: en `CALIB_ERROR` → resetear `stableRespCount=0` (el reintento solo ocurre tras otra grace period completa). Si `calibRetries >= MAX_CALIBRATION_RETRIES` → LED rojo + HALT.
+
+---
+
+**Cascada event-driven (2026-05-22 18:10):**
+
+Antes: todos los slaves se auto-disparaban de forma independiente al alcanzar su grace period → calibración simultánea.
+
+Fix: solo Slave 1 se dispara automáticamente. Al recibir `CALIB_DONE` de Slave N → dispara Slave N+1.
+
+```cpp
+// En calibDone:
+uint8_t next = _currentId + 1;
+if (next <= _numSlaves && !_ch[next].calibrated && !_ch[next].calibrating) {
+    _ch[next].calibrate   = true;
+    _ch[next].calibrating = true;
+    log_i("[CALIB] Cascada → Slave %d", next);
+}
+```
+
+**Flujo resultante:**
+```
+Boot → Slave 1 estabiliza 5 resp → FLAG_CALIB
+Slave 1 CALIB_DONE → Slave 2 FLAG_CALIB
+Slave 2 CALIB_DONE → Slave 3 FLAG_CALIB
+...
+Slave N CALIB_DONE → log "Cascada completa"
+```
+
+**Archivos modificados:**
+- `MASTER_S3-P4/S3/iMakie-ESP32_S3_EXTENDER/src/config.h` — `SLAVE_CALIB_SETTLE_RESPONSES`
+- `MASTER_S3-P4/S3/iMakie-ESP32_S3_EXTENDER/src/RS485/RS485.h` — `stableRespCount` en `ChannelData`
+- `MASTER_S3-P4/S3/iMakie-ESP32_S3_EXTENDER/src/RS485/RS485.cpp` — grace period + cascada + error handling
+
+**Documentación actualizada:** `docs/RS485.md` §4.3
+
+**⚠️ VALIDACIÓN HARDWARE:**
+- [ ] Monitor serie boot S3 — secuencia `estabilizando 1/5` ... `5/5` → `arrancando cascada`
+- [ ] Slave 1 calibra → log `CALIBRADO OK` → aparece `Cascada → Slave 2`
+- [ ] Sin calibración simultánea de múltiples slaves
+- [ ] Con un solo slave: `Cascada completa` aparece tras CALIB_DONE de Slave 1
+- [ ] Error de calibración: no bucle infinito, reintenta tras nueva grace period
+
+---
+
 ### BUG B3 — Fader 2 sube al inicializar Logic sin proyecto abierto (2026-05-20 17:45) — 🔴 PENDIENTE INVESTIGAR
 
 **Síntoma:** Al inicializar Logic Pro (sin ningún proyecto abierto), el fader 1 se queda en 0 pero el fader 2 sube ligeramente. El movimiento ocurre antes de que se abra ningún track.

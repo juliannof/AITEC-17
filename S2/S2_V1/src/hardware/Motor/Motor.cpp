@@ -82,7 +82,7 @@ static void _calibUpdate() {
     switch (_motor_phase) {
 
     case CalibPhase::KICK_UP:
-        log_i("[CALIB] KICK_UP adc=%d (t=%ld ms) pwm=%d", pos, now - _motor_phaseStart, _pwm_max);
+        log_d("[CALIB] KICK_UP adc=%d (t=%ld ms) pwm=%d", pos, now - _motor_phaseStart, _pwm_max);
         if (pos >= 26000) {
             now = millis();  // Recapturar timestamp fresco
             _motor_phase       = CalibPhase::GOING_UP;
@@ -158,7 +158,7 @@ static void _calibUpdate() {
         break;
 
     case CalibPhase::KICK_DOWN:
-        log_i("[CALIB] KICK_DOWN adc=%d (t=%ld ms) pwm=%d", pos, now - _motor_phaseStart, _pwm_max);
+        log_d("[CALIB] KICK_DOWN adc=%d (t=%ld ms) pwm=%d", pos, now - _motor_phaseStart, _pwm_max);
         if (pos <= 200) {
             now = millis();  // Recapturar timestamp fresco
             _motor_phase       = CalibPhase::GOING_DOWN;
