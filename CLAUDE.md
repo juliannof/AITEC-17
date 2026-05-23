@@ -39,6 +39,17 @@
   - Formato: `(YYYY-MM-DD HH:MM)` ejemplo: `(2026-05-11 09:00)`
   - Esto asegura que la hora en commits es real, no adivinada
 
+**FW_REVISION — Contador de revisiones acumulado S2 (2026-05-23 12:00):**
+- `FW_REVISION` vive en `S2/S2_V1/src/config.h` como `#define FW_REVISION N`
+- **Incrementar FW_REVISION en cada sesión que entregue cambios funcionales en S2**
+- Esquema versión auto-generado en `pre_build.py`: `0.{sistemas_ok}.{FW_REVISION}`
+  - MAJOR = 0 fijo (fase debug)
+  - MINOR = count(HW_STATUS == 2) — sistemas completamente funcionales
+  - PATCH = FW_REVISION — contador de revisiones, solo sube, nunca baja
+- **Cuándo subir MINOR:** cuando un sistema pasa de status=1 a status=2 en config.h
+- **Cuándo subir PATCH:** al hacer commit de una sesión con cambios funcionales en S2
+- Esta regla es VINCULANTE
+
 **COMPILACIÓN — PROHIBIDO COMPLETAMENTE (2026-05-10 19:30):**
 - **NUNCA compilar bajo ningún concepto ni circunstancia**
 - No invocar platformio, pio, python, o herramientas de build

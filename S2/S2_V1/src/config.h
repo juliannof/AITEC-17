@@ -30,9 +30,11 @@ enum class ConnectionState {
 // HW_STATUS: Fader=0
 // HW_STATUS: TouchFader=1
 // HW_STATUS: NeoPixels=2
-// HW_STATUS: Touch=1
+// HW_STATUS: Touch=0
 // HW_STATUS: Encoder=2
 // HW_STATUS: Buttons=2
+
+#define FW_REVISION 2  // Contador acumulado de revisiones — incrementar por sesión funcional
 
 
 // ===================================

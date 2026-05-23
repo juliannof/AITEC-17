@@ -7,6 +7,30 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### SESIÓN 2026-05-23 — Versionado automático FW (11:30)
+
+**Objetivo:** Automatizar número de versión FW en `pre_build.py` basado en estado real de sistemas.
+
+**Esquema de versión `MAJOR.MINOR.PATCH`:**
+- `MAJOR = 0` — fase debug (fijo, cambio manual al pasar a release)
+- `MINOR` = count(HW_STATUS == 2) — sistemas completamente funcionales en `config.h`
+- `PATCH` = `FW_REVISION` — contador acumulado de revisiones, solo sube, definido en `config.h`
+
+**Cambios aplicados:**
+
+| Archivo | Cambio | Razón |
+|---------|--------|-------|
+| `S2/S2_V1/src/config.h` | `Touch=1` → `Touch=0` | Touch profundamente inoperativo — excluido del conteo MINOR |
+| `S2/S2_V1/src/config.h` | Añade `#define FW_REVISION 2` | Fuente única del contador de revisiones |
+| `S2/S2_V1/pre_build.py` | `fw_ver` derivado automáticamente | MINOR=count(status==2), PATCH=FW_REVISION |
+| `CLAUDE.md` | Directiva `FW_REVISION` obligatoria | Regla vinculante: incrementar por sesión funcional |
+
+**Versión resultante:** `0.4.2` (4 sistemas OK: Display, NeoPixels, Encoder, Buttons — revisión 2)
+
+**Directiva:** Para futuras sesiones — incrementar `FW_REVISION` en `config.h` al final de cada sesión con cambios funcionales en S2.
+
+---
+
 ### RESUMEN SESIÓN 2026-05-22
 
 **Objetivo de la sesión:** Corregir calibración S3 — "lanza a lo loco" + implementar cascada
