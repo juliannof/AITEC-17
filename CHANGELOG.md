@@ -35,16 +35,28 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 **Problema:** `default_16MB.csv` estaba vacío → PlatformIO usaba tabla de particiones por defecto del board (`esp32-s3-devkitc-1`), que es 8MB → app partition reportada como 6553600 bytes (6.25MB) en lugar de los ~15MB correctos para hardware N16R8 sin OTA.
 
+**Causa raíz:** PlatformIO usa el `default_16MB.csv` del framework (`~/.platformio/packages/framework-arduinoespressif32/tools/partitions/`) en lugar del archivo local cuando hay colisión de nombre. El del framework tiene OTA + `app0=0x640000` (8MB layout).
+
 **Fix:**
 
 | Archivo | Cambio |
 |---------|--------|
-| `MASTER_S3-P4/S3/.../default_16MB.csv` | Rellenado con tabla correcta para 16MB sin OTA + LittleFS |
+| `default_16MB.csv` → `s3_extender_16MB.csv` | Renombrado para evitar colisión con framework |
+| `platformio.ini` | `board_build.partitions = s3_extender_16MB.csv` |
 
-**Tabla aplicada:**
+**Tabla aplicada (`s3_extender_16MB.csv`):**
 - `nvs` 20KB · `app0` (factory) 14.93MB · `littlefs` 1MB
 - Sin OTA — S3 Extender no tiene OTA, `app1` y `otadata` eliminadas
-- Flash app correcta tras compilar: `15663104 bytes` (~14.93MB) — hardware N16R8 16MB QIO
+
+**Warnings USB eliminados:**
+- `-DARDUINO_USB_MODE=0` y flags USB redundantes eliminados de `build_flags`
+- Board ya defaultea a TinyUSB (modo 0) — MIDI USB validado operativo tras el cambio
+
+**Resultado validado en hardware:**
+```
+RAM:   [=  ]  14.6% (used 47700 bytes from 327680 bytes)
+Flash: [   ]   2.5% (used 418574 bytes from 16777216 bytes)
+```
 
 ---
 
