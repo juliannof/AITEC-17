@@ -22,19 +22,26 @@ enum class ConnectionState {
 // ===================================
 // --- HARDWARE STATUS (para pre_build.py) ---
 // ===================================
-// Escala: 0=No implementado (Rojo), 1=En Progreso (Naranja), 2=Implementado (Blanco)
-// HW_STATUS: Motor=0
-// HW_STATUS: RS485=1
-// HW_STATUS: Display=2
-// HW_STATUS: ADC=0
-// HW_STATUS: Fader=0
-// HW_STATUS: TouchFader=1
-// HW_STATUS: NeoPixels=2
-// HW_STATUS: Touch=0
-// HW_STATUS: Encoder=2
-// HW_STATUS: Buttons=2
+// Escala: 0=Descartado/No implementado  1=En progreso  2=Estable
+//
+// HW_STATUS: Motor=1       DRV8833 OK. Logic→S2 funciona. S2→Logic (touch report) en progreso.
+// HW_STATUS: RS485=1       Comunicación funcional. Timeouts periódicos pendientes.
+// HW_STATUS: Display=2     ST7789V3 + LovyanGFX. Dibuja perfecto. Ver HW_DISPLAY abajo.
+// HW_STATUS: ADC=2         ADS1115 resolvió todos los problemas. Estable.
+// HW_STATUS: Fader=1       Lectura ADC OK. Mapeo Logic↔ADC en progreso.
+// HW_STATUS: FaderTouch=1  Pin T capacitivo. Base sólida. Falsos positivos en calibración pendientes.
+// HW_STATUS: NeoPixels=2   WS2812B con nueva librería. Estable.
+// HW_STATUS: Encoder=1     ISR Gray code OK. S2→Logic no funciona aún.
+// HW_STATUS: Buttons=2     Debounce estable, sin retrasos. Mapeo MIDI correcto.
+//
+// --- DISPLAY SUBSYSTEMS (solo documentación — pre_build.py ignora HW_DISPLAY) ---
+// HW_DISPLAY: RecordMode=2   Modo grabación funciona
+// HW_DISPLAY: VUMeter=2      VU dibuja bien
+// HW_DISPLAY: TrackName=2    Nombre de pista correcto
+// HW_DISPLAY: dB=1           En progreso
+// HW_DISPLAY: VPotEncoder=1  Encoder ring en display, en progreso
 
-#define FW_REVISION 2  // Contador acumulado de revisiones — incrementar por sesión funcional
+#define FW_REVISION 2  // Auto-bump: sube en cada upload (pre_upload.py) y en cada commit S2 (pre-commit hook)
 
 
 // ===================================

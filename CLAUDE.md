@@ -39,15 +39,17 @@
   - Formato: `(YYYY-MM-DD HH:MM)` ejemplo: `(2026-05-11 09:00)`
   - Esto asegura que la hora en commits es real, no adivinada
 
-**FW_REVISION — Contador de revisiones acumulado S2 (2026-05-23 12:00):**
+**FW_REVISION — Versionado automático S2 (2026-05-23 12:00):**
 - `FW_REVISION` vive en `S2/S2_V1/src/config.h` como `#define FW_REVISION N`
-- **Incrementar FW_REVISION en cada sesión que entregue cambios funcionales en S2**
-- Esquema versión auto-generado en `pre_build.py`: `0.{sistemas_ok}.{FW_REVISION}`
-  - MAJOR = 0 fijo (fase debug)
+- **NO modificar manualmente** — se gestiona automáticamente:
+  - `pre_upload.py`: bump en cada flash a hardware + log en CHANGELOG
+  - `.git/hooks/pre-commit`: bump en cada commit con cambios S2 (si pre_upload no corrió)
+- Esquema versión auto-generado en `pre_build.py`: `0.{MINOR}.{FW_REVISION}`
+  - MAJOR = 0 fijo (fase debug, hasta producción)
   - MINOR = count(HW_STATUS == 2) — sistemas completamente funcionales
-  - PATCH = FW_REVISION — contador de revisiones, solo sube, nunca baja
-- **Cuándo subir MINOR:** cuando un sistema pasa de status=1 a status=2 en config.h
-- **Cuándo subir PATCH:** al hacer commit de una sesión con cambios funcionales en S2
+  - PATCH = FW_REVISION — contador acumulado de uploads/commits, solo sube
+- **Cuándo subir MINOR:** cambiar un sistema de status=1 a status=2 en config.h (decisión humana)
+- **S3 no tiene este mecanismo** — solo aplica a S2
 - Esta regla es VINCULANTE
 
 **COMPILACIÓN — PROHIBIDO COMPLETAMENTE (2026-05-10 19:30):**

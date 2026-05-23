@@ -9,7 +9,7 @@ hw_status_str = ""
 config_path = "src/config.h"
 hw_components = [
     "Motor", "RS485", "Display", "ADC", "Fader",
-    "TouchFader", "NeoPixels", "Touch", "Encoder", "Buttons"
+    "FaderTouch", "NeoPixels", "Encoder", "Buttons"
 ]
 
 try:
