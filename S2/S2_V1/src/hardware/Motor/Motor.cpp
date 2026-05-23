@@ -636,6 +636,9 @@ void requestCalibration() {
     // S2 reporta CALIB_DONE vía SlavePacket → S3 detecta y pasa a siguiente slave
     // SIN estado pendiente, SIN bloqueos, evaluación PURA de estado actual
 
+    // No interrumpir calibración activa — S3 llama cada 10ms, guard idempotente (2026-05-23)
+    if (_isCalibrating() || _motor_state == MotorState::CALIBRATING) return;
+
     if (_motor_adcPos <= (MOTOR_ADC_MIN + 10)) {
         // Fader EN 0 → calibrar directamente
         if (_motor_state != MotorState::CALIBRATING) {
