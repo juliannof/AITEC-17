@@ -31,6 +31,23 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 ---
 
+### SESIÓN 2026-05-23 — Fix particiones S3 16MB (11:30)
+
+**Problema:** `default_16MB.csv` estaba vacío → PlatformIO usaba tabla de particiones por defecto del board (`esp32-s3-devkitc-1`), que es 8MB → app partition reportada como 6553600 bytes (6.25MB) en lugar de los ~15MB correctos para hardware N16R8 sin OTA.
+
+**Fix:**
+
+| Archivo | Cambio |
+|---------|--------|
+| `MASTER_S3-P4/S3/.../default_16MB.csv` | Rellenado con tabla correcta para 16MB sin OTA + LittleFS |
+
+**Tabla aplicada:**
+- `nvs` 20KB · `app0` (factory) 14.93MB · `littlefs` 1MB
+- Sin OTA — S3 Extender no tiene OTA, `app1` y `otadata` eliminadas
+- Flash app correcta tras compilar: `15663104 bytes` (~14.93MB) — hardware N16R8 16MB QIO
+
+---
+
 ### RESUMEN SESIÓN 2026-05-22
 
 **Objetivo de la sesión:** Corregir calibración S3 — "lanza a lo loco" + implementar cascada
