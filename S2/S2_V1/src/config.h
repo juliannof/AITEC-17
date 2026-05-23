@@ -41,7 +41,13 @@ enum class ConnectionState {
 // HW_DISPLAY: dB=1           En progreso
 // HW_DISPLAY: VPotEncoder=1  Encoder ring en display, en progreso
 
-#define FW_REVISION 2  // Auto-bump: sube en cada upload (pre_upload.py) y en cada commit S2 (pre-commit hook)
+// ⚠️ ============================================================ ⚠️
+// 🚫  NO TOCAR FW_REVISION  —  SE GESTIONA AUTOMÁTICAMENTE       🚫
+//     • pre_upload.py  →  sube en cada flash a hardware
+//     • pre-commit     →  sube en cada commit con cambios S2
+//     Modificarlo a mano rompe el historial de versiones
+// ⚠️ ============================================================ ⚠️
+#define FW_REVISION 2
 
 
 // ===================================
