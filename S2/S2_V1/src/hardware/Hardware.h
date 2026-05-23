@@ -25,7 +25,5 @@ void initHardware();
 void updateButtons();
 void registerButtonPressCallback(ButtonId id, ButtonPressCallback callback);
 void registerButtonEventCallback(ButtonEventCallback callback);
-void registerFaderTouchCallback(ButtonPressCallback callback);
-void registerFaderReleaseCallback(ButtonPressCallback callback);
 void setLedBuiltin(bool state);
 void toggleLedBuiltin();

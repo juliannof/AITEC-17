@@ -257,7 +257,6 @@ void loop() {
     // OTA siempre tiene máxima prioridad, incluso si SAT está abierto
     // Actualizar ADC SIEMPRE (incluso en SAT) para Test Mode live feedback (2026-05-10 21:57)
     faderADC.update();
-    FaderTouch::update();
     Motor::setADCDelta(faderADC.getFaderPos());  // Detecta movimiento manual (delta ADC rápido) — 2026-05-16
     Motor::setADC(faderADC.getFaderPos());  // Motor recibe ADC ANTES de SAT check
 
@@ -321,6 +320,10 @@ void loop() {
     if (!(satMenu && satMenu->isOpen())) {
         Motor::update();
     }
+
+    // FaderTouch DESPUÉS de sendResponse — no bloquea el path crítico RS485 (2026-05-23 19:48)
+    // touchRead (3 muestras) ya no está en el camino de respuesta a S3
+    FaderTouch::update();
 
     // ─── AUTO-CALIB DESACTIVADO — S3 ordena vía RS485 FLAG_CALIB (2026-05-16 07:48) ───
     // Razón: Arquitectura maestro-esclavo — S3 es autoridad única para calibración

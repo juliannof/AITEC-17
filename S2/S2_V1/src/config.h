@@ -47,7 +47,7 @@ enum class ConnectionState {
 //     • pre-commit     →  sube en cada commit con cambios S2
 //     Modificarlo a mano rompe el historial de versiones
 // ⚠️ ============================================================ ⚠️
-#define FW_REVISION 2
+#define FW_REVISION 4
 
 
 // ===================================
@@ -189,12 +189,12 @@ static uint16_t           _stallProtectLastADC = 0;
 static uint16_t   _motor_lastADCForDelta = 0;  // ADC anterior para calcular delta
 static bool       _motor_manualTouchDetected = false;  // Flag toque manual en curso
 static uint32_t   _motor_manualTouchStartTime = 0;  // Cuándo inició movimiento manual
-static constexpr uint16_t MANUAL_TOUCH_THRESHOLD = 500;  // umbral delta para detectar movimiento (cuentas)
+static constexpr uint16_t MANUAL_TOUCH_THRESHOLD = 150;  // umbral delta para detectar movimiento (cuentas)
 static constexpr uint32_t MANUAL_TOUCH_DEBOUNCE_MS = 200;  // esperar estable antes de reanudar (ms)
 
 // ─── FADERTOUCH — detección por sostenimiento ────────────────
 static constexpr uint32_t TOUCH_POLL_MS            = 20;      // intervalo de muestreo (ms)
-static constexpr uint8_t  TOUCH_BASELINE_SAMPS     = 16;      // muestras para baseline inicial
+static constexpr uint8_t  TOUCH_BASELINE_SAMPS     = 3;       // muestras para baseline (reducido: 16→3 para no bloquear RS485, 2026-05-23)
 static constexpr float    TOUCH_THR_TOUCH          = 0.015f;  // 1.5% por encima baseline para tocar
 static constexpr float    TOUCH_THR_RELEASE        = 0.01f;   // 1.0% por encima baseline para liberar
 static constexpr uint8_t  TOUCH_SOSTENIMIENTO      = 6;       // frames (~120ms) para confirmar

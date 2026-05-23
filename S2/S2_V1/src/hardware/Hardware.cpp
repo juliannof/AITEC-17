@@ -6,13 +6,6 @@
 // Solo detecta pulsaciones y notifica via callbacks.
 // RS485Handler es la fuente de verdad para recStates/soloStates/etc.
 
-// ** Sensor Táctil del Fader Variables **
-volatile bool     isFaderTouched            = false;
-static uint32_t   faderTouchThreshold       = 0;
-static uint32_t   faderTouchBaseLine        = 0;
-static unsigned long faderTouchLastReadTime = 0;
-static const unsigned long FADER_TOUCH_READ_INTERVAL_MS = 20;
-
 // ** Instancias Button2 **
 Button2 buttonRec(BUTTON_PIN_REC, BUTTON_USE_INTERNAL_PULLUP);
 Button2 buttonSolo(BUTTON_PIN_SOLO, BUTTON_USE_INTERNAL_PULLUP);
@@ -24,8 +17,6 @@ Button2 buttonEncoderSelect(ENCODER_SW_PIN, BUTTON_USE_INTERNAL_PULLUP);
 // --- CALLBACKS GLOBALES ---
 // ===================================
 static ButtonEventCallback globalButtonEventCallback  = nullptr;
-static ButtonPressCallback onFaderTouchCallback       = nullptr;
-static ButtonPressCallback onFaderReleaseCallback     = nullptr;
 
 // ===================================
 // --- MAPEO DE BOTONES ---
@@ -65,15 +56,6 @@ void initHardware() {
 
     pinMode(LED_BUILTIN_PIN, OUTPUT);
     digitalWrite(LED_BUILTIN_PIN, LOW);
-
-    // Calibración táctil fader
-    uint32_t sum = 0;
-    for (int i = 0; i < 20; i++) {
-        sum += touchRead(FADER_TOUCH_PIN);
-        delay(10);
-    }
-    faderTouchBaseLine  = sum / 20;
-    faderTouchThreshold = faderTouchBaseLine * FADER_TOUCH_THRESHOLD_PERCENTAGE / 100;
 }
 
 // ===================================
@@ -83,31 +65,12 @@ void updateButtons() {
     for (size_t i = 0; i < NUM_BUTTON2_BUTTONS; ++i) {
         buttonMappings[i].button.loop();
     }
-
-    unsigned long currentTime = millis();
-    if (currentTime - faderTouchLastReadTime >= FADER_TOUCH_READ_INTERVAL_MS) {
-        uint32_t touchValue   = touchRead(FADER_TOUCH_PIN);
-        bool currentlyTouched = (touchValue < faderTouchThreshold);
-
-        if (currentlyTouched != isFaderTouched) {
-            isFaderTouched = currentlyTouched;
-            if (isFaderTouched) {
-                if (onFaderTouchCallback)   onFaderTouchCallback();
-            } else {
-                if (onFaderReleaseCallback) onFaderReleaseCallback();
-            }
-            if (globalButtonEventCallback) globalButtonEventCallback(ButtonId::FADER_TOUCH);
-        }
-        faderTouchLastReadTime = currentTime;
-    }
 }
 
 // ===================================
 // --- Callbacks ---
 // ===================================
 void registerButtonEventCallback(ButtonEventCallback callback)  { globalButtonEventCallback = callback; }
-void registerFaderTouchCallback(ButtonPressCallback callback)   { onFaderTouchCallback      = callback; }
-void registerFaderReleaseCallback(ButtonPressCallback callback) { onFaderReleaseCallback    = callback; }
 
 // ===================================
 // --- Funciones internas ---

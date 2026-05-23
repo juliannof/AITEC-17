@@ -7,6 +7,40 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Upload log S2
+- `2026-05-23 19:18` · Flash S2 · **FW 0.4.4** · `lolin_s2_mini`
+- `2026-05-23 18:59` · Flash S2 · **FW 0.4.3** · `lolin_s2_mini`
+
+
+### Bug B5 — Timeout periódico ~2001ms — ✅ Fix aplicado (2026-05-23 19:48)
+
+**Causa raíz:** `FaderTouch::update()` (16 × `touchRead()`) se ejecutaba **antes** de `rs485.sendResponse()` en el loop. Cuando esas 16 llamadas tardaban >3ms, S2 no respondía a S3 dentro de `RS485_RESP_TIMEOUT_US`. El patrón ~2001ms es el período de batido entre el poll de FaderTouch (20ms) y el ciclo RS485 de S3 (10ms) con jitter.
+
+Agravante: `Hardware::updateButtons()` contenía un segundo sistema de detección táctil paralelo (1 × `touchRead()` cada 20ms, mismo pin T1) — código muerto nunca registrado en Motor ni RS485Handler.
+
+**Fix — 3 cambios en S2:**
+
+| Archivo | Línea | Cambio | Efecto |
+|---------|-------|--------|--------|
+| `main.cpp` | 260→326 | `FaderTouch::update()` movido a DESPUÉS de `sendResponse()` | touchRead ya no bloquea el path RS485 |
+| `config.h` | 197 | `TOUCH_BASELINE_SAMPS` 16 → 3 | 73% menos touchRead por poll (16→3) |
+| `Hardware.cpp` | 10-14, 27-28, 69-76, 87-102, 109-110 | Eliminado sistema touch legacy completo | 1 × touchRead y 20 × touchRead+delay(10) en boot eliminados |
+| `Hardware.h` | 28-29 | Eliminadas declaraciones `registerFaderTouch/Release` | — |
+
+**Impacto:**
+- `touchState` reportado a S3: 1 ciclo (10ms) de retraso — imperceptible
+- LED_BUILTIN: no parpadea en modo SAT (SAT hace return antes) — cosmético
+- Boot: 200ms más rápido (eliminado el bucle 20×touchRead+delay en initHardware)
+
+**MCU afectadas:** Solo S2. S3 y P4 sin cambios.
+
+**⚠️ VALIDACIÓN HARDWARE PENDIENTE:**
+- [ ] Flash S2 con cambios
+- [ ] Monitor S3: timeouts post-calibración deben bajar de 0.3% a 0% o menos
+- [ ] Patrón ~2001ms debe desaparecer
+- [ ] Calibración y operación normal sin regresión
+
+
 ### SESIÓN 2026-05-23 — Versionado automático FW (11:30)
 
 **Objetivo:** Automatizar número de versión FW en `pre_build.py` basado en estado real de sistemas.
