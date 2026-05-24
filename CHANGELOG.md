@@ -11,6 +11,7 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 | Prioridad | Tarea | Notas |
 |-----------|-------|-------|
+| 🔴 **VALIDACIÓN HW** | **Fader S2→Logic + detección usuario** — sesión 2026-05-24 | S3: mapeo calibrado, jerarquía master, sync guard. S2: detección dirección en MOVING_TO_TARGET. Commits `6f6ace6` + `d171b12` |
 | 🟢 Baja | Añadir partición `coredump` (64K) en tablas de particiones S2/S3 | `E (112) esp_core_dump_flash: No core dump partition found!` al boot — solo estético, no bloquea operación |
 | 🟢 Baja | Optimización tráfico MIDI PitchBend (`DEADBAND=150`) | Reducir mensajes redundantes S2→Logic |
 
