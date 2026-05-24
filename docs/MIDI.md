@@ -115,6 +115,364 @@ t=~4000ms Logic → S3:  SysEx 0x0E ×9    — automodos reales del proyecto (Tr
 
 ---
 
+---
+
+### 3.4 — Secuencia arranque dual P4 + S3 con MIDI Monitor (2026-05-24 12:35:38)
+
+**Captura real** de Logic Pro conectando simultáneamente con `iMakie-P4-Master` y `iMakie-Extender` (S3). Esta sección es la fuente más completa y fiable del protocolo real que Logic emite.
+
+---
+
+#### 3.4.1 Sondeo multi-familia — Logic prueba 5 familias Mackie
+
+Logic no sabe qué tipo de hardware está conectado. Sondea **5 familias Mackie distintas** en ambos dispositivos:
+
+| Familia | Dispositivo Mackie | Cmd enviado | Esperado |
+|---------|-------------------|-------------|---------|
+| `0x10` | Logic Control (Apple original) | `0x00` (probe) | `0x01` response |
+| `0x11` | Logic Control XT | `0x00` | `0x01` response |
+| `0x14` | Mackie Control Universal (MCU) | `0x00` + `0x13` | `0x01` + `0x14` response |
+| `0x15` | Mackie Control Universal XT | `0x00` + `0x13` | `0x01` + `0x14` response |
+| `0x17` | Mackie C4 (plugin controller) | `0x00` + `0x13` | no response esperada |
+
+**Mensajes observados (a ambos dispositivos simultáneamente):**
+```
+F0 00 00 66 10 00 F7   ← probe familia 0x10
+F0 00 00 66 11 00 F7   ← probe familia 0x11
+F0 00 00 66 17 00 F7   ← probe familia 0x17
+F0 00 00 66 17 13 00 F7  ← versión familia 0x17
+F0 00 00 66 14 00 F7   ← probe familia 0x14  ← responde P4 y S3
+F0 00 00 66 14 13 00 F7  ← versión familia 0x14  ← responde P4 y S3
+F0 00 00 66 15 00 F7   ← probe familia 0x15
+F0 00 00 66 15 13 00 F7  ← versión familia 0x15
+```
+
+Esta secuencia se repite **3 veces** — Logic reintenta si no recibe respuesta satisfactoria en el tiempo esperado.
+
+**⚠️ Bug crítico — P4 y S3 responden a CUALQUIER familia:**
+
+El código actual en `processMackieSysEx()` responde a cmd `0x00` y `0x13` ANTES de comprobar la familia:
+
+```cpp
+if (command == 0x00) { sendMIDIBytes(reply, ...); return; }  // ← responde a familia 0x10, 0x11, 0x15, 0x17
+if (command == 0x13) { sendMIDIBytes(reply, ...); return; }
+if (device_family != 0x14) return;
+```
+
+Cuando Logic envía `F0 00 00 66 10 00 F7` (probe a familia 0x10), P4 y S3 responden identificándose como familia `0x14`. Logic recibe respuestas inesperadas a sus probes de otras familias, lo que puede causar confusión y contribuye al **loop de reintento del handshake** (ver 3.4.3).
+
+**Fix:** Mover el guard `if (device_family != 0x14) return;` AL INICIO de `processMackieSysEx()`, antes de manejar `0x00` y `0x13`.
+
+---
+
+#### 3.4.2 Secuencia de inicialización completa (por dispositivo, tras GoOnline exitoso)
+
+Tras reconocer el dispositivo, Logic envía esta secuencia en ráfaga:
+
+```
+F0 00 00 66 14 21 01 F7                 ← GoOnline (cmd 0x21, data=0x01)
+F0 00 00 66 14 20 00 07 F7              ← cmd 0x20, ch=0, val=7
+F0 00 00 66 14 20 01 07 F7              ← cmd 0x20, ch=1, val=7
+... (×8 para ch=0..7)
+F0 00 00 66 14 0A 01 F7                 ← cmd 0x0A, val=0x01
+F0 00 00 66 14 0E 00 03 F7              ← cmd 0x0E, ch=0, val=0x03
+F0 00 00 66 14 0E 01 03 F7              ← cmd 0x0E, ch=1, val=0x03
+... (×9 para ch=0..8, incluye canal master)
+F0 00 00 66 14 0C 00 F7                 ← cmd 0x0C, val=0x00
+F0 00 00 66 14 0B 0F F7                 ← cmd 0x0B, val=0x0F
+F0 00 00 66 14 12 00 [111×0x20] F7      ← LCD Write: borra display completo (espacios)
+F0 00 00 66 14 72 07 07 07 07 07 07 07 07 F7  ← VU Meter batch: init a 0x07
+```
+
+**Decodificación de cada comando:**
+
+| Cmd | Formato | Valor típico | Significado | Estado en P4 |
+|-----|---------|-------------|-------------|-------------|
+| `0x21` | `21 01` | — | GoOnline — Logic conectado, surface operativa | ✅ Procesado |
+| `0x20` | `20 [ch] [val]` | ch=0..7, val=07 | **Fader Touch Sensitivity** — sensibilidad táctil del fader, 0=mínima, 7=máxima | ❌ No procesado en P4 |
+| `0x0A` | `0A [val]` | val=01 | **Touch sense habilitado** (01=on) — activa detección de toque en faders | ❌ No procesado en P4 |
+| `0x0E` | `0E [ch] [val]` | ch=0..8, val=03 | **Channel Auto Mode** — 0x03=Touch. **9 canales, incluye master (ch=8)** | ✅ Procesado (pero P4 ignora ch=8) |
+| `0x0C` | `0C [val]` | val=00 | **Meter mode** — modo de los VU meters (0=peak) | ❌ No procesado en P4 |
+| `0x0B` | `0B [val]` | val=0F | **Button enable mask** — máscara de botones activos (0x0F = REC/SOLO/MUTE/SEL habilitados) | ❌ No procesado en P4 |
+| `0x12` | `12 [offset] [data]` | offset=0, 111 bytes 0x20 | LCD Write — limpia display completo con espacios antes del volcado real | ✅ Procesado |
+| `0x72` | `72 [8 bytes]` | todos=0x07 (init) | VU Meter batch — al init todos a 0x07 (ver nota), luego valores reales | ✅ Procesado |
+
+**Nota sobre `0x20` (Fader Touch Sensitivity):**
+`F0 00 00 66 14 20 [ch] [sensitivity_0_7] F7` — inicializa la sensibilidad táctil de cada fader. Value=7 = máxima sensibilidad (toque más ligero registrado). P4 no procesa este comando actualmente — afecta a cómo Logic calcula el "touch" del fader en su lógica de automación.
+
+**Nota sobre `0x0E` ch=8 (master fader auto mode):**
+Logic envía auto mode para 9 canales (0-8), siendo ch=8 el fader master. El código P4 solo procesa ch=0..7:
+```cpp
+g_channelAutoMode[ch] = value;  // arrays de 8 elementos — ch=8 sería out of bounds o ignorado
+```
+El modo de grabación del master fader (ch=8) no se captura. Comportamiento deseado actual: ✅ P4 muestra el auto mode de la pista activa en display (confirmado en hardware 2026-05-24).
+
+**Nota sobre `0x72` init a 0x07:**
+En el arranque, todos los VU se inicializan a `0x07`. En el contexto de VU Meter batch (4 bits por canal, 0-11=niveles, 0xC-0xD=sobre, 0xE=clip, 0xF=clear clip), `0x07` = nivel 7/11 (~64%). Esto es un reset genérico a valor central antes del volcado de niveles reales. No confundir con el estado operacional donde `0x07` en Channel Pressure tiene otro significado.
+
+---
+
+#### 3.4.3 Bug S3 — Loop de reintento del handshake (3 intentos fallidos en 120ms)
+
+**Observado en captura 2026-05-24.** P4 completa el handshake en el primer intento. S3 falla 3 veces antes de estabilizarse, con un total de ~3 segundos hasta la conexión exitosa.
+
+**Timeline completo:**
+
+```
+12:35:38.664  Logic → P4 + S3:  probe 0x00 (familia 0x14)
+12:35:38.666  Logic → P4:       GoOnline #1 + init completo ← P4 OK en primer intento
+12:35:38.666  Logic → S3:       GoOnline #1 + init completo
+12:35:38.749  Logic → S3:       cmd 0x13 ×17 veces (!)  ← Logic retrying firmware query
+12:35:38.750  Logic → S3:       0x0A/0x0C/0x0B ×4 ciclos (garbage init)
+12:35:38.750  Logic → S3:       GoOnline #2 + init completo ← segundo intento fallido
+12:35:38.782  Logic → S3:       0x0A/0x0C/0x0B ×5 ciclos más
+12:35:38.783  Logic → S3:       GoOnline #3 + init completo ← tercer intento fallido
+              [pausa ~600ms]
+12:35:39.382  Logic → S3:       0x12 (LCD clear)
+12:35:39.683  Logic → P4:       0x0E ×9 (auto mode update)
+12:35:39.782  Logic → S3:       0x0E ×9 (auto mode update)
+12:35:40.351  Logic → P4 + S3:  0x12 "LogicPro Trial -" ← broadcast global
+12:35:41.641  Logic → P4 + S3:  0x12 [16 espacios] ← clear parcial broadcast
+12:35:41.659  Logic → P4:       GoOnline FINAL + init + nombres reales ← OK
+12:35:41.698  Logic → S3:       GoOnline FINAL + init + nombres reales ← OK (~3s después)
+```
+
+**Causa probable:** S3 no responde al GoOnline (0x21) con suficiente rapidez. La respuesta requerida es el echo `F0 00 00 66 14 21 01 F7`. Si S3 está bloqueado en la tarea RS485 en ese momento, el echo llega tarde, Logic hace timeout y reintenta.
+
+**Agravante — Bug de familia:** S3 responde a los probes `0x00` y `0x13` de otras familias (0x10, 0x15…), lo que genera respuestas inesperadas que Logic interpreta como señales de nuevos dispositivos y reinicia el sondeo.
+
+**Resultado visible:** Durante ~3 segundos tras conectar, la pantalla de S3 está sin datos. Los 17× `cmd 0x13` consecutivos son Logic en estado de confusión, preguntando repetidamente la versión de firmware al S3.
+
+**Impacto en P4:** P4 también se reinicializa al final (GoOnline a 12:35:41.659 es ~3 segundos después del primero). La segunda inicialización es la que contiene los nombres reales de pista.
+
+---
+
+#### 3.4.4 Broadcast global "LogicPro Trial -"
+
+```
+12:35:40.351  → P4:  F0 00 00 66 14 12 00 4C 6F 67 69 63 50 72 6F 20 54 72 69 61 6C 20 2D F7
+12:35:40.351  → S3:  F0 00 00 66 14 12 00 4C 6F 67 69 63 50 72 6F 20 54 72 69 61 6C 20 2D F7
+```
+
+Decodificado: `"LogicPro Trial -"` (16 bytes, offset 0 = inicio de LCD row 0).
+
+Logic envía su versión/licencia a **ambos dispositivos simultáneamente** via SysEx `0x12` (LCD Write). Esto es un **mensaje global broadcast** — el único tipo que Logic envía a master y extender a la vez sin diferenciación de banco.
+
+**Implicación:** Si P4 muestra este texto en el display durante 1-2 segundos al arrancar, es comportamiento correcto de Logic. El LCD se borrará cuando llegue el volcado real de nombres de pista.
+
+---
+
+#### 3.4.5 Actualizaciones LCD parciales (SysEx 0x12 con offset variable)
+
+Tras la inicialización completa, Logic puede enviar `0x12` con **offset distinto de 0** para actualizar solo parte del LCD:
+
+```
+12:35:43.138  → S3:  F0 00 00 66 14 12 00 56 6F 6C 75 6D 65 6E 20 20 20 20 20 F7
+                     offset=0x00, data="Volumen    " (12 bytes) — solo ch1 row0
+
+12:35:43.147  → S3:  F0 00 00 66 14 12 38 2B 30 2C 30 20 64 42 20 F7
+                     offset=0x38=56, data="+0,0 dB " (8 bytes) — ch1 row1 (valor fader)
+```
+
+El LCD Mackie MCU tiene 112 posiciones (2 filas × 56 chars). El offset indica la posición de inicio en ese buffer lineal:
+- offset `0x00..0x37` (0-55) = row 0 (nombres), posición dentro de esa fila
+- offset `0x38..0x6F` (56-111) = row 1 (valores), posición dentro de esa fila
+
+P4 ya soporta esto — `processMackieSysEx case 0x12` usa el offset para escribir en la posición correcta del array `trackNames`.
+
+```
+12:35:45.383  → S3:  F0 00 00 66 14 12 00 53 6F 6C 65 72 20 20 4C 6F 70 65 72 F7
+                     "Soler  Loper" — actualiza ch1+ch2 row0
+
+12:35:45.395  → S3:  F0 00 00 66 14 12 38 2D 34 32 20 20 20 20 30 F7
+                     "-42    0" — actualiza ch1+ch2 row1
+```
+
+---
+
+#### 3.4.6 Auto Mode `0x0E` — Confirmación en hardware P4 (2026-05-24)
+
+El comando `0x0E [ch] [mode]` llega a P4 cada vez que Logic cambia el modo de automación de una pista. Modos observados:
+
+| Valor | Nombre Mackie | Equivalente Logic Pro |
+|-------|--------------|----------------------|
+| 0x00 | Off | Off |
+| 0x01 | Read | Read |
+| 0x02 | Write | Write |
+| 0x03 | Touch | Touch ← valor al arranque |
+| 0x04 | Latch | Latch |
+| 0x05 | Trim | Trim |
+
+**Confirmado en hardware:** P4 muestra en pantalla el modo de grabación de la pista activa (✅ comportamiento deseado). El display de P4 reacciona correctamente a `0x0E`. Esto se gestiona en `MIDIProcessor.cpp` vía `g_channelAutoMode[ch] = value` y `needsButtonsRedraw = true`.
+
+**Nota:** Logic envía `0x0E` para 9 canales (ch=0..8) en cada actualización. El ch=8 es el fader master — P4 actualmente lo ignora (no hay slot 8 en los arrays de 8 elementos). No es un bug funcional hoy, pero hay que tenerlo en cuenta cuando se amplíe a 16 canales.
+
+---
+
+#### 3.4.7 Resumen: qué mensajes llegan a P4 vs S3
+
+| Mensaje | → P4 | → S3 | Notas |
+|---------|------|------|-------|
+| Probe `0x00` (todas familias) | ✅ | ✅ | Broadcast — ambos lo reciben |
+| Versión `0x13` (todas familias) | ✅ | ✅ | Broadcast — ambos lo reciben |
+| GoOnline `0x21 01` | ✅ | ✅ | Separado por dispositivo |
+| Fader Touch Sensitivity `0x20` | ✅ | ✅ | Por dispositivo, 8 canales |
+| Touch Enable `0x0A 01` | ✅ | ✅ | Por dispositivo |
+| Auto Mode `0x0E` | ✅ | ✅ | Por dispositivo, 9 canales |
+| Meter Mode `0x0C` | ✅ | ✅ | Por dispositivo |
+| Button Mask `0x0B` | ✅ | ✅ | Por dispositivo |
+| LCD Clear `0x12` (espacios) | ✅ | ✅ | Por dispositivo |
+| VU Init `0x72` | ✅ | ✅ | Por dispositivo |
+| "LogicPro Trial -" `0x12` | ✅ | ✅ | **Broadcast global** — idéntico a ambos. P4 lo escribe en `trackNames[0]` y lo reenvía a S2 slave 1 via RS485. El filtrado de este string basura **ocurre en S2, no en P4** — S2 decide si muestra el nombre recibido. Idealmente P4 debería filtrarlo antes de forwarding. |
+| LCD Clear parcial `0x12` 16 spaces | ✅ | ✅ | **Broadcast global** — misma situación: P4 reenvía a S2 sin filtrar. S2 filtra. |
+| Nombres reales `0x12` 119 bytes | ✅ tracks 1-8 | ✅ tracks 9-16 | **Datos distintos** por banco |
+| VU real `0x72` | ✅ | ✅ | Datos distintos por banco |
+| GoOffline `0x0F` | ✅ | ✅ | Por dispositivo |
+
+---
+
+#### 3.4.8 Capture completo MIDI Monitor (2026-05-24 12:35:38)
+
+Captura raw sin modificar. Referencia canónica para auditoría futura del protocolo.
+
+```
+12:35:38.664    To iMakie-P4-Master    SysEx    7 bytes     F0 00 00 66 14 00 F7
+12:35:38.664    To iMakie-Extender     SysEx    7 bytes     F0 00 00 66 14 00 F7
+12:35:38.666    To iMakie-P4-Master    SysEx    8 bytes     F0 00 00 66 14 21 01 F7
+12:35:38.666    To iMakie-P4-Master    SysEx    9 bytes     F0 00 00 66 14 20 00 07 F7
+12:35:38.666    To iMakie-P4-Master    SysEx    9 bytes     F0 00 00 66 14 20 01 07 F7
+12:35:38.666    To iMakie-P4-Master    SysEx    9 bytes     F0 00 00 66 14 20 02 07 F7
+12:35:38.666    To iMakie-P4-Master    SysEx    9 bytes     F0 00 00 66 14 20 03 07 F7
+12:35:38.666    To iMakie-P4-Master    SysEx    9 bytes     F0 00 00 66 14 20 04 07 F7
+12:35:38.666    To iMakie-P4-Master    SysEx    9 bytes     F0 00 00 66 14 20 05 07 F7
+12:35:38.666    To iMakie-P4-Master    SysEx    9 bytes     F0 00 00 66 14 20 06 07 F7
+12:35:38.666    To iMakie-P4-Master    SysEx    9 bytes     F0 00 00 66 14 20 07 07 F7
+12:35:38.666    To iMakie-P4-Master    SysEx    8 bytes     F0 00 00 66 14 0A 01 F7
+12:35:38.666    To iMakie-P4-Master    SysEx    9 bytes     F0 00 00 66 14 0E 00 03 F7
+12:35:38.666    To iMakie-P4-Master    SysEx    9 bytes     F0 00 00 66 14 0E 01 03 F7
+12:35:38.666    To iMakie-P4-Master    SysEx    9 bytes     F0 00 00 66 14 0E 02 03 F7
+12:35:38.666    To iMakie-P4-Master    SysEx    9 bytes     F0 00 00 66 14 0E 03 03 F7
+12:35:38.666    To iMakie-P4-Master    SysEx    9 bytes     F0 00 00 66 14 0E 04 03 F7
+12:35:38.666    To iMakie-P4-Master    SysEx    9 bytes     F0 00 00 66 14 0E 05 03 F7
+12:35:38.666    To iMakie-P4-Master    SysEx    9 bytes     F0 00 00 66 14 0E 06 03 F7
+12:35:38.666    To iMakie-P4-Master    SysEx    9 bytes     F0 00 00 66 14 0E 07 03 F7
+12:35:38.666    To iMakie-P4-Master    SysEx    9 bytes     F0 00 00 66 14 0E 08 03 F7
+12:35:38.666    To iMakie-P4-Master    SysEx    8 bytes     F0 00 00 66 14 0C 00 F7
+12:35:38.666    To iMakie-P4-Master    SysEx    8 bytes     F0 00 00 66 14 0B 0F F7
+12:35:38.666    To iMakie-P4-Master    SysEx    119 bytes   F0 00 00 66 14 12 00 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 F7
+12:35:38.666    To iMakie-P4-Master    SysEx    15 bytes    F0 00 00 66 14 72 07 07 07 07 07 07 07 07 F7
+12:35:38.666    To iMakie-Extender     SysEx    8 bytes     F0 00 00 66 14 21 01 F7
+12:35:38.666    To iMakie-Extender     SysEx    9 bytes     F0 00 00 66 14 20 00 07 F7
+12:35:38.666    To iMakie-Extender     SysEx    9 bytes     F0 00 00 66 14 20 01 07 F7
+12:35:38.666    To iMakie-Extender     SysEx    9 bytes     F0 00 00 66 14 20 02 07 F7
+12:35:38.666    To iMakie-Extender     SysEx    9 bytes     F0 00 00 66 14 20 03 07 F7
+12:35:38.666    To iMakie-Extender     SysEx    9 bytes     F0 00 00 66 14 20 04 07 F7
+12:35:38.666    To iMakie-Extender     SysEx    9 bytes     F0 00 00 66 14 20 05 07 F7
+12:35:38.666    To iMakie-Extender     SysEx    9 bytes     F0 00 00 66 14 20 06 07 F7
+12:35:38.666    To iMakie-Extender     SysEx    9 bytes     F0 00 00 66 14 20 07 07 F7
+12:35:38.666    To iMakie-Extender     SysEx    8 bytes     F0 00 00 66 14 0A 01 F7
+12:35:38.666    To iMakie-Extender     SysEx    9 bytes     F0 00 00 66 14 0E 00 03 F7
+12:35:38.666    To iMakie-Extender     SysEx    9 bytes     F0 00 00 66 14 0E 01 03 F7
+12:35:38.666    To iMakie-Extender     SysEx    9 bytes     F0 00 00 66 14 0E 02 03 F7
+12:35:38.666    To iMakie-Extender     SysEx    9 bytes     F0 00 00 66 14 0E 03 03 F7
+12:35:38.666    To iMakie-Extender     SysEx    9 bytes     F0 00 00 66 14 0E 04 03 F7
+12:35:38.666    To iMakie-Extender     SysEx    9 bytes     F0 00 00 66 14 0E 05 03 F7
+12:35:38.666    To iMakie-Extender     SysEx    9 bytes     F0 00 00 66 14 0E 06 03 F7
+12:35:38.666    To iMakie-Extender     SysEx    9 bytes     F0 00 00 66 14 0E 07 03 F7
+12:35:38.666    To iMakie-Extender     SysEx    9 bytes     F0 00 00 66 14 0E 08 03 F7
+12:35:38.666    To iMakie-Extender     SysEx    8 bytes     F0 00 00 66 14 0C 00 F7
+12:35:38.666    To iMakie-Extender     SysEx    8 bytes     F0 00 00 66 14 0B 0F F7
+12:35:38.666    To iMakie-Extender     SysEx    119 bytes   F0 00 00 66 14 12 00 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 F7
+12:35:38.666    To iMakie-Extender     SysEx    15 bytes    F0 00 00 66 14 72 07 07 07 07 07 07 07 07 F7
+12:35:38.667    To iMakie-P4-Master    SysEx    7 bytes     F0 00 00 66 10 00 F7
+12:35:38.667    To iMakie-Extender     SysEx    7 bytes     F0 00 00 66 10 00 F7
+12:35:38.667    To iMakie-P4-Master    SysEx    7 bytes     F0 00 00 66 11 00 F7
+12:35:38.667    To iMakie-Extender     SysEx    7 bytes     F0 00 00 66 11 00 F7
+12:35:38.667    To iMakie-P4-Master    SysEx    7 bytes     F0 00 00 66 17 00 F7
+12:35:38.667    To iMakie-Extender     SysEx    7 bytes     F0 00 00 66 17 00 F7
+12:35:38.667    To iMakie-P4-Master    SysEx    8 bytes     F0 00 00 66 17 13 00 F7
+12:35:38.667    To iMakie-Extender     SysEx    8 bytes     F0 00 00 66 17 13 00 F7
+12:35:38.667    To iMakie-P4-Master    SysEx    7 bytes     F0 00 00 66 14 00 F7
+12:35:38.667    To iMakie-Extender     SysEx    7 bytes     F0 00 00 66 14 00 F7
+12:35:38.667    To iMakie-P4-Master    SysEx    8 bytes     F0 00 00 66 14 13 00 F7
+12:35:38.667    To iMakie-Extender     SysEx    8 bytes     F0 00 00 66 14 13 00 F7
+12:35:38.667    To iMakie-P4-Master    SysEx    7 bytes     F0 00 00 66 15 00 F7
+12:35:38.667    To iMakie-Extender     SysEx    7 bytes     F0 00 00 66 15 00 F7
+12:35:38.667    To iMakie-P4-Master    SysEx    8 bytes     F0 00 00 66 15 13 00 F7
+12:35:38.667    To iMakie-Extender     SysEx    8 bytes     F0 00 00 66 15 13 00 F7
+12:35:38.667    To iMakie-P4-Master    SysEx    7 bytes     F0 00 00 66 14 00 F7
+12:35:38.667    To iMakie-Extender     SysEx    7 bytes     F0 00 00 66 14 00 F7
+12:35:38.667    To iMakie-P4-Master    SysEx    8 bytes     F0 00 00 66 14 13 00 F7
+12:35:38.667    To iMakie-Extender     SysEx    8 bytes     F0 00 00 66 14 13 00 F7
+12:35:38.667    To iMakie-P4-Master    SysEx    7 bytes     F0 00 00 66 15 00 F7
+12:35:38.667    To iMakie-Extender     SysEx    7 bytes     F0 00 00 66 15 00 F7
+12:35:38.667    To iMakie-P4-Master    SysEx    8 bytes     F0 00 00 66 15 13 00 F7
+12:35:38.667    To iMakie-Extender     SysEx    8 bytes     F0 00 00 66 15 13 00 F7
+12:35:38.667    To iMakie-P4-Master    SysEx    7 bytes     F0 00 00 66 14 00 F7
+12:35:38.667    To iMakie-Extender     SysEx    7 bytes     F0 00 00 66 14 00 F7
+12:35:38.667    To iMakie-P4-Master    SysEx    8 bytes     F0 00 00 66 14 13 00 F7
+12:35:38.667    To iMakie-Extender     SysEx    8 bytes     F0 00 00 66 14 13 00 F7
+12:35:38.667    To iMakie-P4-Master    SysEx    7 bytes     F0 00 00 66 15 00 F7
+12:35:38.667    To iMakie-Extender     SysEx    7 bytes     F0 00 00 66 15 00 F7
+12:35:38.667    To iMakie-P4-Master    SysEx    8 bytes     F0 00 00 66 15 13 00 F7
+12:35:38.667    To iMakie-Extender     SysEx    8 bytes     F0 00 00 66 15 13 00 F7
+12:35:38.749    To iMakie-Extender     SysEx    8 bytes     F0 00 00 66 14 13 00 F7  [×17]
+12:35:38.750    To iMakie-Extender     SysEx    8 bytes     F0 00 00 66 14 0A 01 F7
+12:35:38.750    To iMakie-Extender     SysEx    8 bytes     F0 00 00 66 14 0C 00 F7
+12:35:38.750    To iMakie-Extender     SysEx    8 bytes     F0 00 00 66 14 0B 0F F7
+12:35:38.750    To iMakie-Extender     SysEx    8 bytes     F0 00 00 66 14 0A 01 F7  [0x0A/0C/0B ×4 ciclos]
+12:35:38.750    To iMakie-Extender     SysEx    8 bytes     F0 00 00 66 14 21 01 F7
+12:35:38.750    To iMakie-Extender     SysEx    9 bytes     F0 00 00 66 14 20 00 07 F7  [×8]
+12:35:38.750    To iMakie-Extender     SysEx    8 bytes     F0 00 00 66 14 0A 01 F7
+12:35:38.750    To iMakie-Extender     SysEx    8 bytes     F0 00 00 66 14 0C 00 F7
+12:35:38.750    To iMakie-Extender     SysEx    8 bytes     F0 00 00 66 14 0B 0F F7
+12:35:38.750    To iMakie-Extender     SysEx    119 bytes   F0 00 00 66 14 12 00 20[×111] F7
+12:35:38.750    To iMakie-Extender     SysEx    15 bytes    F0 00 00 66 14 72 07 07 07 07 07 07 07 07 F7
+12:35:38.750    To iMakie-Extender     SysEx    8 bytes     F0 00 00 66 14 21 01 F7
+12:35:38.750    To iMakie-Extender     SysEx    9 bytes     F0 00 00 66 14 20 00 07 F7  [×8]
+12:35:38.750    To iMakie-Extender     SysEx    8 bytes     F0 00 00 66 14 0A 01 F7
+12:35:38.750    To iMakie-Extender     SysEx    8 bytes     F0 00 00 66 14 0C 00 F7
+12:35:38.750    To iMakie-Extender     SysEx    8 bytes     F0 00 00 66 14 0B 0F F7
+12:35:38.782    To iMakie-Extender     SysEx    8 bytes     F0 00 00 66 14 0A 01 F7  [0x0A/0C/0B ×5 ciclos]
+12:35:38.783    To iMakie-Extender     SysEx    15 bytes    F0 00 00 66 14 72 07 07 07 07 07 07 07 07 F7
+12:35:38.783    To iMakie-Extender     SysEx    8 bytes     F0 00 00 66 14 21 01 F7
+12:35:38.783    To iMakie-Extender     SysEx    9 bytes     F0 00 00 66 14 20 00 07 F7  [×8]
+12:35:38.783    To iMakie-Extender     SysEx    8 bytes     F0 00 00 66 14 0A 01 F7
+12:35:38.783    To iMakie-Extender     SysEx    8 bytes     F0 00 00 66 14 0C 00 F7
+12:35:38.783    To iMakie-Extender     SysEx    8 bytes     F0 00 00 66 14 0B 0F F7
+12:35:39.382    To iMakie-Extender     SysEx    119 bytes   F0 00 00 66 14 12 00 20[×111] F7
+12:35:39.683    To iMakie-P4-Master    SysEx    9 bytes     F0 00 00 66 14 0E 00 03 F7  [×9 ch=0..8]
+12:35:39.782    To iMakie-Extender     SysEx    9 bytes     F0 00 00 66 14 0E 00 03 F7  [×9 ch=0..8]
+12:35:40.351    To iMakie-P4-Master    SysEx    24 bytes    F0 00 00 66 14 12 00 4C 6F 67 69 63 50 72 6F 20 54 72 69 61 6C 20 2D F7
+12:35:40.351    To iMakie-Extender     SysEx    24 bytes    F0 00 00 66 14 12 00 4C 6F 67 69 63 50 72 6F 20 54 72 69 61 6C 20 2D F7
+12:35:41.641    To iMakie-P4-Master    SysEx    24 bytes    F0 00 00 66 14 12 00 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 F7
+12:35:41.641    To iMakie-Extender     SysEx    24 bytes    F0 00 00 66 14 12 00 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20 F7
+12:35:41.659    To iMakie-P4-Master    SysEx    8 bytes     F0 00 00 66 14 21 01 F7
+12:35:41.659    To iMakie-P4-Master    SysEx    9 bytes     F0 00 00 66 14 20 00 07 F7  [×8]
+12:35:41.664    To iMakie-P4-Master    SysEx    8 bytes     F0 00 00 66 14 0A 01 F7
+12:35:41.664    To iMakie-P4-Master    SysEx    9 bytes     F0 00 00 66 14 0E 00 03 F7  [×9 ch=0..8]
+12:35:41.667    To iMakie-P4-Master    SysEx    8 bytes     F0 00 00 66 14 0C 00 F7
+12:35:41.667    To iMakie-P4-Master    SysEx    8 bytes     F0 00 00 66 14 0B 0F F7
+12:35:41.667    To iMakie-P4-Master    SysEx    119 bytes   F0 00 00 66 14 12 00 41 75 64 69 6F 54 20 42 61 73 65 20 20 20 41 75 64 69 6F 32 20 4E 6F 20 20 20 20 20 6E 61 74 68 6C 65 20 56 4F 5A 20 34 20 20 61 6C 65 78 20 20 20 49 6E 73 74 20 34 20 30 20 20 20 20 20 20 2B 34 20 20 20 20 20 2D 31 20 20 20 20 20 20 20 20 20 20 20 20 2D 31 20 20 20 20 20 2D 34 39 20 20 20 20 30 20 20 20 20 20 20 30 20 20 20 20 20 F7
+12:35:41.692    To iMakie-P4-Master    SysEx    15 bytes    F0 00 00 66 14 72 04 02 04 02 04 04 04 02 F7
+12:35:41.698    To iMakie-Extender     SysEx    8 bytes     F0 00 00 66 14 21 01 F7
+12:35:41.698    To iMakie-Extender     SysEx    9 bytes     F0 00 00 66 14 20 00 07 F7  [×8]
+12:35:41.702    To iMakie-Extender     SysEx    8 bytes     F0 00 00 66 14 0A 01 F7
+12:35:41.703    To iMakie-Extender     SysEx    9 bytes     F0 00 00 66 14 0E 00 03 F7  [×9 ch=0..8]
+12:35:41.705    To iMakie-Extender     SysEx    8 bytes     F0 00 00 66 14 0C 00 F7
+12:35:41.706    To iMakie-Extender     SysEx    8 bytes     F0 00 00 66 14 0B 0F F7
+12:35:41.706    To iMakie-Extender     SysEx    119 bytes   F0 00 00 66 14 12 00 53 6F 6C 65 72 20 20 4C 6F 70 65 72 20 20 54 72 6E 71 69 6C 20 70 69 61 6E 6F 20 20 41 75 64 6F 31 32 20 54 72 54 65 42 65 20 44 57 59 53 6C 65 20 41 75 64 6F 31 35 20 2D 34 32 20 20 20 20 30 20 20 20 20 20 20 2D 33 34 20 20 20 20 2D 36 34 20 20 20 20 2B 36 33 20 20 20 20 30 20 20 20 20 20 20 30 20 20 20 20 20 20 2B 36 33 20 20 20 F7
+12:35:41.731    To iMakie-Extender     SysEx    15 bytes    F0 00 00 66 14 72 02 04 02 02 04 04 04 04 F7
+12:35:42.781    To iMakie-P4-Master    SysEx    9 bytes     F0 00 00 66 14 0E 00 03 F7  [×9 ch=0..8]
+12:35:42.791    To iMakie-Extender     SysEx    9 bytes     F0 00 00 66 14 0E 00 03 F7  [×9 ch=0..8]
+12:35:43.138    To iMakie-Extender     SysEx    20 bytes    F0 00 00 66 14 12 00 56 6F 6C 75 6D 65 6E 20 20 20 20 20 F7
+12:35:43.147    To iMakie-Extender     SysEx    16 bytes    F0 00 00 66 14 12 38 2B 30 2C 30 20 64 42 20 F7
+12:35:45.383    To iMakie-Extender     SysEx    20 bytes    F0 00 00 66 14 12 00 53 6F 6C 65 72 20 20 4C 6F 70 65 72 F7
+12:35:45.395    To iMakie-Extender     SysEx    16 bytes    F0 00 00 66 14 12 38 2D 34 32 20 20 20 20 30 F7
+```
+
+---
+
 ## 4. COMANDOS LOGIC → S3
 
 ### 4.1 GoOffline (SysEx 0x0F)

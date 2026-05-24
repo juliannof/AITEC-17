@@ -14,6 +14,8 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 | 🔴 **VALIDACIÓN HW** | **Fader S2→Logic + detección usuario** — sesión 2026-05-24 | S3: mapeo calibrado, jerarquía master, sync guard. S2: detección dirección en MOVING_TO_TARGET. Commits `6f6ace6` + `d171b12` |
 | 🟢 Baja | Añadir partición `coredump` (64K) en tablas de particiones S2/S3 | `E (112) esp_core_dump_flash: No core dump partition found!` al boot — solo estético, no bloquea operación |
 | 🟢 Baja | Optimización tráfico MIDI PitchBend (`DEADBAND=150`) | Reducir mensajes redundantes S2→Logic |
+| 🟡 Media | **Protocolo de cierre Logic — GoOffline limpio en P4 y S3** | Observado en captura 2026-05-24: handshake de arranque tiene 3 reintentos en S3 (~3s). El cierre de Logic (GoOffline + desconexión USB) no está validado ni documentado. Implementar secuencia `0x0F` → reset de estados → faders a 0 → LED off, limpia en ambos MCU. Ver `docs/MIDI.md` sección 3.4. |
+| 🟢 Baja | **P4: VU global 16 pistas via MIDI UART S3→P4** | S3 re-emite MIDI de Logic (ch 1–8) a P4 por UART directo (ch 9–16). P4 agrega las 16 pistas en display LVGL. Sin WiFi, sin protocolo custom — reutiliza `processMidiByte()` existente. 1 cable TX→RX. Ver `docs/S3ToP4.md` sección "Feature: Agregación 16 pistas". |
 
 ---
 

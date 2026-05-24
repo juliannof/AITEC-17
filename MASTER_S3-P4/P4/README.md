@@ -3,12 +3,12 @@
 Master Mackie Control Universal (MCU) para Logic Pro. Controla 9 tracks S2 locales vía RS485 bus A, display IPS táctil 480×800, y matriz NeoTrellis 4×8.
 
 **Placa de desarrollo:** GUITION ESP32-P4 Capacitive Touch IPS 4.3"  
-**Chip:** ESP32-P4 (Xtensa dual-core 360MHz)  
+**Chip:** ESP32-P4 (Xtensa dual-core 400MHz)  
 **Flash:** 16MB (QIO)  
-**PSRAM:** 8MB (OPI)  
+**PSRAM:** 32MB (OPI)  
 **Display:** IPS 4.3" 480×800 (ST7701S MIPI-DSI 2-lane)  
 **Touch:** Capacitivo GT911 (I2C)  
-**Familia Mackie:** 0x14  
+**Familia Mackie:** 0x14 (testing) / 0x15 (producción)  
 **Slaves controlados:** 9 (IDs 1–9) en RS485 bus A  
 **NeoTrellis:** 2× Adafruit seesaw 4×4 (matriz 4×8)
 
@@ -17,7 +17,7 @@ Master Mackie Control Universal (MCU) para Logic Pro. Controla 9 tracks S2 local
 ## Especificación de placa (2026-05-16)
 
 **Módulo:** GUITION JC4880P443C-I-W (placa de desarrollo integrada)  
-**Procesador principal:** ESP32-P4 Xtensa dual-core 360MHz (Core0 + Core1)  
+**Procesador principal:** ESP32-P4 Xtensa dual-core 400MHz (Core0 + Core1)  
 **Procesador secundario:** ESP32-C6 (Wi-Fi 6 + Bluetooth 5)  
 **Memoria:**
 - Flash: 16MB (QIO mode)
@@ -107,24 +107,25 @@ platform = https://github.com/pioarduino/platform-espressif32/releases/download/
 board = esp32-p4
 board_build.partitions = default_16MB.csv
 board_build.flash_size = 16MB
-board_build.arduino.memory_type = qio_opi
+board_build.psram_type = opi
 ```
 
+> ⚠️ **Riesgo conocido (2026-05-24):** `default_16MB.csv` puede colisionar con la tabla del framework pioarduino (mismo nombre → PlatformIO usa la del framework, no la local). S3 tuvo este bug exacto y lo resolvió renombrando el archivo. Si P4 da problemas de tamaño de partición, renombrar a `p4_master_16MB.csv` y actualizar `board_build.partitions`.
+
 **Flags críticos:**
-- `-DBOARD_HAS_PSRAM` — Habilita PSRAM (8MB)
-- `-DARDUINO_USB_MODE=0` — USB nativo
+- `-DBOARD_HAS_PSRAM` — Habilita PSRAM (32MB OPI)
+- `-DARDUINO_USB_MODE=1` — USB CDC nativo (USBMIDI)
 - `-DDEVICE_P4_MASTER` — Identifica como P4 Master (vs S3 Extender)
 
 ### Platform y Framework
 
 **Platform:** espressif32 (pioarduino 55.03.37 — IDF5 + Arduino core)  
 **Framework:** Arduino  
-**Librerías estándar:**
-- LovyanGFX (display ST7701S MIPI-DSI)
-- LVGL v9 (UI framework 480×800)
-- Adafruit NeoPixel (seesaw 4×4 RGB)
-- Wire (I2C GT911 touch, seesaw)
-- HardwareSerial (RS485)
+**Librerías (`lib_deps`):**
+- `lvgl/lvgl@^9.5.0` — UI framework 480×800
+- `tamctec/TAMC_GT911@^1.0.2` — Touch capacitivo GT911
+
+**Nota:** el display ST7701S usa un driver custom ESP-IDF (`src/lcd/st7701_lcd.cpp`) — **no LovyanGFX**. La comunicación MIDI usa la librería USBMIDI incluida en el framework Arduino ESP32.
 
 ---
 
