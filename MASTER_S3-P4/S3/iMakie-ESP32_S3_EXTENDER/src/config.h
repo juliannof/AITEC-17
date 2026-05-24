@@ -12,7 +12,7 @@
 #elif defined(DEVICE_S3_EXTENDER)
     #define DEVICE_FAMILY       0x14
     #define VERSION_REPLY_CMD   0x14
-    #define NUM_SLAVES          1
+    #define NUM_SLAVES          1   // TESTING=1 | PRODUCCIÓN=8 — no cambiar aquí sin hardware real
 
 #else
     #error "DEBE DEFINIR: DEVICE_P4_MASTER o DEVICE_S3_EXTENDER en platformio.ini build_flags"
@@ -44,9 +44,12 @@ extern volatile ConnectionState logicConnectionState;
 // --- Timing (µs) ---
 #define RS485_TX_ENABLE_US   30      // ← aumentado: transceiver setup típico 30-50µs
 #define RS485_TX_DONE_US     30      // ← aumentado: esperar a transceiver deshabilitar
-#define RS485_RESP_TIMEOUT_US 3000   // ← aumentado: margen más generoso para ISR overhead
+#define RS485_RESP_TIMEOUT_US 5000   // ← 5ms: absorbe stalls ESP32-S2 ~4ms cada ~2s (2026-05-23)
 #define RS485_GAP_US         300
-#define POLL_CYCLE_MS        10   // 100Hz con 1 slave — transacción ~3ms, margen suficiente (2026-05-19)
+#define POLL_CYCLE_MS        20   // Tiempo mínimo de ronda completa (todos los slaves).
+                                  // Con 1 slave (testing): 20ms → 50Hz, da margen al loop S2 (~10ms worst-case).
+                                  // Con 8 slaves (producción): ronda natural ~14ms > 20ms → este valor se ignora,
+                                  // cada slave se actualiza a ~71Hz sin espera adicional. (2026-05-23)
 
 // --- Calibración (2026-05-16 19:25) ---
 #define MAX_CALIBRATION_RETRIES     5   // máx reintentos RS485 timeout durante calibración
@@ -55,6 +58,8 @@ extern volatile ConnectionState logicConnectionState;
 // --- Fader Logic PitchBend (2026-05-18, confirmado MIDI monitor canal 2) ---
 // signed: min=-8192 (raw 0), max=+6653 (raw 14845) → span = 6653 - (-8192) = 14845
 #define LOGIC_PITCHBEND_MAX  14845
+#define FADER_SYNC_DEADBAND    200   // PitchBend counts S2→Logic: ~1.3% escala full (0-14845)
+#define MOTOR_SETTLE_THRESHOLD  80   // ADC counts: motor settled cuando |faderPos-target| <= este valor
 
 // --- NeoPixel Status LED (2026-05-16 19:40) ---
 #define NEOPIXEL_PIN 48              // GPIO 48 (WS2812B RGB)

@@ -7,7 +7,72 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 ## [Unreleased]
 
+### Pendientes
+
+| Prioridad | Tarea | Notas |
+|-----------|-------|-------|
+| 🟢 Baja | Añadir partición `coredump` (64K) en tablas de particiones S2/S3 | `E (112) esp_core_dump_flash: No core dump partition found!` al boot — solo estético, no bloquea operación |
+| 🟢 Baja | Optimización tráfico MIDI PitchBend (`DEADBAND=150`) | Reducir mensajes redundantes S2→Logic |
+
+---
+
+### SESIÓN 2026-05-24 — Fader S2→Logic feedback (11:31)
+
+**Objetivo:** Implementar y corregir el path de feedback de posición de fader desde S2 hasta Logic Pro.
+
+**Arquitectura final (jerarquía de masters):**
+
+| Estado motor | Master | Comportamiento S3 |
+|---|---|---|
+| Motor moviéndose (`\|faderPos-target\| > 80`) | **Logic** | Silencio — no enviar PitchBend |
+| Stall en tope físico (sobrepasa target) | **Logic** | Silencio — posición fuera de rango no se reporta |
+| Motor settled + deriva > 200 PB counts | Nadie | Sync — confirma posición real a Logic |
+| `touchState=1` + posición cambiada | **Usuario** | Envío inmediato sin deadband |
+
+**Bugs corregidos:**
+
+**Bug 1 — Mapeo usaba rango fijo 27000 (S3 `main.cpp`)**
+- El path S2→Logic usaba `faderPos * LOGIC_PITCHBEND_MAX / 27000` (rango teórico)
+- `setFaderTarget()` (Logic→S2) usaba rango calibrado real `calibratedMin..calibratedMax`
+- Asimetría: fader nunca alcanzaba 0% ni 100% en Logic al mapear con rango fijo
+- Fix: mapeo inverso exacto usando `calibratedMin/Max`; fallback a 27000 si sin calibrar
+
+**Bug 2 — PitchBend solo se enviaba con `touchState=1`**
+- FaderTouch capacitivo inoperativo → `touchState=1` solo si delta ADC > 150 cuentas
+- Movimientos lentos o fader parado no generaban feedback → Logic desincronizado
+- Fix: añadido path B (sync) que envía PitchBend aunque no haya toque, con condiciones
+
+**Bug 3 — Path sync disparaba durante movimiento de motor (Logic es master)**
+- Path B enviaba lecturas intermedias a Logic mientras motor se movía al target
+- Logic interpretaba esas lecturas como movimiento de usuario → cancelaba el move automático
+- Cambios de banco (+16): motores en tránsito → Logic recibía posiciones intermedias → interferencia
+- Fix: guard `motorSettled` — sync solo cuando `|faderPos - faderTarget| <= MOTOR_SETTLE_THRESHOLD`
+
+**Bug 4 — Umbral `motorSettled` demasiado holgado (500 ADC)**
+- Motor stall en tope físico a `adc=22968` con target `22776` (diferencia 192 counts)
+- `192 < 500` → `motorSettled=true` → sync disparaba con posición imposible hacia Logic
+- Fix: umbral reducido a `MOTOR_SETTLE_THRESHOLD = 80` (= `DEAD_ZONE` del motor S2)
+- Con 80: `192 > 80` → settled=false → sync suprimido en stall ✓
+
+**Cambios aplicados — solo S3:**
+
+| Archivo | Cambio |
+|---------|--------|
+| `config.h` | Añade `FADER_SYNC_DEADBAND 200` — deadband PB para sync S2→Logic |
+| `config.h` | Añade `MOTOR_SETTLE_THRESHOLD 80` — umbral ADC para considerar motor parado |
+| `main.cpp` | `processSlaveResponse()`: mapeo calibrado, jerarquía master, guards sync |
+
+**MCU afectadas:** Solo S3. S2 y P4 sin cambios.
+
+**Validación pendiente:**
+- [ ] Flash S3 con cambios
+- [ ] Mover fader manualmente → Logic debe actualizar posición (path A: touch)
+- [ ] Logic mueve fader (motor) → no debe interferir Logic durante tránsito
+- [ ] Cambio de banco (+16) → todos los faders llegan a nuevas posiciones sin interferencia
+- [ ] Fader settled en target → Logic confirma posición (path B: sync, una sola vez)
+
 ### Upload log S2
+- `2026-05-23 19:52` · Flash S2 · **FW 0.4.5** · `lolin_s2_mini`
 - `2026-05-23 19:18` · Flash S2 · **FW 0.4.4** · `lolin_s2_mini`
 - `2026-05-23 18:59` · Flash S2 · **FW 0.4.3** · `lolin_s2_mini`
 

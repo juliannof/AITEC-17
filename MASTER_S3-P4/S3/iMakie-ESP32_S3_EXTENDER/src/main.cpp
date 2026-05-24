@@ -88,13 +88,29 @@ static void processSlaveResponse(uint8_t slaveId) {
     }
 
     // NO ENVIAR si slave está en calibración (CALIB_SENDING activo) — valores raw no son válidos para Logic
-    if (ch.touchState && !(ch.buttons & SLAVE_FLAG_CALIB_SENDING)) {
-        uint16_t pb  = ((uint32_t)ch.faderPos * LOGIC_PITCHBEND_MAX / 27000) & 0x3FFF;
+    if (!(ch.buttons & SLAVE_FLAG_CALIB_SENDING)) {
+        // Mapeo inverso exacto de setFaderTarget: usa rango calibrado real (2026-05-24)
+        uint16_t pb;
+        uint16_t span = ch.calibratedMax - ch.calibratedMin;
+        if (span > 0) {
+            int32_t shifted = (int32_t)ch.faderPos - ch.calibratedMin;
+            pb = (uint16_t)constrain((int32_t)shifted * LOGIC_PITCHBEND_MAX / span, 0, LOGIC_PITCHBEND_MAX);
+        } else {
+            pb = (uint16_t)constrain((int32_t)ch.faderPos * LOGIC_PITCHBEND_MAX / 27000, 0, LOGIC_PITCHBEND_MAX);
+        }
 
-        // Send-only-on-change: filtrar repeticiones idénticas (reduce tráfico 850→~100 msgs/s)
-        if (pb != lastSentPb[slaveId]) {
-            log_i("[FADER→LOGIC] SEND pb=%d (pos=%d lastSent=%d)", pb, ch.faderPos, lastSentPb[slaveId]);
-            byte msg[3]  = { (byte)(0xE0 | midiCh), (byte)(pb & 0x7F), (byte)(pb >> 7) };
+        // Master hierarchy (2026-05-24):
+        //   touchState=1  → Usuario es master: enviar sin deadband
+        //   motor quieto  → Nadie: sync permitido (confirma posición real)
+        //   motor moviendo → Logic es master: silencio total (no interferir)
+        bool motorSettled = abs((int32_t)ch.faderPos - (int32_t)ch.faderTarget) <= MOTOR_SETTLE_THRESHOLD;
+        bool shouldSend = ch.touchState
+            ? (pb != lastSentPb[slaveId])
+            : (motorSettled && abs((int16_t)pb - (int16_t)lastSentPb[slaveId]) > FADER_SYNC_DEADBAND);
+
+        if (shouldSend) {
+            log_i("[FADER→LOGIC] SEND pb=%d touch=%d (pos=%d lastSent=%d)", pb, ch.touchState, ch.faderPos, lastSentPb[slaveId]);
+            byte msg[3] = { (byte)(0xE0 | midiCh), (byte)(pb & 0x7F), (byte)(pb >> 7) };
             sendMIDIBytes(msg, 3);
             lastSentPb[slaveId] = pb;
         }
