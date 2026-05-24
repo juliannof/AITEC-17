@@ -72,6 +72,7 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 - [ ] Fader settled en target → Logic confirma posición (path B: sync, una sola vez)
 
 ### Upload log S2
+- `2026-05-24 11:40` · Commit S2 · **FW 0.4.6** (sin upload)
 - `2026-05-23 19:52` · Flash S2 · **FW 0.4.5** · `lolin_s2_mini`
 - `2026-05-23 19:18` · Flash S2 · **FW 0.4.4** · `lolin_s2_mini`
 - `2026-05-23 18:59` · Flash S2 · **FW 0.4.3** · `lolin_s2_mini`

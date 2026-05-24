@@ -485,14 +485,26 @@ void setADCDelta(uint16_t currentADC) {
         return;  // Solo calibrar, no detectar delta en boot
     }
 
-    // No detectar usuario mientras el motor mueve el fader intencionalmente
+    // No detectar usuario durante calibración ni goToMin
     bool inCalibFlow = _isCalibrating() ||
                        _motor_state == MotorState::GOING_TO_MIN ||
-                       _motor_state == MotorState::CALIBRATING ||
-                       _motor_state == MotorState::MOVING_TO_TARGET;  // Evita auto-detección — motor rápido supera threshold (2026-05-19)
+                       _motor_state == MotorState::CALIBRATING;
     if (inCalibFlow) {
-        _motor_lastADCForDelta = currentADC;  // Actualizar referencia sin detectar
+        _motor_lastADCForDelta = currentADC;
         return;
+    }
+
+    // MOVING_TO_TARGET: suprimir solo si ADC va en la misma dirección que el target (2026-05-24)
+    // Motor rápido genera delta > threshold en su propia dirección → falsa detección
+    // Si el ADC va en dirección CONTRARIA al target → usuario oponiéndose → dejar pasar
+    if (_motor_state == MotorState::MOVING_TO_TARGET) {
+        bool motorGoingUp = (_motor_targetADC > _motor_lastADCForDelta);
+        bool adcGoingUp   = ((int)currentADC >= (int)_motor_lastADCForDelta);
+        if (motorGoingUp == adcGoingUp) {
+            _motor_lastADCForDelta = currentADC;
+            return;  // Motor en su dirección — no es el usuario
+        }
+        // Dirección opuesta: usuario oponiéndose → detección normal
     }
 
     // Spike eléctrico: raw ADC salta más de ADC_SPIKE_GUARD desde posición filtrada
