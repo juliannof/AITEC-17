@@ -142,6 +142,24 @@ void drawSplashScreen() {
 
 
 // ════════════════════════════════════════════════════════════
+//  VU — geometría y estado para dibujo diferencial en tft
+// ════════════════════════════════════════════════════════════
+namespace VU {
+    static constexpr int X      = MAINAREA_WIDTH + 3;
+    static constexpr int Y_TOP  = HEADER_HEIGHT + 4;
+    static constexpr int W      = 42;
+    static constexpr int H      = MAINAREA_HEIGHT - 10;
+    static constexpr int SEGS   = 12;
+    static constexpr int PAD    = 2;
+    static constexpr int CORNER = 2;
+    static constexpr int SEG_H  = (H - PAD * (SEGS - 1)) / SEGS;
+
+    int8_t lastActive = -1;   // -1 = nunca dibujado → fuerza fondo completo
+    int8_t lastPeak   = -1;
+    bool   lastClip   = false;
+}
+
+// ════════════════════════════════════════════════════════════
 //  updateDisplay  —  redraw total + redraws incrementales
 // ════════════════════════════════════════════════════════════
 void updateDisplay() {
@@ -311,24 +329,6 @@ void drawMainArea() {
     mainArea.pushSprite(0, HEADER_HEIGHT);
     
     
-}
-
-// ════════════════════════════════════════════════════════════
-//  VU — geometría y estado para dibujo diferencial en tft
-// ════════════════════════════════════════════════════════════
-namespace VU {
-    static constexpr int X      = MAINAREA_WIDTH + 3;
-    static constexpr int Y_TOP  = HEADER_HEIGHT + 4;
-    static constexpr int W      = 42;
-    static constexpr int H      = MAINAREA_HEIGHT - 10;
-    static constexpr int SEGS   = 12;
-    static constexpr int PAD    = 2;
-    static constexpr int CORNER = 2;
-    static constexpr int SEG_H  = (H - PAD * (SEGS - 1)) / SEGS;
-
-    int8_t lastActive = -1;   // -1 = nunca dibujado → fuerza fondo completo
-    int8_t lastPeak   = -1;
-    bool   lastClip   = false;
 }
 
 static uint16_t vuSegColor(int i, int active, int peak, bool clip) {
