@@ -49,9 +49,11 @@ void RS485Master::startTask() {
 void RS485Master::setCalibrate(uint8_t id) {
     if (id < 1 || id > _numSlaves) return;
     if (xSemaphoreTake(_mutex, pdMS_TO_TICKS(5)) == pdTRUE) {
-        _ch[id].calibrate  = true;
-        _ch[id].calibrating = true;  // FIX (2026-05-14): evita retries infinitos — Core0 verifica !calibrating
-        _ch[id].dirty      = true;
+        _ch[id].calibrate    = true;
+        _ch[id].calibrating  = true;
+        _ch[id].calibrated   = false;   // permite re-calibrar slaves en bypass (2026-05-26)
+        _ch[id].calibRetries = 0;
+        _ch[id].dirty        = true;
         xSemaphoreGive(_mutex);
     }
 }
@@ -263,9 +265,10 @@ void RS485Master::_handleResponse() {
         if (_currentId == 1 && !_ch[_currentId].calibrated && !_ch[_currentId].calibrating) {
             _ch[_currentId].stableRespCount++;
             if (_ch[_currentId].stableRespCount >= SLAVE_CALIB_SETTLE_RESPONSES) {
-                _ch[_currentId].calibrate   = true;
-                _ch[_currentId].calibrating = true;
-                _ch[_currentId].dirty       = true;
+                _ch[_currentId].calibrate     = true;
+                _ch[_currentId].calibrating   = true;
+                _ch[_currentId].calibRetries  = 0;   // reset budget en cada intento real (2026-05-26)
+                _ch[_currentId].dirty         = true;
                 log_i("[CALIB] Slave 1 estable (%d resp) — arrancando cascada de calibración",
                       _ch[_currentId].stableRespCount);
             } else {
@@ -312,30 +315,49 @@ void RS485Master::_handleResponse() {
                 // Cascada: disparar siguiente esclavo (2026-05-22)
                 uint8_t next = _currentId + 1;
                 if (next <= _numSlaves && !_ch[next].calibrated && !_ch[next].calibrating) {
-                    _ch[next].calibrate   = true;
-                    _ch[next].calibrating = true;
-                    _ch[next].dirty       = true;
+                    _ch[next].calibrate    = true;
+                    _ch[next].calibrating  = true;
+                    _ch[next].calibRetries = 0;   // reset budget en primer intento (2026-05-26)
+                    _ch[next].dirty        = true;
                     log_i("[CALIB] Cascada → Slave %d", next);
                 } else if (next > _numSlaves) {
                     log_i("[CALIB] Cascada completa — todos los slaves calibrados");
                 }
             }
         } else if (calibError) {
-            _ch[_currentId].calibrating  = false;
-            _ch[_currentId].calibRetries++;
-            if (_ch[_currentId].calibRetries >= MAX_CALIBRATION_RETRIES) {
-                // Demasiados errores: HALT (2026-05-22)
-                pixels.setPixelColor(0, pixels.Color(255, 0, 0));
-                pixels.show();
-                log_e("[CALIB] ✗ FALLO CRÍTICO Slave %d — %d errores de calibración. Sistema DETENIDO.",
-                      _currentId, _ch[_currentId].calibRetries);
-                while(1) delay(1000);
-            } else {
-                // Reset grace period: reintento tras N respuestas estables (no inmediato)
-                _ch[_currentId].stableRespCount = 0;
-                log_e("[CALIB] Slave %d ✗ ERROR calibración (%d/%d) — esperando grace period para reintento",
-                      _currentId, _ch[_currentId].calibRetries, MAX_CALIBRATION_RETRIES);
+            // Guard: contar solo si este intento fue nuestro (2026-05-26)
+            // S2 reporta CalibPhase::ERROR en CADA paquete hasta que se reinicia.
+            // Sin guard, 5 paquetes consecutivos == HALT prematuro antes del primer reintento.
+            if (_ch[_currentId].calibrating) {
+                _ch[_currentId].calibrating  = false;
+                _ch[_currentId].calibRetries++;
+                if (_ch[_currentId].calibRetries >= MAX_CALIBRATION_RETRIES) {
+                    // Bypass: slave responde pero no calibra — continuar cascade (2026-05-26)
+                    // No haltar: marcar como calibrado con rango teórico, la cascada sigue.
+                    // El slave "díscolo" puede re-calibrarse después con setCalibrate(id).
+                    _ch[_currentId].calibrated = true;   // bypass — rango teórico 0-27000
+                    _ch[_currentId].dirty      = true;
+                    log_w("[CALIB] Slave %d ✗ BYPASS tras %d errores — operando sin calibrar (rango teórico)",
+                          _currentId, _ch[_currentId].calibRetries);
+                    // Continuar cascada al siguiente slave
+                    uint8_t next = _currentId + 1;
+                    if (next <= _numSlaves && !_ch[next].calibrated && !_ch[next].calibrating) {
+                        _ch[next].calibrate    = true;
+                        _ch[next].calibrating  = true;
+                        _ch[next].calibRetries = 0;
+                        _ch[next].dirty        = true;
+                        log_i("[CALIB] Cascada → Slave %d (tras bypass slave %d)", next, _currentId);
+                    } else if (next > _numSlaves) {
+                        log_i("[CALIB] Cascada completa (con bypass)");
+                    }
+                } else {
+                    // Reintento tras grace period: N respuestas estables antes de nuevo intento
+                    _ch[_currentId].stableRespCount = 0;
+                    log_e("[CALIB] Slave %d ✗ ERROR calibración (%d/%d) — grace period activo",
+                          _currentId, _ch[_currentId].calibRetries, MAX_CALIBRATION_RETRIES);
+                }
             }
+            // Si !calibrating: grace period activo — ignorar ERROR duplicados del mismo fallo
         } else {
             // S2 en tránsito — calibrating solo lo limpia CALIB_DONE o CALIB_ERROR
         }
