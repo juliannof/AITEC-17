@@ -323,11 +323,10 @@ void RS485Master::_handleResponse() {
                 _ch[_currentId].calibrating  = false;
                 _ch[_currentId].calibRetries++;
                 if (_ch[_currentId].calibRetries >= MAX_CALIBRATION_RETRIES) {
-                    // Sin bypass, sin HALT — cascade continúa, reintento posterior (2026-05-26)
-                    // El slave díscolo queda calibrated=false y será reintentado por wraparound.
-                    _ch[_currentId].calibRetries = 0;   // presupuesto limpio para próximo intento
-                    log_w("[CALIB] Slave %d — %d intentos fallidos, cascade continúa",
-                          _currentId, MAX_CALIBRATION_RETRIES);
+                    // Presupuesto agotado — NO resetear calibRetries (2026-05-26)
+                    // _triggerNextCalibration lo saltará: calibRetries>=MAX → skip definitivo
+                    log_w("[CALIB] Slave %d — %d intentos fallidos, marcado como defectuoso",
+                          _currentId, _ch[_currentId].calibRetries);
                     _triggerNextCalibration(_currentId);
                 } else {
                     // Reintento tras grace period: N respuestas estables antes de nuevo intento
@@ -364,7 +363,8 @@ void RS485Master::_triggerNextCalibration(uint8_t fromId) {
         uint8_t start = (pass == 0) ? fromId + 1 : 1;
         uint8_t end   = (pass == 0) ? _numSlaves  : fromId;
         for (uint8_t i = start; i <= end; i++) {
-            if (!_ch[i].calibrated && !_ch[i].calibrating) {
+            if (!_ch[i].calibrated && !_ch[i].calibrating
+            && _ch[i].calibRetries < MAX_CALIBRATION_RETRIES) {  // skip si presupuesto agotado
                 _ch[i].calibrate    = true;
                 _ch[i].calibrating  = true;
                 _ch[i].calibRetries = 0;
@@ -374,7 +374,15 @@ void RS485Master::_triggerNextCalibration(uint8_t fromId) {
             }
         }
     }
-    log_i("[CALIB] ✓ Todos los slaves calibrados");
+    // Nada pendiente — reportar estado final
+    bool allOk = true;
+    for (uint8_t i = 1; i <= _numSlaves; i++) {
+        if (!_ch[i].calibrated) {
+            log_e("[CALIB] ✗ Slave %d — no calibrado (hardware defectuoso)", i);
+            allOk = false;
+        }
+    }
+    if (allOk) log_i("[CALIB] ✓ Todos los slaves calibrados");
 }
 
 void RS485Master::_nextSlave() {
