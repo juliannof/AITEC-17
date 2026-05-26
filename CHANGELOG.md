@@ -11,12 +11,43 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 | Prioridad | Tarea | Notas |
 |-----------|-------|-------|
-| 🟡 **PENDIENTE FLASH** | **OTA WiFi S2** — fix aplicado en código, pendiente flash + validación | Bug #1 (GPIO flotantes) corregido: bloque `safePins` en `setup()` + OTA password activo. Flashear sketch provisioning primero, luego firmware producción. Ver `docs/WIFI-OTA.md` §5.3 y `S2/provisioning/`. |
+| 🟢 Baja | **OTA WiFi S2** — ✅ validado hardware (2026-05-26) | OTA funcional en 4 faders. Flashear provisioning + firmware. Ver `docs/WIFI-OTA.md`. |
 | 🔴 **VALIDACIÓN HW** | **Fader S2→Logic + detección usuario** — auditado 2026-05-25, listo para flash | S3: mapeo calibrado, jerarquía master, sync guard. S2: detección dirección en MOVING_TO_TARGET. Commits `6f6ace6` + `d171b12`. Firmware verificado en código — pendiente flash y test en hardware. |
 | 🟢 Baja | Añadir partición `coredump` (64K) en tablas de particiones S2/S3 | `E (112) esp_core_dump_flash: No core dump partition found!` al boot — solo estético, no bloquea operación |
 | 🟢 Baja | Optimización tráfico MIDI PitchBend (`DEADBAND=150`) | Reducir mensajes redundantes S2→Logic |
 | 🟡 Media | **Protocolo de cierre Logic — GoOffline limpio en P4 y S3** | Observado en captura 2026-05-24: handshake de arranque tiene 3 reintentos en S3 (~3s). El cierre de Logic (GoOffline + desconexión USB) no está validado ni documentado. Implementar secuencia `0x0F` → reset de estados → faders a 0 → LED off, limpia en ambos MCU. Ver `docs/MIDI.md` sección 3.4. |
 | 🟢 Baja | **P4: VU global 16 pistas via MIDI UART S3→P4** | S3 re-emite MIDI de Logic (ch 1–8) a P4 por UART directo (ch 9–16). P4 agrega las 16 pistas en display LVGL. Sin WiFi, sin protocolo custom — reutiliza `processMidiByte()` existente. 1 cable TX→RX. Ver `docs/S3ToP4.md` sección "Feature: Agregación 16 pistas". |
+
+---
+
+### SESIÓN 2026-05-26 — OTA WiFi S2 + VUMeter completo (17:48)
+
+**Objetivo:** Resolver OTA WiFi S2 + VUMeter flickering
+
+**Resuelto ✅**
+
+| Fix | MCU | Archivos | Descripción |
+|-----|-----|----------|-------------|
+| Bug #1 GPIO flotantes ciegan WiFi | S2 | `main.cpp` | Bloque `safePins` (OUTPUT LOW todos los GPIO) al inicio de `setup()` antes del check `otaMode` — root cause documentado en `docs/WIFI-OTA.md §5.3` |
+| OTA password activo | S2 | `OtaManager.cpp` | `otaPass` ahora se pasa a `ElegantOTA.begin()` — Basic Auth funcional |
+| Sketch provisioning | S2 | `S2/provisioning/provisioning.ino` | Guardado en repo sanitizado (sin credenciales) |
+| Credenciales eliminadas | docs | `WIFI-OTA.md`, `CHANGELOG.md`, `STATUS.md` | Credenciales reales retiradas de todos los documentos públicos |
+| WIFI.md → WIFI-OTA.md | docs | `docs/WIFI-OTA.md` | Renombrado, referencias actualizadas en 5 archivos |
+| `lolin_s2_mini_ota` eliminado | S2 | `platformio.ini`, `upload_ota.py` | Entorno roto (espota.py ≠ ElegantOTA) + credencial expuesta en `upload_flags` |
+| `WiFiManager` retirado de lib_deps | S2 | `platformio.ini` | Librería eliminada del código en 2026-05-20, quedaba huérfana |
+| VUMeter: namespace VU orden | S2 | `Display.cpp` | `namespace VU` movido antes de `updateDisplay()` — error de compilación `'VU' has not been declared` |
+| VUMeter: peak estilo hardware | S2 | `Display.cpp` | Peak = segmento ON en su color natural (verde/amarillo/rojo). Sin borde blanco. Comportamiento idéntico a VU hardware real (SSL, Neve) |
+| VUMeter: decay S3 timeout | S3 | `main.cpp` | Check cada 50ms: si no llega Channel Pressure en >200ms → `setVuLevel(0)` → S2 decae via `handleVUMeterDecay()` |
+
+**Validado en hardware ✅**
+- OTA funcional en 4 faders (upload browser + Basic Auth)
+- VUMeter sin flickering
+- Peak hold estilo hardware
+- Decay funcional al parar audio (~300ms: 200ms S3 timeout + 100ms decay S2)
+
+**Commits:** `4c4ef4b`, `cb3ec9d`, `008c57f`, `9d5bd8f`, `ad0fd55`, `07d12cd`
+
+**MCU afectadas:** S2 (OTA + VU display) + S3 (VU decay). P4 sin cambios.
 
 ---
 
@@ -133,6 +164,7 @@ Regenera `.vscode/c_cpp_properties.json` desde cero. Nunca editar manualmente.
 - [ ] Fader settled en target → Logic confirma posición (path B: sync, una sola vez)
 
 ### Upload log S2
+- `2026-05-26 17:51` · Flash S2 · **FW 0.4.8** · `lolin_s2_mini`
 - `2026-05-26 17:50` · Commit S2 · **FW 0.4.7** (sin upload)
 - `2026-05-24 11:40` · Commit S2 · **FW 0.4.6** (sin upload)
 - `2026-05-23 19:52` · Flash S2 · **FW 0.4.5** · `lolin_s2_mini`
