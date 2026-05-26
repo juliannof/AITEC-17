@@ -100,9 +100,11 @@ void onMasterData(const MasterPacket& pkt) {
            }
 
     // ── VU meter — attack instantáneo, decay por handleVUMeterDecay() ──────
+    // vuLastUpdateTime SOLO se actualiza cuando VU realmente sube.
+    // Si se resetea en cada paquete RS485 (~10ms), el decay de 100ms nunca dispara. (2026-05-26)
     float newVu = pkt.vuLevel / 127.0f;
-    if (newVu > 0.01f) vuLastUpdateTime = millis();   // previene decay mientras llega señal
     if (newVu > vuLevels + 0.01f) {                   // solo subir desde RS485
+        vuLastUpdateTime = millis();
         vuLevels = newVu;
         if (vuLevels > vuPeakLevels) {
             vuPeakLevels         = vuLevels;
