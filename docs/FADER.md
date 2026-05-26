@@ -724,7 +724,327 @@ S3 respuesta:
 
 ---
 
-## 10. HISTORIA DE CAMBIOS
+## 10. VUMETER — Arquitectura Completa (2026-05-26)
+
+### 10.1 Qué es y para qué sirve
+
+El VUMeter del S2 muestra el nivel de audio del canal asignado. Los datos vienen de Logic Pro vía MIDI → S3 → RS485 → S2 → Display. Es un indicador **pasivo**: S2 recibe el nivel ya calculado por Logic, no procesa audio.
+
+---
+
+### 10.2 Flujo de datos completo
+
+```
+Logic Pro
+  │  Channel Pressure (0xD0)
+  │  value = (trackId << 4) | mcu_level
+  │  mcu_level 0x00-0x0B = nivel  0x0E = clip  0x0F = clear_clip
+  │  Frecuencia: ~30 Hz (cada ~33ms)
+  ▼
+S3 MIDIProcessor::processChannelPressure()
+  │  Decodifica trackId y mcu_level
+  │  Normaliza: normalizedLevel = mcu_level / 11.0f
+  │  Convierte: vuLevel7bit = (uint8_t)(normalizedLevel * 127.0f)
+  │  Llama: rs485.setVuLevel(trackId + 1, vuLevel7bit)
+  ▼
+S3 RS485Master — _ch[id].vuLevel = value
+  │  Incluido en MasterPacket.vuLevel (0-127) en cada ciclo RS485
+  │  Frecuencia: ~50 Hz (ciclo RS485 ~20ms con 1 slave)
+  ▼
+S2 RS485Handler::onMasterData()
+  │  float newVu = pkt.vuLevel / 127.0f  →  0.0-1.0
+  │  Attack instantáneo: solo sube desde RS485
+  │  vuLastUpdateTime = millis() si newVu > 0.01
+  │  needsVUMetersRedraw = true si nivel subió
+  ▼
+S2 handleVUMeterDecay()  ← llamada cada loop()
+  │  Decay: -1/12 segmento cada 100ms si no llega señal
+  │  Peak hold: 2000ms, luego salta al nivel actual
+  ▼
+S2 drawVUMeters()  ← llamada desde updateDisplay()
+  │  Dibujo diferencial: solo segmentos que cambiaron
+  │  Directo en tft (sin sprite intermedio)
+  ▼
+Display ST7789V3 — 12 segmentos RGB565
+```
+
+---
+
+### 10.3 Encoding Mackie MCU — Channel Pressure
+
+Logic Pro envía el nivel VU como **Channel Pressure** (MIDI 0xD0) en canal MIDI 1.
+
+```
+Byte value = (trackId << 4) | mcu_level
+
+trackId:   bits 7-4  → qué canal del Extender (0-7)
+mcu_level: bits 3-0  → nivel en 4 bits:
+  0x00           = silencio
+  0x01 .. 0x0B   = escala logarítmica (1/11 .. 11/11)
+  0x0C, 0x0D     = alto / muy alto  → normalizedLevel = 1.0
+  0x0E           = clip             → vuLevel7bit = 127
+  0x0F           = clear clip       → mantiene nivel actual
+```
+
+**Datos reales capturados con MIDI Monitor (2026-05-26):**
+
+```
+Frecuencia:  ~30 Hz (grupos de 4-5 mensajes cada ~33ms)
+Niveles observados: mcu_level 5, 6, 7, 8 (oscilación normal de audio)
+Patrón por ciclo:
+  value=6   → track 0, level 6  ← VU real del canal activo
+  value=31  → track 1, clear_clip (0x1F)
+  value=47  → track 2, clear_clip (0x2F)
+  value=79  → track 4, clear_clip (0x4F)
+
+mcu_level 5 → vuLevel7bit = 58  →  newVu = 0.457 →  5-6/12 segmentos
+mcu_level 6 → vuLevel7bit = 69  →  newVu = 0.543 →  6-7/12 segmentos
+mcu_level 7 → vuLevel7bit = 81  →  newVu = 0.638 →  7-8/12 segmentos
+mcu_level 8 → vuLevel7bit = 92  →  newVu = 0.724 →  8-9/12 segmentos
+```
+
+**Diagnóstico del chisporreo (2026-05-26):**
+El VUMeter chisporroteaba porque la señal de audio real fluctúa entre mcu_level 5-9 (~33ms), generando cambios de 4 segmentos visibles sin ningún smoothing. No había VU=0 intermitentes — era oscilación normal del audio sin decay visual.
+
+---
+
+### 10.4 Conversión en S3 — processChannelPressure()
+
+```cpp
+// MIDIProcessor.cpp
+void processChannelPressure(byte channel, byte value) {
+    // channel == 0 → encoding Mackie compacto (trackId + level en 1 byte)
+    if (channel == 0) {
+        int targetChannel = (value >> 4) & 0x0F;   // track 0-7
+        byte mcu_level    = value & 0x0F;
+
+        switch (mcu_level) {
+            case 0x0F:  // clear clip — mantiene nivel, solo borra indicador
+                clearClip = true;
+                normalizedLevel = vuLevels[targetChannel];
+                vuLevel7bit = (uint8_t)(normalizedLevel * 127.0f);  // ← NO enviar 0
+                break;
+            case 0x0E:  // clip
+                newClipState = true;
+                normalizedLevel = 1.0f;
+                vuLevel7bit = 127;
+                break;
+            case 0x0C: case 0x0D:  // muy alto
+                normalizedLevel = 1.0f;
+                vuLevel7bit = 120;
+                break;
+            default:   // 0x00-0x0B → escala normal
+                normalizedLevel = (mcu_level <= 11) ? (float)mcu_level / 11.0f : 0.0f;
+                vuLevel7bit = (uint8_t)(normalizedLevel * 127.0f);
+                break;
+        }
+        rs485.setVuLevel(targetChannel + 1, vuLevel7bit);
+    }
+}
+```
+
+⚠️ **Bug conocido en clear_clip (no crítico con NUM_SLAVES=1):**
+El case `0x0F` original dejaba `vuLevel7bit = 0` → enviaba VU=0 al slave en cada clear_clip. Con NUM_SLAVES=1 el único slave activo es track 0, que nunca recibe clear_clip, así que no afecta. Con más slaves sí causaría chisporreo en los que reciben clear_clip con audio activo.
+
+---
+
+### 10.5 Lógica Attack/Decay en S2
+
+**Antes (bug):** `vuLevels` se actualizaba en cualquier dirección (subida y bajada) desde RS485, y `handleVUMeterDecay()` nunca se llamaba → el VU reflejaba directamente el valor crudo de cada paquete → chisporreo.
+
+**Después (fix 2026-05-26):**
+
+```
+Attack (RS485Handler::onMasterData):
+  ├── Si newVu > 0.01 → actualiza vuLastUpdateTime (previene decay)
+  └── Si newVu > vuLevels + 0.01 → sube vuLevels instantáneamente
+
+Decay (handleVUMeterDecay, llamada en loop()):
+  ├── Si vuLevels > 0 y now - vuLastUpdateTime > 100ms → baja 1/12 por tick
+  ├── Peak hold: 2000ms, luego peak salta al nivel actual
+  └── Seguridad: peak nunca < nivel actual
+```
+
+**Comportamiento resultante:**
+- Audio sube de 0 a 9 segmentos → VU sube instantáneamente
+- Audio baja momentáneamente → `vuLastUpdateTime` se mantiene activo → decay NO actúa
+- Audio deja de llegar (silencio real) → tras 100ms, decay baja 1 segmento cada 100ms
+- Pico → línea gris se mantiene 2s en el máximo alcanzado
+
+---
+
+### 10.6 Arquitectura de Dibujo — Diferencial sin Sprite
+
+#### Antes (sprite completo):
+```
+drawVUMeters() {
+  vuSprite.fillSprite(gris)          ← borra 60×230px en PSRAM  (~27KB escritura)
+  for i in 0..11:
+    vuSprite.fillRoundRect(...)      ← 12 primitivas en PSRAM
+  vuSprite.pushSprite(x, y)          ← SPI: 60×230×2 = 27.6KB transferidos
+}
+```
+**Coste total:** ~27KB por SPI + 12 fillRoundRect en PSRAM, siempre.  
+**PSRAM consumida:** 27.6KB (liberados con el nuevo diseño).
+
+#### Después (diferencial directo en tft):
+```
+drawVUMeters() {
+  Calcular: active, peak, showPeak, clip
+
+  Si lastActive < 0:                 ← primera vez o tras fillScreen total
+    tft.fillRect(área VU, gris)      ← fondo una sola vez
+    for i in 0..11: vuDrawSeg(i)     ← 12 segmentos
+
+  Si no:                             ← diferencial
+    for i in 0..11:
+      si color cambió: vuDrawSeg(i)  ← solo los que cambiaron (1-3 típico)
+}
+```
+**Coste típico (1 segmento cambia):** 1 fillRoundRect = 42×17px × 2B = ~1.4KB.  
+**Ratio vs anterior:** ~20× menos datos SPI en el caso normal.
+
+#### Geometría del VU (coordenadas absolutas en pantalla):
+
+```
+namespace VU {
+    X      = MAINAREA_WIDTH + 3    // pixel X inicio en pantalla
+    Y_TOP  = HEADER_HEIGHT  + 4    // pixel Y inicio en pantalla
+    W      = 42                    // ancho del VU en pixels
+    H      = MAINAREA_HEIGHT - 10  // alto total del VU en pixels
+    SEGS   = 12                    // número de segmentos
+    PAD    = 2                     // separación entre segmentos (px)
+    CORNER = 2                     // radio de esquinas redondeadas (px)
+    SEG_H  = (H - PAD*(SEGS-1)) / SEGS   // alto de cada segmento ≈ 17px
+}
+```
+
+#### Colores por segmento:
+
+| Segmentos | Estado ON | Estado OFF | Peak borde |
+|-----------|-----------|------------|------------|
+| 0-7 (bajo) | `VU_GREEN_ON` (verde) | `VU_GREEN_OFF` (verde oscuro) | `VU_PEAK_COLOR` (gris) |
+| 8-9 (medio) | `VU_YELLOW_ON` (amarillo) | `VU_YELLOW_OFF` (amarillo oscuro) | `VU_PEAK_COLOR` |
+| 10-11 (alto) | `VU_RED_ON` (rojo) | `VU_RED_OFF` (rojo oscuro) | `VU_PEAK_COLOR` |
+| 11 (clip) | `VU_RED_ON` (siempre ON si clip) | — | — |
+
+#### Lógica de selección de color:
+
+```cpp
+static uint16_t vuSegColor(int i, int active, int peak, bool clip) {
+    if (i == VU::SEGS - 1 && clip) return VU_RED_ON;           // clip override
+    if (peak >= 0 && i == peak)    return offColor(i);          // peak: fondo apagado
+    if (i < active)                return onColor(i);           // activo: encendido
+    return                                offColor(i);           // inactivo: apagado
+}
+// Peak borde doble: drawRoundRect exterior + interior (efecto 3D)
+```
+
+#### Estado diferencial guardado:
+
+```cpp
+namespace VU {
+    int8_t lastActive = -1;   // -1 = no dibujado → fuerza fondo + todos los segs
+    int8_t lastPeak   = -1;   // índice del segmento pico anterior (-1 = sin pico)
+    bool   lastClip   = false;
+}
+// Reset a -1 en cada needsTOTALRedraw (tras fillScreen) para forzar redibujado completo
+```
+
+---
+
+### 10.7 handleVUMeterDecay() — Implementación
+
+```cpp
+// Display.cpp (S2) y UIPage3.cpp (P4) — misma lógica
+void handleVUMeterDecay() {
+    const unsigned long DECAY_INTERVAL_MS = 100;    // 1 segmento cada 100ms
+    const unsigned long PEAK_HOLD_TIME_MS = 2000;   // peak se mantiene 2s
+    const float         DECAY_AMOUNT      = 1.0f / 12.0f;  // 1 segmento por tick
+
+    unsigned long now = millis();
+    bool changed = false;
+
+    // 1. Decay del nivel: baja si no llega señal nueva
+    if (vuLevels > 0 && now - vuLastUpdateTime > DECAY_INTERVAL_MS) {
+        vuLevels -= DECAY_AMOUNT;
+        if (vuLevels < 0.01f) vuLevels = 0.0f;
+        vuLastUpdateTime = now;   // ← resetea para que el siguiente tick espere 100ms más
+        changed = true;
+    }
+
+    // 2. Decay del peak: tras 2s, peak salta al nivel actual
+    if (vuPeakLevels > 0 && now - vuPeakLastUpdateTime > PEAK_HOLD_TIME_MS) {
+        if (vuPeakLevels > vuLevels) {
+            vuPeakLevels = vuLevels;
+            vuPeakLastUpdateTime = now;
+            changed = true;
+        }
+    }
+
+    // 3. Seguridad: peak nunca puede ser menor que el nivel
+    if (vuPeakLevels < vuLevels) {
+        vuPeakLevels = vuLevels;
+        vuPeakLastUpdateTime = now;
+        changed = true;
+    }
+
+    if (changed) needsVUMetersRedraw = true;
+}
+```
+
+**Dónde se llama:**
+- **S2:** `loop()` en `main.cpp`, antes de `updateDisplay()`
+- **P4:** `uiPage3Update()` en `UIPage3.cpp`, línea ~169
+
+**Tiempo de decay de nivel máximo a 0:** 12 ticks × 100ms = **1.2 segundos**
+
+---
+
+### 10.8 Integración en loop() S2
+
+```cpp
+// main.cpp — orden en loop()
+updateButtons();
+handleVUMeterDecay();    // ← decay temporal (100ms tick)
+updateDisplay();          // ← drawVUMeters() si needsVUMetersRedraw
+updateAllNeopixels();
+```
+
+`handleVUMeterDecay()` se llama en cada iteración del loop (sin throttle propio en la llamada — el throttle está internamente con `DECAY_INTERVAL_MS`). El coste es mínimo: 3 comparaciones de `millis()` + 1 resta si hay que decaer.
+
+---
+
+### 10.9 Diferencias S2 vs P4
+
+| Aspecto | S2 (Slave) | P4 (Master) |
+|---------|-----------|-------------|
+| **Librería display** | LovyanGFX (tft directo) | LVGL v9 (objetos) |
+| **Dibujo** | `tft.fillRoundRect()` directo | `lv_obj_set_style_bg_color()` |
+| **Canales VU** | 1 (canal propio) | 9 (todos los slaves del bus A) |
+| **Estado previo** | `VU::lastActive`, `VU::lastPeak` | LVGL mantiene estado de objetos |
+| **Decay** | `handleVUMeterDecay()` en loop() | `handleVUMeterDecay()` en uiPage3Update() |
+| **PSRAM para VU** | 0 (eliminado sprite) | N/A (LVGL heap interno) |
+
+---
+
+### 10.10 Performance VUMeter
+
+| Métrica | Valor | Notas |
+|---------|-------|-------|
+| **Frecuencia Logic → S3** | ~30 Hz (33ms) | Channel Pressure cada frame de audio |
+| **Frecuencia S3 → S2** | ~50 Hz (20ms) | Ciclo RS485 con 1 slave |
+| **Attack (subida)** | instantáneo | RS485Handler actualiza sin delay |
+| **Decay (bajada)** | 100ms/segmento | 1.2s de máx a 0 |
+| **Peak hold** | 2000ms | Luego salta al nivel actual |
+| **Segmentos cambiados/update** | 1-3 (típico) | Audio ±1-2 segmentos entre frames |
+| **Datos SPI/update** | ~1.4KB (1 seg) | vs 27.6KB antes (sprite completo) |
+| **Mejora SPI** | ~20× | Caso típico 1 segmento |
+| **PSRAM liberada** | 27.6KB | vuSprite eliminado |
+
+---
+
+## 11. HISTORIA DE CAMBIOS
 
 ### 2026-05-16 08:05 — PitchBend signed 14-bit fix
 

@@ -14,18 +14,17 @@ Documentación exhaustiva del subsistema WiFi, provisioning de credenciales, OTA
 
 ```cpp
 // config.h (S2)
-#define WIFI_SSID_DEFAULT      "Julianno-WiFi"
-#define WIFI_PASS_DEFAULT      "JULIANf1"
-#define OTA_PASS_DEFAULT       "9821"
+#define WIFI_SSID_DEFAULT      "<TU_SSID>"
+#define WIFI_PASS_DEFAULT      "<TU_PASS>"
+#define OTA_PASS_DEFAULT       "<TU_OTA_PASS>"
 ```
 
 **Red WiFi:**
-- SSID: `Julianno-WiFi`
-- Contraseña: `JULIANf1`
+- SSID: configurado en NVS o `WIFI_SSID_DEFAULT` en `config.h`
 - Frecuencia: 2.4GHz (ESP32-S2 no soporta 5GHz)
 
 **OTA:**
-- Contraseña de acceso: `9821` (para evitar acceso no autorizado)
+- Contraseña de acceso: configurada en NVS o `OTA_PASS_DEFAULT` en `config.h`
 
 ### 1.2 Almacenamiento NVS
 
@@ -316,18 +315,51 @@ void setup() {
 
 | Síntoma | Causa Probable | Verificación |
 |---------|----------------|--------------|
-| WiFi no conecta | Credenciales incorrectas | Revisar NVS con `nvs_get` |
-| OTA no aparece | WiFi no conectado | Check IP con `Serial.print()` |
+| **WiFi scan devuelve 0 redes** | **GPIO flotantes — ver Bug #1** | **Añadir bloque safePins antes de WiFi.begin()** |
+| WiFi no conecta | Credenciales incorrectas en NVS | Reflashear sketch provisioning |
+| OTA no aparece | WiFi no conectado | Check log serial: `[OTA] IP address:` |
 | Upload lento | Red congestionada | Intenta cerca del router (2-3m) |
 | Falla CRC32 | Firmware corrompido en upload | Reintenta, verifica archivo .bin |
 | Reinicia infinito | otaMode flag stuck | Limpiar NVS: `prefs.remove("otaMode")` |
 | PSRAM leak | Sprites no liberados en OTA-only | Verificar `initDisplay(true)` |
 
+---
+
+### 5.3 Bug #1 — GPIO Flotantes Bloquean WiFi (2026-05-26) 🔴 PENDIENTE FIX
+
+**Síntoma:** `WiFi.scanNetworks()` devuelve 0 redes. WiFi no conecta en OTA-only mode aunque las credenciales sean correctas.
+
+**Root cause:** El ESP32-S2 tiene ~33 GPIO disponibles. En OTA-only mode, `setup()` solo inicializa `Motor::init()` + `initDisplay(true)` — el resto de pines (NeoPixels, encoder, botones, FaderTouch, ADS1115 I2C, RS485) quedan **flotantes**. Los pines flotantes generan interferencia RF que ciega el radio WiFi.
+
+**Impacto:** OTA no funciona en unidades nuevas ni en cualquier unidad que entre en OTA-only mode.
+
+**Workaround probado:** El sketch de provisioning incluye un bloque `safePins` que pone todos los GPIO disponibles en `OUTPUT LOW` antes de inicializar WiFi. Con este bloque, `scanNetworks()` detecta redes y WiFi conecta correctamente.
+
+**GPIOs seguros a LOW** (excluidos: GPIO0 bootstrap, 19-20 USB, 26-32 QSPI flash/PSRAM, 46 input-only):
+```cpp
+const uint8_t safePins[] = {
+     1,  2,  3,  4,  5,  6,  7,  8,  9, 10,
+    11, 12, 13, 14, 15, 16, 17, 18, 21,
+    33, 34, 35, 36, 37, 38, 39, 40,
+    41, 42, 43, 44, 45
+};
+for (uint8_t pin : safePins) {
+    pinMode(pin, OUTPUT);
+    digitalWrite(pin, LOW);
+}
+```
+
+**Fix aplicado (2026-05-26):** Bloque `safePins` añadido al inicio de `setup()` en `main.cpp`, antes del check `otaMode` y antes de `Motor::init()` — aplica tanto en boot normal como en OTA-only mode. Los módulos posteriores reconfiguran sus pines en su propio `init()`.
+
+**Fix adicional (2026-05-26):** `OtaManager::enableForUpload()` ahora pasa `otaPass` a `ElegantOTA.begin()` → Basic Auth activo si NVS tiene contraseña OTA.
+
+**Pendiente:** Flash + validación hardware. Sketch provisioning en `S2/provisioning/`.
+
 ### 5.2 Debugging Logs
 
 **Conexión WiFi exitosa:**
 ```
-[OTA] Buscando SSID: Julianno-WiFi
+[OTA] Buscando SSID: <TU_SSID>
 [OTA] Conectado, IP: 192.168.1.100
 [OTA] Web server en puerto 80
 [OTA] Accede a: http://192.168.1.100/update
@@ -355,6 +387,15 @@ void setup() {
 ---
 
 ## 6. HISTORIAL CAMBIOS
+
+### 6.0 Bug #1 — GPIO Flotantes (2026-05-26) — 🔴 Pendiente fix firmware
+
+**Descubierto:** Sketch provisioning funciona solo cuando se añade bloque `safePins` (OUTPUT LOW en todos los GPIO disponibles). Sin él, `WiFi.scanNetworks()` devuelve 0 — radio WiFi cegado por interferencia de pines flotantes.
+
+**Afectado:** OTA-only mode en `main.cpp` — no llama a `initHardware()` → pines RS485, encoder, botones, NeoPixels, FaderTouch flotantes.
+
+**Fix aplicado:** Bloque `safePins` añadido al inicio de `setup()` antes del check `otaMode`. `otaPass` ahora se pasa a `ElegantOTA.begin()`. Pendiente flash + validación.
+
 
 ### 6.1 2026-05-14: Migración ArduinoOTA → ElegantOTA
 
@@ -392,3 +433,4 @@ void setup() {
 ## Últimas Actualizaciones
 
 - **(2026-05-16)** Creado WIFI.md como documento exhaustivo, trasladado contenido de CLAUDE.md
+- **(2026-05-26)** Renombrado WIFI.md → WIFI-OTA.md (nombre más descriptivo)

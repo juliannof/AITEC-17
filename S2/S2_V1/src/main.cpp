@@ -24,7 +24,7 @@
 
 // ─── Objetos globales ─────────────────────────────────────────
 LGFX        tft;
-LGFX_Sprite header(&tft), mainArea(&tft), vuSprite(&tft), vPotSprite(&tft);
+LGFX_Sprite header(&tft), mainArea(&tft), vPotSprite(&tft);
 FaderADC    faderADC;
 
 // ─── Estado de canal ──────────────────────────────────────────
@@ -75,7 +75,6 @@ static void _satLedsOff() {
 static void _satSuspendSprites() {
     header.deleteSprite();
     mainArea.deleteSprite();
-    vuSprite.deleteSprite();
     vPotSprite.deleteSprite();
     log_i("Sprites suspendidos | PSRAM libre: %d", ESP.getFreePsram());
 }
@@ -88,17 +87,12 @@ static void _satRestoreSprites() {
     header.setPsram(true);
     header.createSprite(TFT_WIDTH, HEADER_HEIGHT);
 
-    vuSprite.setColorDepth(16);
-    vuSprite.setPsram(true);
-    vuSprite.createSprite(TFT_WIDTH - MAINAREA_WIDTH, MAINAREA_HEIGHT);
-
     vPotSprite.setColorDepth(16);
     vPotSprite.setPsram(true);
     vPotSprite.createSprite(TFT_WIDTH, VPOT_HEIGHT);
 
     _logSpriteAlloc("header",    header);
     _logSpriteAlloc("mainArea",  mainArea);
-    _logSpriteAlloc("vuSprite",  vuSprite);
     _logSpriteAlloc("vPotSprite",vPotSprite);
     needsTOTALRedraw = true;
 }
@@ -116,6 +110,20 @@ static void _satLedsTest(int idx, uint8_t r, uint8_t g, uint8_t b) {
 //  setup
 // =============================================================
 void setup() {
+    // GPIO flotantes ciegan el radio WiFi en ESP32-S2 — poner todos a OUTPUT LOW
+    // ANTES de cualquier init. Excluidos: 0 (bootstrap), 19-20 (USB), 26-32 (QSPI), 46 (input-only)
+    // Cada módulo reconfigura sus pines en su propio init() posterior. (2026-05-26)
+    static const uint8_t safePins[] = {
+         1,  2,  3,  4,  5,  6,  7,  8,  9, 10,
+        11, 12, 13, 14, 15, 16, 17, 18, 21,
+        33, 34, 35, 36, 37, 38, 39, 40,
+        41, 42, 43, 44, 45
+    };
+    for (uint8_t pin : safePins) {
+        pinMode(pin, OUTPUT);
+        digitalWrite(pin, LOW);
+    }
+
     // ⚠️ SAFETY: Motor EN (GPIO14) MUST be LOW immediately to prevent movement
     pinMode(MOTOR_EN, OUTPUT);
     digitalWrite(MOTOR_EN, LOW);
@@ -341,6 +349,7 @@ void loop() {
     */
 
     updateButtons();
+    handleVUMeterDecay();
     updateDisplay();
     updateAllNeopixels();
 }

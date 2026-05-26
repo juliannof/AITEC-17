@@ -392,7 +392,7 @@ ESP32-S3  ←→  RS485 bus B  ←→  8× ESP32-S2 (PTxx Track)
 │   ├── FADER.md                      ← ADS1115, calibración, mapping (2026-05-16)
 │   ├── MOTOR.md                      ← DRV8833, control, SAT (2026-05-16)
 │   ├── RS485.md                      ← Protocolo, timing, troubleshooting (2026-05-16)
-│   ├── WIFI.md                       ← Provisioning, OTA, ElegantOTA (2026-05-16)
+│   ├── WIFI-OTA.md                   ← Provisioning, OTA, ElegantOTA (2026-05-16)
 │   ├── BUTTONS.md                    ← Debounce, ButtonManager, mapeo MIDI (2026-05-16)
 │   ├── DISPLAY.md                    ← ST7789V3, sprites PSRAM, layout (2026-05-16)
 │   ├── ENCODER.md                    ← ISR Gray code, sequenciamiento, SAT (2026-05-16)
@@ -423,7 +423,7 @@ ESP32-S3  ←→  RS485 bus B  ←→  8× ESP32-S2 (PTxx Track)
 **Sistemas Compartidos (S2/S3/P4):**
 - **RS485.md** — Protocolo binario, timing, paquetes, máquina estados (Buses A y B)
 - **MIDI.md** — Protocolo Mackie MCU completo: handshake SysEx, faders, VU, botones, encoders, desconexión
-- **WIFI.md** — Provisioning credenciales, OTA, ElegantOTA, NVS
+- **WIFI-OTA.md** — Provisioning credenciales, OTA, ElegantOTA, NVS
 - **SAT.md** — Sistema Auto-Test, navegación menú, integración módulos
 - **Transport.md** — Controles transport (S3), MIDI notas, handshake Mackie, bidireccional
 
@@ -469,10 +469,10 @@ ESP32-S3  ←→  RS485 bus B  ←→  8× ESP32-S2 (PTxx Track)
 **Documentación exhaustiva:** 
 → **[RS485.md](docs/RS485.md)** (topología, timing, paquetes, máquina estados, troubleshooting)
 
-### WiFi / OTA — 📌 Ver WIFI.md
+### WiFi / OTA — 📌 Ver WIFI-OTA.md
 
 **Documentación exhaustiva:** 
-→ **[WIFI.md](docs/WIFI.md)** (provisioning, OTA ElegantOTA, NVS, boot OTA-only mode)
+→ **[WIFI-OTA.md](docs/WIFI-OTA.md)** (provisioning, OTA ElegantOTA, NVS, boot OTA-only mode)
 
 ---
 
@@ -629,6 +629,26 @@ cd MASTER_S3-P4/S3/iMakie-ESP32_S3_EXTENDER && pio run
 # Slave S2
 cd S2/S2_V1 && pio run
 ```
+
+---
+
+## 🔧 Herramientas de Diagnóstico (2026-05-26)
+
+### MIDI Monitor (macOS)
+- **App:** MIDI Monitor — captura tráfico MIDI real en macOS
+- **Uso:** Conectar Logic Pro → observar mensajes raw en tiempo real
+- **Cuándo usarlo:** Antes de diagnosticar bugs de VUMeter, VPot, faders o transport — verificar qué envía Logic exactamente
+- **Datos clave a capturar:**
+  - Channel Pressure (0xD0): VU level → frecuencia y valores reales
+  - PitchBend (0xE0): fader positions → rango y cadencia
+  - Control Change (0xB0): VPot, transport LEDs
+  - SysEx (0xF0): handshake Mackie MCU
+- **Antes de asumir bug en firmware:** verificar con MIDI Monitor que Logic envía lo esperado
+- **Flujo de diagnóstico:**
+  1. MIDI Monitor → capturar tráfico Logic
+  2. Identificar patrón (frecuencia, valores, gaps)
+  3. Comparar con comportamiento observado en hardware
+  4. Entonces → proponer fix en firmware
 
 ---
 

@@ -11,12 +11,69 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 | Prioridad | Tarea | Notas |
 |-----------|-------|-------|
-| 🔴 **PRÓXIMA SESIÓN** | **OTA WiFi S2 funcionando** — desbloquea ajuste fino del sistema | Sin OTA hay que flashear físicamente cada S2. Con OTA operativo el ciclo de desarrollo es fluido. Ver `docs/WIFI.md`. |
-| 🔴 **VALIDACIÓN HW** | **Fader S2→Logic + detección usuario** — sesión 2026-05-24 | S3: mapeo calibrado, jerarquía master, sync guard. S2: detección dirección en MOVING_TO_TARGET. Commits `6f6ace6` + `d171b12` |
+| 🟡 **PENDIENTE FLASH** | **OTA WiFi S2** — fix aplicado en código, pendiente flash + validación | Bug #1 (GPIO flotantes) corregido: bloque `safePins` en `setup()` + OTA password activo. Flashear sketch provisioning primero, luego firmware producción. Ver `docs/WIFI-OTA.md` §5.3 y `S2/provisioning/`. |
+| 🔴 **VALIDACIÓN HW** | **Fader S2→Logic + detección usuario** — auditado 2026-05-25, listo para flash | S3: mapeo calibrado, jerarquía master, sync guard. S2: detección dirección en MOVING_TO_TARGET. Commits `6f6ace6` + `d171b12`. Firmware verificado en código — pendiente flash y test en hardware. |
 | 🟢 Baja | Añadir partición `coredump` (64K) en tablas de particiones S2/S3 | `E (112) esp_core_dump_flash: No core dump partition found!` al boot — solo estético, no bloquea operación |
 | 🟢 Baja | Optimización tráfico MIDI PitchBend (`DEADBAND=150`) | Reducir mensajes redundantes S2→Logic |
 | 🟡 Media | **Protocolo de cierre Logic — GoOffline limpio en P4 y S3** | Observado en captura 2026-05-24: handshake de arranque tiene 3 reintentos en S3 (~3s). El cierre de Logic (GoOffline + desconexión USB) no está validado ni documentado. Implementar secuencia `0x0F` → reset de estados → faders a 0 → LED off, limpia en ambos MCU. Ver `docs/MIDI.md` sección 3.4. |
 | 🟢 Baja | **P4: VU global 16 pistas via MIDI UART S3→P4** | S3 re-emite MIDI de Logic (ch 1–8) a P4 por UART directo (ch 9–16). P4 agrega las 16 pistas en display LVGL. Sin WiFi, sin protocolo custom — reutiliza `processMidiByte()` existente. 1 cable TX→RX. Ver `docs/S3ToP4.md` sección "Feature: Agregación 16 pistas". |
+
+---
+
+### SESIÓN 2026-05-25 — Auditoría firmware fader S2→Logic antes de flash (16:24)
+
+**Objetivo:** Verificar que el código de las sesiones 2026-05-24 (`6f6ace6` S3, `d171b12` S2) está correcto antes de flashear hardware.
+
+**Resultado: FIRMWARE LISTO PARA FLASH** ✅
+
+**Archivos auditados:**
+
+| MCU | Archivo | Verificado | Resultado |
+|-----|---------|-----------|-----------|
+| S3 | `config.h` | `FADER_SYNC_DEADBAND=200`, `MOTOR_SETTLE_THRESHOLD=80` | ✅ |
+| S3 | `main.cpp::processSlaveResponse()` | Mapeo calibrado con fallback 27000, jerarquía master, guard `CALIB_SENDING` | ✅ |
+| S3 | `RS485/RS485.cpp::_handleResponse()` | `ch.buttons` actualizado (línea 257), `calibratedMin/Max` capturados | ✅ |
+| S2 | `Motor.cpp::setADCDelta()` | Guard dirección `MOVING_TO_TARGET` (líneas 500–508) | ✅ |
+| S2 | `Motor.cpp::setTargetFromS3()` | Guards calibración + usuario + dead zone completos | ✅ |
+| S2 | `RS485Handler.cpp::buildResponse()` | `touchState` = `isManualTouchDetected()` delta-based | ✅ |
+
+**Observación menor (no bloquea flash):**
+- `Motor.cpp` línea 699: condición de log `_motor_targetADC != adcTarget` siempre `false` — la asignación ocurre en línea 691. Solo afecta al log (no registra cambio de target en mismo valor). Funcionalidad correcta.
+
+**FW actual:** `FW_REVISION=6` → `0.4.6` (S2). S3 sin versión numérica.
+
+**Próximo paso — validación en hardware:**
+
+- [ ] Flash S3 (`6f6ace6`)
+- [ ] Flash S2 (`d171b12`)
+- [ ] Mover fader manualmente → Logic actualiza posición (path A: touch, `touchState=1`)
+- [ ] Logic mueve fader (motor) → S3 en silencio durante tránsito (`motorSettled=false`)
+- [ ] Cambio de banco (+16) → faders llegan sin interferencia Logic
+- [ ] Fader settled en target → Logic confirma posición (path B: sync, una vez, `motorSettled=true`)
+
+**MCU afectadas:** S3 + S2. P4 sin cambios.
+
+---
+
+### SESIÓN 2026-05-24 — IntelliSense PlatformIO VS Code (13:XX)
+
+**Contexto:** Error en VS Code al abrir `MASTER_S3-P4/P4/src/display/Display.cpp`:
+```
+Se han detectado errores de #include. Actualice el valor de includePath.
+El subrayado ondulado está deshabilitado para esta unidad de traducción.
+```
+
+**Causa:** `c_cpp_properties.json` es auto-generado por PlatformIO y queda desactualizado. Contiene entradas vacías `""` al final de `includePath` / `browse.path` que invalidan el índice IntelliSense.
+
+**Zigbee y otras librerías ajenas:** PlatformIO añade TODAS las librerías del framework Arduino-ESP32 al `includePath`, aunque no estén en `lib_deps`. Es cosmético, no afecta compilación.
+
+**Fix:**
+```
+Command Palette (⇧⌘P) → PlatformIO: Rebuild IntelliSense Index
+```
+Regenera `.vscode/c_cpp_properties.json` desde cero. Nunca editar manualmente.
+
+**MCU afectadas:** Ninguna — solo entorno de desarrollo.
 
 ---
 
@@ -1634,7 +1691,7 @@ RS485Handler.cpp:
   - docs/FADER.md (ADS1115, calibración, mapping)
   - docs/MOTOR.md (DRV8833, máquina estados, SAT)
   - docs/RS485.md (protocolo binario, timing, paquetes)
-  - docs/WIFI.md (provisioning, OTA, ElegantOTA)
+  - docs/WIFI-OTA.md (provisioning, OTA, ElegantOTA)
   - docs/BUTTONS.md (debounce, ButtonManager, MIDI)
   - docs/DISPLAY.md (ST7789V3, sprites PSRAM, layout)
   - docs/ENCODER.md (ISR Gray code, sequenciamiento, SAT)
@@ -2240,7 +2297,7 @@ Motor controla ADC 0-27000 (ADS1115 raw)
 - **WiFi OTA — ElegantOTA 3.1.7** 
   - ArduinoOTA descartado (muerto en pioarduino 55.03.37)
   - ElegantOTA funciona perfecto — SAT menu "WiFi OTA"
-  - Credenciales NVS: SSID=`Julianno-WiFi` | Pass=`JULIANf1`
+  - Credenciales: configuradas en NVS namespace `ptxx` (sketch provisioning USB)
 
 ### Changed
 - **STATUS.md reorganizado** (2026-05-04 19:20)

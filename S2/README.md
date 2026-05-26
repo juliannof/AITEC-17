@@ -292,7 +292,7 @@ board_build.arduino.memory_type = qio_qspi
 - **Encoder (Gray code):** [docs/ENCODER.md](../docs/ENCODER.md)
 - **LEDs (NeoPixel):** [docs/LEDS.md](../docs/LEDS.md)
 - **SAT (Auto-Test):** [docs/SAT.md](../docs/SAT.md)
-- **WiFi/OTA:** [docs/WIFI.md](../docs/WIFI.md)
+- **WiFi/OTA:** [docs/WIFI-OTA.md](../docs/WIFI-OTA.md)
 - **Arquitectura general:** [CLAUDE.md](../CLAUDE.md)
 - **Estado técnico:** [STATUS.md](../STATUS.md)
 - **Historial cambios:** [CHANGELOG.md](../CHANGELOG.md)

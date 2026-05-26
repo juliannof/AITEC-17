@@ -11,7 +11,6 @@
 extern LGFX        tft;
 extern LGFX_Sprite header;
 extern LGFX_Sprite mainArea;
-extern LGFX_Sprite vuSprite;
 extern LGFX_Sprite vPotSprite;
 
 static uint8_t _trackId = 0;
@@ -27,7 +26,6 @@ void drawOfflineScreen();
 void drawInitializingScreen();
 void drawVPotDisplay();
 void drawButton(LGFX_Sprite &sprite, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const char* label, bool active, uint16_t activeColor);
-void drawMeter(LGFX_Sprite &sprite, uint16_t x, uint16_t y, uint16_t w, uint16_t h, float level, float peakLevel, bool isClipping);
 void setTrackId(uint8_t id) { _trackId = id; }
 
 
@@ -72,10 +70,6 @@ void initDisplay(bool otaOnlyMode) {
         header.setPsram(true);
         header.createSprite(TFT_WIDTH, HEADER_HEIGHT);
 
-        vuSprite.setColorDepth(16);
-        vuSprite.setPsram(true);
-        vuSprite.createSprite(TFT_WIDTH - MAINAREA_WIDTH, MAINAREA_HEIGHT);
-
         vPotSprite.setColorDepth(16);
         vPotSprite.setPsram(true);
         vPotSprite.createSprite(TFT_WIDTH, VPOT_HEIGHT);
@@ -84,7 +78,6 @@ void initDisplay(bool otaOnlyMode) {
     Serial.printf("tft       : %d x %d\n", tft.width(), tft.height());
     Serial.printf("header    : %d x %d  → pushSprite(0, 0)\n",   header.width(),   header.height());
     Serial.printf("mainArea  : %d x %d  → pushSprite(0, %d)\n",  mainArea.width(),  mainArea.height(), HEADER_HEIGHT);
-    Serial.printf("vuSprite  : %d x %d  → pushSprite(%d, %d)\n", vuSprite.width(),  vuSprite.height(), MAINAREA_WIDTH, HEADER_HEIGHT);
     Serial.printf("vPotSprite: %d x %d  → pushSprite(0, %d)\n",  vPotSprite.width(),vPotSprite.height(), MAINAREA_HEIGHT + HEADER_HEIGHT);
     Serial.printf("Layout total: %d px alto (pantalla: %d)\n", HEADER_HEIGHT + MAINAREA_HEIGHT + VPOT_HEIGHT, tft.height());
 
@@ -92,7 +85,6 @@ void initDisplay(bool otaOnlyMode) {
 
     Serial.printf("header     creado: %s\n", header.width()    > 0 ? "OK" : "FALLO");
     Serial.printf("mainArea   creado: %s\n", mainArea.width()  > 0 ? "OK" : "FALLO");
-    Serial.printf("vuSprite   creado: %s\n", vuSprite.width()  > 0 ? "OK" : "FALLO");
     Serial.printf("vPotSprite creado: %s\n", vPotSprite.width()> 0 ? "OK" : "FALLO");
     Serial.printf("Heap libre:  %u bytes\n", ESP.getFreeHeap());
     Serial.printf("PSRAM libre: %u bytes\n", ESP.getFreePsram());
@@ -100,7 +92,6 @@ void initDisplay(bool otaOnlyMode) {
 
     _logSpriteAlloc("header",    header);
     _logSpriteAlloc("mainArea",  mainArea);
-    _logSpriteAlloc("vuSprite",  vuSprite);
     _logSpriteAlloc("vPotSprite",vPotSprite);
 
     needsTOTALRedraw = true;
@@ -174,6 +165,7 @@ void updateDisplay() {
         tft.fillScreen(TFT_BG_COLOR);
         drawHeaderSprite();
         drawMainArea();
+        VU::lastActive = -1;   // fuerza fondo completo del VU tras fillScreen
         drawVUMeters();
         drawVPotDisplay();
         needsTOTALRedraw    = false;
@@ -322,68 +314,75 @@ void drawMainArea() {
 }
 
 // ════════════════════════════════════════════════════════════
-//  drawMeter  — visual S2 (rounded) + cálculo robusto de S3
+//  VU — geometría y estado para dibujo diferencial en tft
 // ════════════════════════════════════════════════════════════
-void drawMeter(LGFX_Sprite &sprite, uint16_t x, uint16_t y,
-               uint16_t w, uint16_t h,
-               float level, float peakLevel, bool isClipping) {
+namespace VU {
+    static constexpr int X      = MAINAREA_WIDTH + 3;
+    static constexpr int Y_TOP  = HEADER_HEIGHT + 4;
+    static constexpr int W      = 42;
+    static constexpr int H      = MAINAREA_HEIGHT - 10;
+    static constexpr int SEGS   = 12;
+    static constexpr int PAD    = 2;
+    static constexpr int CORNER = 2;
+    static constexpr int SEG_H  = (H - PAD * (SEGS - 1)) / SEGS;
 
-    const int numSegments     = 12;
-    const int padding         = 2;
-    const int cornerRadius    = 2;
+    int8_t lastActive = -1;   // -1 = nunca dibujado → fuerza fondo completo
+    int8_t lastPeak   = -1;
+    bool   lastClip   = false;
+}
 
-    if (numSegments <= 1 || h <= (uint16_t)(padding * (numSegments - 1))) return;
+static uint16_t vuSegColor(int i, int active, int peak, bool clip) {
+    if (i == VU::SEGS - 1 && clip) return VU_RED_ON;
+    if (peak >= 0 && i == peak)    return (i<8)?VU_GREEN_OFF:(i<10)?VU_YELLOW_OFF:VU_RED_OFF;
+    if (i < active)                return (i<8)?VU_GREEN_ON :(i<10)?VU_YELLOW_ON :VU_RED_ON;
+    return                                (i<8)?VU_GREEN_OFF:(i<10)?VU_YELLOW_OFF:VU_RED_OFF;
+}
 
-    const int segmentHeight = (h - padding * (numSegments - 1)) / numSegments;
-
-    // ── Cálculo de segmentos activos y peak (lógica S3) ──────────────────────
-    size_t activeSegments  = (size_t)round(level     * numSegments);
-    size_t peakSegment_idx = (size_t)round(peakLevel * numSegments);
-
-    if (peakSegment_idx > 0) peakSegment_idx--;
-
-    if (activeSegments > 0 && peakSegment_idx < activeSegments - 1) {
-        peakSegment_idx = activeSegments - 1;
-    } else if (activeSegments == 0 && peakSegment_idx != (size_t)-1) {
-        peakSegment_idx = (size_t)-1;
-    }
-
-    // ── Dibujo con estilo S2 (rounded + doble borde peak) ────────────────────
-    for (int i = 0; i < numSegments; i++) {
-        int segY = y + h - (i + 1) * segmentHeight - i * padding;
-
-        bool hasPeakBorder = (static_cast<size_t>(i) == peakSegment_idx
-                              && peakLevel > level + 0.001f);   // ← condición S3
-
-        uint16_t fillColor;
-        if (hasPeakBorder) {
-            fillColor = (i < 8) ? VU_GREEN_OFF : (i < 10) ? VU_YELLOW_OFF : VU_RED_OFF;
-        } else if (static_cast<size_t>(i) < activeSegments) {
-            fillColor = (i < 8) ? VU_GREEN_ON : (i < 10) ? VU_YELLOW_ON : VU_RED_ON;
-        } else {
-            fillColor = (i < 8) ? VU_GREEN_OFF : (i < 10) ? VU_YELLOW_OFF : VU_RED_OFF;
-        }
-
-        if (static_cast<size_t>(i) == (size_t)(numSegments - 1) && isClipping) {
-            fillColor = VU_RED_ON;
-        }
-
-        sprite.fillRoundRect(x, segY, w, segmentHeight, cornerRadius, fillColor);
-
-        if (hasPeakBorder) {
-            sprite.drawRoundRect(x,   segY,   w,   segmentHeight,   cornerRadius,   VU_PEAK_COLOR);
-            sprite.drawRoundRect(x+1, segY+1, w-2, segmentHeight-2, cornerRadius-1, VU_PEAK_COLOR);
-        }
+static void vuDrawSeg(int i, uint16_t fill, bool peakBorder) {
+    int y = VU::Y_TOP + VU::H - (i + 1) * VU::SEG_H - i * VU::PAD;
+    tft.fillRoundRect(VU::X, y, VU::W, VU::SEG_H, VU::CORNER, fill);
+    if (peakBorder) {
+        tft.drawRoundRect(VU::X,   y,   VU::W,   VU::SEG_H,   VU::CORNER,   VU_PEAK_COLOR);
+        tft.drawRoundRect(VU::X+1, y+1, VU::W-2, VU::SEG_H-2, VU::CORNER-1, VU_PEAK_COLOR);
     }
 }
+
 // ════════════════════════════════════════════════════════════
-//  drawVUMeters
+//  drawVUMeters — diferencial: solo segmentos que cambiaron
 // ════════════════════════════════════════════════════════════
 void drawVUMeters() {
-    vuSprite.fillSprite(TFT_MCU_DARKGRAY);
-    drawMeter(vuSprite, 3, 4, 42, MAINAREA_HEIGHT - 10,
-              vuLevels, vuPeakLevels, vuClipState);
-    vuSprite.pushSprite(MAINAREA_WIDTH, HEADER_HEIGHT);
+    int  active   = (int)round(vuLevels     * VU::SEGS);
+    int  peak     = (int)round(vuPeakLevels * VU::SEGS);
+    if (peak > 0) peak--;
+    bool showPeak = (vuPeakLevels > vuLevels + 0.001f);
+    if (showPeak && active > 0 && peak < active - 1) peak = active - 1;
+    if (!showPeak) peak = -1;
+    bool clip = vuClipState;
+
+    if (VU::lastActive < 0) {
+        // Primera vez o tras TOTAL redraw: fondo gris + todos los segmentos
+        tft.fillRect(MAINAREA_WIDTH, HEADER_HEIGHT,
+                     TFT_WIDTH - MAINAREA_WIDTH, MAINAREA_HEIGHT, TFT_MCU_DARKGRAY);
+        for (int i = 0; i < VU::SEGS; i++) {
+            bool isPeak = (i == peak);
+            vuDrawSeg(i, vuSegColor(i, active, isPeak ? peak : -1, clip), isPeak);
+        }
+    } else {
+        // Diferencial: solo los segmentos cuyo color o estado peak cambió
+        bool prevShowPeak = (VU::lastPeak >= 0);
+        for (int i = 0; i < VU::SEGS; i++) {
+            bool isPeakNow  = showPeak    && (i == peak);
+            bool isPeakPrev = prevShowPeak && (i == VU::lastPeak);
+            uint16_t cNow  = vuSegColor(i, active,        isPeakNow  ? peak        : -1, clip);
+            uint16_t cPrev = vuSegColor(i, VU::lastActive, isPeakPrev ? VU::lastPeak : -1, VU::lastClip);
+            if (cNow != cPrev || isPeakNow != isPeakPrev)
+                vuDrawSeg(i, cNow, isPeakNow);
+        }
+    }
+
+    VU::lastActive = (int8_t)active;
+    VU::lastPeak   = (int8_t)(showPeak ? peak : -1);
+    VU::lastClip   = clip;
 }
 
 // ════════════════════════════════════════════════════════════

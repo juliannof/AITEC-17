@@ -99,15 +99,15 @@ void onMasterData(const MasterPacket& pkt) {
         needsHeaderRedraw = true;
            }
 
-    // ── VU meter ──────────────────────────────────────────────
+    // ── VU meter — attack instantáneo, decay por handleVUMeterDecay() ──────
     float newVu = pkt.vuLevel / 127.0f;
-    if (fabsf(vuLevels - newVu) > 0.01f) {
+    if (newVu > 0.01f) vuLastUpdateTime = millis();   // previene decay mientras llega señal
+    if (newVu > vuLevels + 0.01f) {                   // solo subir desde RS485
         vuLevels = newVu;
         if (vuLevels > vuPeakLevels) {
-            vuPeakLevels = vuLevels;
+            vuPeakLevels         = vuLevels;
             vuPeakLastUpdateTime = millis();
         }
-        vuLastUpdateTime    = millis();
         needsVUMetersRedraw = true;
     }
 

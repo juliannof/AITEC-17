@@ -5,7 +5,7 @@
 #include "protocol.h"
 
 extern LGFX tft;
-extern LGFX_Sprite header, mainArea, vuSprite, vPotSprite;
+extern LGFX_Sprite header, mainArea, vPotSprite;
 
 // ===================================
 // --- ENUMERACIONES (Tipos de Datos) ---

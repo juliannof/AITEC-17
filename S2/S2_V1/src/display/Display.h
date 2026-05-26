@@ -35,8 +35,3 @@ void drawButton(LGFX_Sprite &sprite,                  // ← LGFX_Sprite
                 bool active,
                 uint16_t activeColor);
 
-void drawMeter(LGFX_Sprite &sprite,                   // ← LGFX_Sprite
-               uint16_t x, uint16_t y,
-               uint16_t w, uint16_t h,
-               float level, float peakLevel,
-               bool isClipping);

@@ -60,7 +60,7 @@ Regresa a menú principal
 | **Brightness** | GPIO3 (BL PWM) | Slider 0-255 backlight | DISPLAY.md |
 | **RS485** | GPIO9 (RX) | Toggle conexión (debug) | RS485.md |
 | **LEDs Test** | GPIO36 (DIN) | Secuencia RGB índice 0-11 | LEDS.md |
-| **WiFi OTA** | — | Boot OTA-only mode | WIFI.md |
+| **WiFi OTA** | — | Boot OTA-only mode | WIFI-OTA.md |
 | **Reboot** | — | Reinicia S2 | — |
 
 ### 2.2 Motor Submenu
@@ -475,7 +475,7 @@ Display normal
 - **DISPLAY.md** — ST7789V3, sprites PSRAM, layout
 - **ENCODER.md** — ISR Gray code, sequenciamiento, consumo
 - **LEDS.md** — WS2812B, asignación, control brillo
-- **WIFI.md** — OTA-only mode, provisioning
+- **WIFI-OTA.md** — OTA-only mode, provisioning
 - **RS485.md** — Protocolo, timing, suspensión
 
 ---
