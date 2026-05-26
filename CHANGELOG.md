@@ -38,6 +38,8 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 | VUMeter: namespace VU orden | S2 | `Display.cpp` | `namespace VU` movido antes de `updateDisplay()` — error de compilación `'VU' has not been declared` |
 | VUMeter: peak estilo hardware | S2 | `Display.cpp` | Peak = segmento ON en su color natural (verde/amarillo/rojo). Sin borde blanco. Comportamiento idéntico a VU hardware real (SSL, Neve) |
 | VUMeter: decay S3 timeout | S3 | `main.cpp` | Check cada 50ms: si no llega Channel Pressure en >200ms → `setVuLevel(0)` → S2 decae via `handleVUMeterDecay()` |
+| VUMeter: decay S2 timer fix | S2 | `RS485Handler.cpp` | `vuLastUpdateTime` se actualiza SOLO cuando VU sube (antes: en cada paquete RS485 ~10ms → `handleVUMeterDecay()` nunca veía gap de 100ms → sin decay) |
+| VUMeter: peak fade 300ms | S2 | `Display.cpp` | Peak en color natural, hold 2s, fade suave 12 pasos × 25ms con `blendColor565()` ON→OFF. `peakAlpha` + `peakFadeTime` en `namespace VU`. Documentado en `docs/DISPLAY.md §10` |
 
 **Validado en hardware ✅**
 - OTA funcional en 4 faders (upload browser + Basic Auth)
@@ -45,9 +47,13 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 - Peak hold estilo hardware
 - Decay funcional al parar audio (~300ms: 200ms S3 timeout + 100ms decay S2)
 
+**Pendiente validación hardware:**
+- VU peak fade 300ms (implementado, no flasheado aún)
+- VU decay S2 timer fix (commit pendiente)
+
 **Commits:** `4c4ef4b`, `cb3ec9d`, `008c57f`, `9d5bd8f`, `ad0fd55`, `07d12cd`
 
-**MCU afectadas:** S2 (OTA + VU display) + S3 (VU decay). P4 sin cambios.
+**MCU afectadas:** S2 (OTA + VU display + decay timer) + S3 (VU decay). P4 sin cambios.
 
 ---
 
@@ -164,6 +170,7 @@ Regenera `.vscode/c_cpp_properties.json` desde cero. Nunca editar manualmente.
 - [ ] Fader settled en target → Logic confirma posición (path B: sync, una sola vez)
 
 ### Upload log S2
+- `2026-05-26 18:40` · Commit S2 · **FW 0.4.10** (sin upload)
 - `2026-05-26 18:17` · Commit S2 · **FW 0.4.9** (sin upload)
 - `2026-05-26 17:51` · Flash S2 · **FW 0.4.8** · `lolin_s2_mini`
 - `2026-05-26 17:50` · Commit S2 · **FW 0.4.7** (sin upload)

@@ -103,7 +103,7 @@ void OtaManager::enableForUpload(bool otaOnlyMode) {
         server.send(302);
     });
 
-    ElegantOTA.begin(&server);
+    ElegantOTA.begin(&server, otaPass[0] ? "ota" : "", otaPass);  // Basic Auth si otaPass en NVS (2026-05-26)
     ElegantOTA.onStart(onOTAStart);
     ElegantOTA.onProgress(onOTAProgress);
     ElegantOTA.onEnd(onOTAEnd);

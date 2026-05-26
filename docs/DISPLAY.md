@@ -3,7 +3,7 @@
 Documentación exhaustiva del subsistema de display. Incluye hardware ST7789V3, layout, sprites LovyanGFX, actualización, y troubleshooting.
 
 **Responsable:** iMakie Development Team  
-**Última actualización:** 2026-05-16  
+**Última actualización:** 2026-05-26  
 **Estado:** En producción (240×280 SPI3, sprites PSRAM)
 
 ---
@@ -283,12 +283,12 @@ void _satRestoreSprites() {
 
 // VU Meter colores
 #define VU_GREEN_OFF  COLOR_16_BITS(0, 20, 0)       // Verde oscuro
-#define VU_GREEN_ON   TFT_GREEN                    // Verde brillante
-#define VU_YELLOW_OFF COLOR_16_BITS(20, 20, 0)     // Amarillo oscuro
-#define VU_YELLOW_ON  TFT_YELLOW                   // Amarillo brillante
-#define VU_RED_OFF    COLOR_16_BITS(20, 0, 0)       // Rojo oscuro
-#define VU_RED_ON     TFT_RED                      // Rojo brillante
-#define VU_PEAK_COLOR COLOR_16_BITS(150, 150, 150) // Gris pico
+#define VU_GREEN_ON   TFT_GREEN                     // Verde brillante
+#define VU_YELLOW_OFF COLOR_16_BITS(20, 20, 0)      // Amarillo oscuro
+#define VU_YELLOW_ON  TFT_YELLOW                    // Amarillo brillante
+#define VU_RED_OFF    COLOR_16_BITS(20, 0, 0)        // Rojo oscuro
+#define VU_RED_ON     TFT_RED                       // Rojo brillante
+// VU_PEAK_COLOR (gris) OBSOLETO (2026-05-26): peak usa blendColor565() ON↔OFF
 ```
 
 ---
@@ -303,6 +303,144 @@ void _satRestoreSprites() {
 
 **Status:** ✅ Resuelto
 
+### 8.2 2026-05-26: VU Meter — refactor completo
+
+| Cambio | Detalle |
+|--------|---------|
+| Dibujo diferencial | Solo redibuja segmentos cuyo color cambió respecto al frame anterior |
+| Fix decay timer | `vuLastUpdateTime` solo se actualiza cuando VU sube (no cada paquete RS485) |
+| Fix S3 stale VU | Timeout 200ms en S3: si Logic no envía Channel Pressure → fuerza vuLevel=0 |
+| Peak hardware-style | Segmento peak se dibuja en su color ON (verde/amarillo/rojo), no en blanco/gris |
+| Peak fade 300ms | Tras hold 2s, peak se desvanece con blendColor565() en 12 pasos × 25ms |
+
+**Status:** ✅ Implementado, pendiente validación hardware
+
+---
+
+## 10. VU METER — Arquitectura Completa (2026-05-26)
+
+### 10.1 Visión General
+
+El VU meter se dibuja **directamente sobre `tft`** (no usa sprite). Ocupa la banda derecha de la pantalla junto a `mainArea`. El redibujado es diferencial: solo los segmentos cuyo color cambió respecto al frame anterior se repintan.
+
+### 10.2 Geometría (`namespace VU`)
+
+```cpp
+namespace VU {
+    static constexpr int X      = MAINAREA_WIDTH + 3;    // 183px desde izquierda
+    static constexpr int Y_TOP  = HEADER_HEIGHT + 4;     // 44px desde arriba
+    static constexpr int W      = 42;                    // ancho barra
+    static constexpr int H      = MAINAREA_HEIGHT - 10;  // alto total
+    static constexpr int SEGS   = 12;                    // segmentos (0=bajo, 11=alto)
+    static constexpr int PAD    = 2;                     // hueco entre segmentos
+    static constexpr int CORNER = 2;                     // radio esquinas
+    static constexpr int SEG_H  = (H - PAD*(SEGS-1)) / SEGS;
+
+    // Estado diferencial
+    int8_t   lastActive    = -1;   // -1 = nunca dibujado → fuerza fondo completo
+    int8_t   lastPeak      = -1;
+    bool     lastClip      = false;
+    uint8_t  peakAlpha     = 255;  // alpha del segmento peak (255=pleno, 0=invisible)
+    uint8_t  lastPeakAlpha = 255;
+    uint32_t peakFadeTime  = 0;    // timestamp inicio paso de fade (0=fade inactivo)
+}
+```
+
+**Asignación de colores por segmento:**
+
+| Segmentos | Color ON | Color OFF |
+|-----------|----------|-----------|
+| 0–7 (bajo) | `VU_GREEN_ON` | `VU_GREEN_OFF` |
+| 8–9 (medio) | `VU_YELLOW_ON` | `VU_YELLOW_OFF` |
+| 10–11 (alto) | `VU_RED_ON` | `VU_RED_OFF` |
+
+### 10.3 Redibujado Diferencial
+
+```cpp
+void drawVUMeters() {
+    int  active   = (int)round(vuLevels     * VU::SEGS);  // segmentos activos
+    int  peak     = (int)round(vuPeakLevels * VU::SEGS);
+    if (peak > 0) peak--;                                  // índice exacto del segmento peak
+    bool showPeak = (vuPeakLevels > vuLevels + 0.001f) && VU::peakAlpha > 0;
+    if (!showPeak) peak = -1;
+
+    // Primer redibujado: fondo completo + todos los segmentos
+    if (VU::lastActive < 0) {
+        tft.fillRect(MAINAREA_WIDTH, HEADER_HEIGHT, ...);
+        for (int i = 0; i < VU::SEGS; i++)
+            vuDrawSeg(i, vuSegColor(i, active, peak, clip, VU::peakAlpha));
+    } else {
+        // Diferencial: solo segmentos que cambiaron de color
+        for (int i = 0; i < VU::SEGS; i++) {
+            uint16_t cNow  = vuSegColor(i, active,         peak,         clip,         VU::peakAlpha);
+            uint16_t cPrev = vuSegColor(i, VU::lastActive, VU::lastPeak, VU::lastClip, VU::lastPeakAlpha);
+            if (cNow != cPrev) vuDrawSeg(i, cNow);
+        }
+    }
+    // Guardar estado para próximo frame
+    VU::lastActive    = active;
+    VU::lastPeak      = showPeak ? peak : -1;
+    VU::lastClip      = clip;
+    VU::lastPeakAlpha = VU::peakAlpha;
+}
+```
+
+### 10.4 Peak Hold + Fade (2026-05-26)
+
+```
+Señal VU sube → peak=vuLevels, alpha=255, peakLastUpdate=now
+                     │
+                     ▼
+              [Hold 2000ms]
+                     │
+                     ▼
+              peakFadeTime=now (marcar inicio fade)
+                     │
+           ┌─────────┴─────────────┐
+           │  cada 25ms            │
+           ▼                       │
+    peakAlpha -= 21    ◄───────────┘
+           │
+    peakAlpha <= 0?
+       │ sí        │ no
+       ▼           └── continuar
+  vuPeakLevels=0
+  peak desaparece
+```
+
+**Reglas:**
+- Si el nivel vuelve a alcanzar el peak durante el fade → `alpha=255`, fade cancelado
+- Si el nivel supera el peak en cualquier momento → `vuPeakLevels=vuLevels`, `alpha=255`
+- El segmento peak se dibuja en el color ON del rango correspondiente (no gris), con transparencia progresiva
+
+### 10.5 `blendColor565()` — Interpolación RGB565
+
+```cpp
+static uint16_t blendColor565(uint16_t a, uint16_t b, uint8_t alpha) {
+    // alpha=255 → color a (ON), alpha=0 → color b (OFF)
+    uint8_t r  = ((((a>>11)&0x1F)*alpha) + (((b>>11)&0x1F)*(255u-alpha))) >> 8;
+    uint8_t g  = ((((a>> 5)&0x3F)*alpha) + (((b>> 5)&0x3F)*(255u-alpha))) >> 8;
+    uint8_t bl = (((a&0x1F)*alpha)        + ((b&0x1F)*(255u-alpha)))        >> 8;
+    return (r << 11) | (g << 5) | bl;
+}
+```
+
+Usada exclusivamente por `vuSegColor()` para el segmento peak durante el fade.
+
+### 10.6 `handleVUMeterDecay()` — Bucles de Decaimiento
+
+Llamada cada ciclo de `loop()`. Gestiona tres bucles independientes:
+
+| Bucle | Condición | Acción |
+|-------|-----------|--------|
+| **Nivel VU** | `now - vuLastUpdateTime > 100ms` | `vuLevels -= 1/12` hasta 0 |
+| **Peak fade** | `now - vuPeakLastUpdateTime > 2000ms` | `peakAlpha -= 21` cada 25ms |
+| **Guard** | `vuPeakLevels < vuLevels` | `vuPeakLevels = vuLevels`, `alpha=255` |
+
+**Fuente del timer VU:** `vuLastUpdateTime` se actualiza en `RS485Handler::onMasterData()` **solo cuando el nivel sube** (no en cada paquete). Así, cuando el audio para, el timer no se renueva y el decay dispara correctamente.
+
+**Fuente del timeout S3:** Si Logic deja de enviar Channel Pressure, S3 fuerza `vuLevel=0` al S2 correspondiente tras 200ms de silencio (fix en `S3/main.cpp taskCore0()`).
+
 ---
 
 ## 9. REFERENCIAS
@@ -316,4 +454,5 @@ void _satRestoreSprites() {
 
 ## Últimas Actualizaciones
 
+- **(2026-05-26)** §10 VU Meter: geometría, diferencial, peak hold+fade 300ms, blendColor565()
 - **(2026-05-16)** Creado DISPLAY.md como documento exhaustivo, trasladado contenido de CLAUDE.md

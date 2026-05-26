@@ -154,9 +154,12 @@ namespace VU {
     static constexpr int CORNER = 2;
     static constexpr int SEG_H  = (H - PAD * (SEGS - 1)) / SEGS;
 
-    int8_t lastActive = -1;   // -1 = nunca dibujado → fuerza fondo completo
-    int8_t lastPeak   = -1;
-    bool   lastClip   = false;
+    int8_t   lastActive    = -1;   // -1 = nunca dibujado → fuerza fondo completo
+    int8_t   lastPeak      = -1;
+    bool     lastClip      = false;
+    uint8_t  peakAlpha     = 255;  // 255=pleno, 0=invisible — fade 300ms (2026-05-26)
+    uint8_t  lastPeakAlpha = 255;
+    uint32_t peakFadeTime  = 0;
 }
 
 // ════════════════════════════════════════════════════════════
@@ -331,10 +334,21 @@ void drawMainArea() {
     
 }
 
-static uint16_t vuSegColor(int i, int active, int peak, bool clip) {
+static uint16_t blendColor565(uint16_t a, uint16_t b, uint8_t alpha) {
+    uint8_t r  = ((((a >> 11) & 0x1F) * alpha) + (((b >> 11) & 0x1F) * (255u - alpha))) >> 8;
+    uint8_t g  = ((((a >>  5) & 0x3F) * alpha) + (((b >>  5) & 0x3F) * (255u - alpha))) >> 8;
+    uint8_t bl = (((a & 0x1F) * alpha)          + (( b & 0x1F)        * (255u - alpha))) >> 8;
+    return (r << 11) | (g << 5) | bl;
+}
+
+static uint16_t vuSegColor(int i, int active, int peak, bool clip, uint8_t peakAlpha = 255) {
     if (i == VU::SEGS - 1 && clip) return VU_RED_ON;
-    if (i < active || (peak >= 0 && i == peak))
-        return (i<8)?VU_GREEN_ON:(i<10)?VU_YELLOW_ON:VU_RED_ON;
+    if (i < active) return (i<8)?VU_GREEN_ON:(i<10)?VU_YELLOW_ON:VU_RED_ON;
+    if (peak >= 0 && i == peak && peakAlpha > 0) {
+        uint16_t on  = (i<8)?VU_GREEN_ON :(i<10)?VU_YELLOW_ON :VU_RED_ON;
+        uint16_t off = (i<8)?VU_GREEN_OFF:(i<10)?VU_YELLOW_OFF:VU_RED_OFF;
+        return (peakAlpha == 255) ? on : blendColor565(on, off, peakAlpha);
+    }
     return (i<8)?VU_GREEN_OFF:(i<10)?VU_YELLOW_OFF:VU_RED_OFF;
 }
 
@@ -350,7 +364,7 @@ void drawVUMeters() {
     int  active   = (int)round(vuLevels     * VU::SEGS);
     int  peak     = (int)round(vuPeakLevels * VU::SEGS);
     if (peak > 0) peak--;
-    bool showPeak = (vuPeakLevels > vuLevels + 0.001f);
+    bool showPeak = (vuPeakLevels > vuLevels + 0.001f) && VU::peakAlpha > 0;
     if (!showPeak) peak = -1;
     bool clip = vuClipState;
 
@@ -358,19 +372,20 @@ void drawVUMeters() {
         tft.fillRect(MAINAREA_WIDTH, HEADER_HEIGHT,
                      TFT_WIDTH - MAINAREA_WIDTH, MAINAREA_HEIGHT, TFT_MCU_DARKGRAY);
         for (int i = 0; i < VU::SEGS; i++)
-            vuDrawSeg(i, vuSegColor(i, active, peak, clip));
+            vuDrawSeg(i, vuSegColor(i, active, peak, clip, VU::peakAlpha));
     } else {
         for (int i = 0; i < VU::SEGS; i++) {
-            uint16_t cNow  = vuSegColor(i, active,        peak,        clip);
-            uint16_t cPrev = vuSegColor(i, VU::lastActive, VU::lastPeak, VU::lastClip);
+            uint16_t cNow  = vuSegColor(i, active,         peak,         clip,         VU::peakAlpha);
+            uint16_t cPrev = vuSegColor(i, VU::lastActive, VU::lastPeak, VU::lastClip, VU::lastPeakAlpha);
             if (cNow != cPrev)
                 vuDrawSeg(i, cNow);
         }
     }
 
-    VU::lastActive = (int8_t)active;
-    VU::lastPeak   = (int8_t)(showPeak ? peak : -1);
-    VU::lastClip   = clip;
+    VU::lastActive    = (int8_t)active;
+    VU::lastPeak      = (int8_t)(showPeak ? peak : -1);
+    VU::lastClip      = clip;
+    VU::lastPeakAlpha = VU::peakAlpha;
 }
 
 // ════════════════════════════════════════════════════════════
@@ -378,38 +393,55 @@ void drawVUMeters() {
 // ════════════════════════════════════════════════════════════
 void handleVUMeterDecay() {
     const unsigned long DECAY_INTERVAL_MS = 100;
-    const unsigned long PEAK_HOLD_TIME_MS = 2000;
-    const float DECAY_AMOUNT = 1.0f / 12.0f;
+    const unsigned long PEAK_HOLD_TIME_MS = 1000;
+    const unsigned long PEAK_FADE_STEP_MS = 25;    // 4 pasos × 25ms = 100ms fade (SSL-style)
+    const float         DECAY_AMOUNT      = 1.0f / 12.0f;
+    const uint8_t       FADE_STEP         = 64;    // 255 / 4 pasos ≈ 64 por paso
 
     unsigned long now = millis();
     bool changed = false;
 
     // 1. Decaimiento del nivel normal
     if (vuLevels > 0 && now - vuLastUpdateTime > DECAY_INTERVAL_MS) {
-        float old = vuLevels;
         vuLevels -= DECAY_AMOUNT;
         if (vuLevels < 0.01f) vuLevels = 0.0f;
         vuLastUpdateTime = now;
         changed = true;
-        log_v("VU Level decayed %.3f → %.3f", old, vuLevels);
     }
 
-    // 2. Decaimiento del peak tras hold time
-    if (vuPeakLevels > 0 && now - vuPeakLastUpdateTime > PEAK_HOLD_TIME_MS) {
-        if (vuPeakLevels > vuLevels) {
-            float old = vuPeakLevels;
-            vuPeakLevels = vuLevels;
-            vuPeakLastUpdateTime = now;     // ← BUG FIX: sin esto se dispara cada ciclo
-            changed = true;
-            log_v("VU Peak decayed %.3f → %.3f (jump to current level)", old, vuPeakLevels);
+    // 2. Peak — hold 2s + fade 300ms
+    if (vuPeakLevels > 0) {
+        bool detached = vuPeakLevels > vuLevels + 0.001f;
+        if (!detached) {
+            // Nivel alcanzó el peak: mantener alpha pleno
+            VU::peakAlpha    = 255;
+            VU::peakFadeTime = 0;
+        } else if (now - vuPeakLastUpdateTime > PEAK_HOLD_TIME_MS) {
+            // Hold completo: iniciar o continuar fade
+            if (VU::peakFadeTime == 0) {
+                VU::peakFadeTime = now;
+            } else if (now - VU::peakFadeTime >= PEAK_FADE_STEP_MS) {
+                VU::peakFadeTime = now;
+                if (VU::peakAlpha > FADE_STEP) {
+                    VU::peakAlpha -= FADE_STEP;
+                } else {
+                    VU::peakAlpha = 0;
+                    vuPeakLevels  = 0.0f;
+                }
+                changed = true;
+            }
         }
+    } else {
+        VU::peakAlpha    = 255;
+        VU::peakFadeTime = 0;
     }
 
     // 3. Seguridad: peak nunca puede ser menor que el nivel actual
     if (vuPeakLevels < vuLevels) {
-        log_w("VU Peak (%.3f) < VU Level (%.3f). Corrigiendo.", vuPeakLevels, vuLevels);
-        vuPeakLevels = vuLevels;
+        vuPeakLevels         = vuLevels;
         vuPeakLastUpdateTime = now;
+        VU::peakAlpha        = 255;
+        VU::peakFadeTime     = 0;
         changed = true;
     }
 
