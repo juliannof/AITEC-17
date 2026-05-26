@@ -333,18 +333,14 @@ void drawMainArea() {
 
 static uint16_t vuSegColor(int i, int active, int peak, bool clip) {
     if (i == VU::SEGS - 1 && clip) return VU_RED_ON;
-    if (peak >= 0 && i == peak)    return (i<8)?VU_GREEN_OFF:(i<10)?VU_YELLOW_OFF:VU_RED_OFF;
-    if (i < active)                return (i<8)?VU_GREEN_ON :(i<10)?VU_YELLOW_ON :VU_RED_ON;
-    return                                (i<8)?VU_GREEN_OFF:(i<10)?VU_YELLOW_OFF:VU_RED_OFF;
+    if (i < active || (peak >= 0 && i == peak))
+        return (i<8)?VU_GREEN_ON:(i<10)?VU_YELLOW_ON:VU_RED_ON;
+    return (i<8)?VU_GREEN_OFF:(i<10)?VU_YELLOW_OFF:VU_RED_OFF;
 }
 
-static void vuDrawSeg(int i, uint16_t fill, bool peakBorder) {
+static void vuDrawSeg(int i, uint16_t fill) {
     int y = VU::Y_TOP + VU::H - (i + 1) * VU::SEG_H - i * VU::PAD;
     tft.fillRoundRect(VU::X, y, VU::W, VU::SEG_H, VU::CORNER, fill);
-    if (peakBorder) {
-        tft.drawRoundRect(VU::X,   y,   VU::W,   VU::SEG_H,   VU::CORNER,   VU_PEAK_COLOR);
-        tft.drawRoundRect(VU::X+1, y+1, VU::W-2, VU::SEG_H-2, VU::CORNER-1, VU_PEAK_COLOR);
-    }
 }
 
 // ════════════════════════════════════════════════════════════
@@ -355,28 +351,20 @@ void drawVUMeters() {
     int  peak     = (int)round(vuPeakLevels * VU::SEGS);
     if (peak > 0) peak--;
     bool showPeak = (vuPeakLevels > vuLevels + 0.001f);
-    if (showPeak && active > 0 && peak < active - 1) peak = active - 1;
     if (!showPeak) peak = -1;
     bool clip = vuClipState;
 
     if (VU::lastActive < 0) {
-        // Primera vez o tras TOTAL redraw: fondo gris + todos los segmentos
         tft.fillRect(MAINAREA_WIDTH, HEADER_HEIGHT,
                      TFT_WIDTH - MAINAREA_WIDTH, MAINAREA_HEIGHT, TFT_MCU_DARKGRAY);
-        for (int i = 0; i < VU::SEGS; i++) {
-            bool isPeak = (i == peak);
-            vuDrawSeg(i, vuSegColor(i, active, isPeak ? peak : -1, clip), isPeak);
-        }
+        for (int i = 0; i < VU::SEGS; i++)
+            vuDrawSeg(i, vuSegColor(i, active, peak, clip));
     } else {
-        // Diferencial: solo los segmentos cuyo color o estado peak cambió
-        bool prevShowPeak = (VU::lastPeak >= 0);
         for (int i = 0; i < VU::SEGS; i++) {
-            bool isPeakNow  = showPeak    && (i == peak);
-            bool isPeakPrev = prevShowPeak && (i == VU::lastPeak);
-            uint16_t cNow  = vuSegColor(i, active,        isPeakNow  ? peak        : -1, clip);
-            uint16_t cPrev = vuSegColor(i, VU::lastActive, isPeakPrev ? VU::lastPeak : -1, VU::lastClip);
-            if (cNow != cPrev || isPeakNow != isPeakPrev)
-                vuDrawSeg(i, cNow, isPeakNow);
+            uint16_t cNow  = vuSegColor(i, active,        peak,        clip);
+            uint16_t cPrev = vuSegColor(i, VU::lastActive, VU::lastPeak, VU::lastClip);
+            if (cNow != cPrev)
+                vuDrawSeg(i, cNow);
         }
     }
 
