@@ -188,6 +188,20 @@ void taskCore0(void* pvParameters) {
         // tickCalibracion gestiona calibración post-conexión (disparada por SysEx 0x21)
         tickCalibracion();
 
+        // VU timeout — Logic deja de enviar Channel Pressure cuando no hay audio.
+        // S3 mantiene el último vuLevel indefinidamente → S2 nunca decae.
+        // Fix: reset a 0 si no llega Channel Pressure en >200ms. (2026-05-26)
+        static uint32_t lastVuTimeoutCheck = 0;
+        if (millis() - lastVuTimeoutCheck > 50) {
+            lastVuTimeoutCheck = millis();
+            for (int i = 0; i < NUM_SLAVES; i++) {
+                if (vuLevels[i] > 0.0f && millis() - vuLastUpdateTime[i] > 200) {
+                    vuLevels[i] = 0.0f;
+                    rs485.setVuLevel(i + 1, 0);
+                }
+            }
+        }
+
         // ← LOG DE ESTADO (DENTRO DEL LOOP):
         if (millis() - lastStatusLog > 2000) {
             lastStatusLog = millis();
