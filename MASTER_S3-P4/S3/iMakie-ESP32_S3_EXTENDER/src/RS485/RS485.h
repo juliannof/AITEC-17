@@ -104,10 +104,11 @@ private:
     uint8_t  _disconnectLastId = 0;        // Último slave a notificar (NUM_SLAVES)
     uint32_t _disconnectStartTime = 0;     // Para timeout de seguridad (~5s)
 
-    void _sendPacket   (uint8_t id);
-    bool _readResponse ();
-    void _handleResponse();
-    void _nextSlave    ();
+    void _sendPacket              (uint8_t id);
+    bool _readResponse            ();
+    void _handleResponse          ();
+    void _nextSlave               ();
+    void _triggerNextCalibration  (uint8_t fromId);  // cascade + wraparound (2026-05-26)
 };
 
 extern RS485Master rs485;

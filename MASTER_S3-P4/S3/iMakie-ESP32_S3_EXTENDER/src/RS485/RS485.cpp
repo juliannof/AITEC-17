@@ -312,17 +312,8 @@ void RS485Master::_handleResponse() {
                 _ch[_currentId].dirty      = true;
                 log_i("[CALIB] Slave %d ✓ CALIBRADO OK: MIN=%d MAX=%d",
                       _currentId, _ch[_currentId].calibratedMin, _ch[_currentId].calibratedMax);
-                // Cascada: disparar siguiente esclavo (2026-05-22)
-                uint8_t next = _currentId + 1;
-                if (next <= _numSlaves && !_ch[next].calibrated && !_ch[next].calibrating) {
-                    _ch[next].calibrate    = true;
-                    _ch[next].calibrating  = true;
-                    _ch[next].calibRetries = 0;   // reset budget en primer intento (2026-05-26)
-                    _ch[next].dirty        = true;
-                    log_i("[CALIB] Cascada → Slave %d", next);
-                } else if (next > _numSlaves) {
-                    log_i("[CALIB] Cascada completa — todos los slaves calibrados");
-                }
+                // Cascade con wraparound — incluye slaves que fallaron antes (2026-05-26)
+                _triggerNextCalibration(_currentId);
             }
         } else if (calibError) {
             // Guard: contar solo si este intento fue nuestro (2026-05-26)
@@ -332,24 +323,12 @@ void RS485Master::_handleResponse() {
                 _ch[_currentId].calibrating  = false;
                 _ch[_currentId].calibRetries++;
                 if (_ch[_currentId].calibRetries >= MAX_CALIBRATION_RETRIES) {
-                    // Bypass: slave responde pero no calibra — continuar cascade (2026-05-26)
-                    // No haltar: marcar como calibrado con rango teórico, la cascada sigue.
-                    // El slave "díscolo" puede re-calibrarse después con setCalibrate(id).
-                    _ch[_currentId].calibrated = true;   // bypass — rango teórico 0-27000
-                    _ch[_currentId].dirty      = true;
-                    log_w("[CALIB] Slave %d ✗ BYPASS tras %d errores — operando sin calibrar (rango teórico)",
-                          _currentId, _ch[_currentId].calibRetries);
-                    // Continuar cascada al siguiente slave
-                    uint8_t next = _currentId + 1;
-                    if (next <= _numSlaves && !_ch[next].calibrated && !_ch[next].calibrating) {
-                        _ch[next].calibrate    = true;
-                        _ch[next].calibrating  = true;
-                        _ch[next].calibRetries = 0;
-                        _ch[next].dirty        = true;
-                        log_i("[CALIB] Cascada → Slave %d (tras bypass slave %d)", next, _currentId);
-                    } else if (next > _numSlaves) {
-                        log_i("[CALIB] Cascada completa (con bypass)");
-                    }
+                    // Sin bypass, sin HALT — cascade continúa, reintento posterior (2026-05-26)
+                    // El slave díscolo queda calibrated=false y será reintentado por wraparound.
+                    _ch[_currentId].calibRetries = 0;   // presupuesto limpio para próximo intento
+                    log_w("[CALIB] Slave %d — %d intentos fallidos, cascade continúa",
+                          _currentId, MAX_CALIBRATION_RETRIES);
+                    _triggerNextCalibration(_currentId);
                 } else {
                     // Reintento tras grace period: N respuestas estables antes de nuevo intento
                     _ch[_currentId].stableRespCount = 0;
@@ -376,6 +355,27 @@ void RS485Master::_handleResponse() {
 
 
 
+
+// ─── Cascade con wraparound (2026-05-26) ────────────────────────────────────
+// Busca el siguiente slave sin calibrar: primero después de fromId, luego
+// desde 1 (wraparound). Si todos están calibrados → log completo.
+void RS485Master::_triggerNextCalibration(uint8_t fromId) {
+    for (uint8_t pass = 0; pass < 2; pass++) {
+        uint8_t start = (pass == 0) ? fromId + 1 : 1;
+        uint8_t end   = (pass == 0) ? _numSlaves  : fromId;
+        for (uint8_t i = start; i <= end; i++) {
+            if (!_ch[i].calibrated && !_ch[i].calibrating) {
+                _ch[i].calibrate    = true;
+                _ch[i].calibrating  = true;
+                _ch[i].calibRetries = 0;
+                _ch[i].dirty        = true;
+                log_i("[CALIB] → Slave %d", i);
+                return;
+            }
+        }
+    }
+    log_i("[CALIB] ✓ Todos los slaves calibrados");
+}
 
 void RS485Master::_nextSlave() {
     _currentId++;
