@@ -433,16 +433,6 @@ void update() {
         // Máquina calibración en curso
         _calibUpdate();
         if (_motor_phase == CalibPhase::DONE || _motor_phase == CalibPhase::ERROR) {
-            if (_motor_phase == CalibPhase::ERROR) {
-                // Bypass: calibración falló — usar rango teórico para no bloquear movimiento (2026-05-26)
-                // S3 ya marcó este slave como bypass; S2 debe poder seguir targets igualmente.
-                // Display muestra "NO CAL" para identificar la unidad con problema físico.
-                _calibratedFaderMin = MOTOR_ADC_MIN;
-                _calibratedFaderMax = MOTOR_ADC_MAX;
-                _motor_adcSpan      = MOTOR_ADC_MAX - MOTOR_ADC_MIN;
-                _motor_phase        = CalibPhase::ERROR;  // mantener ERROR → isCalibrated()=false → "NO CAL"
-                log_w("[MOTOR] Calibración fallida — bypass rango teórico (%d-%d)", MOTOR_ADC_MIN, MOTOR_ADC_MAX);
-            }
             _motor_state = MotorState::IDLE;
             log_d("[MOTOR-STATE] CALIBRATING → IDLE");
         }
@@ -682,13 +672,10 @@ void requestCalibration() {
 void setTargetFromS3(uint16_t adcTarget) {
     // S3 ordena posición → solo si usuario NO está tocando (usuario es master)
     _s3Target = adcTarget;
-    // Bloquear solo si calibración activa O si no hay span (ni real ni teórico)
-    bool hasRange = (_motor_adcSpan > 0);
-    bool calibActive = _isCalibrating() || _motor_state == MotorState::CALIBRATING;
-    if (!hasRange || calibActive) {
+    if (_motor_phase != CalibPhase::DONE) {
         static unsigned long _lastNoCal = 0;
         if (millis() - _lastNoCal > 2000) {
-            log_w("[MOTOR] setTargetFromS3: sin rango o calibrando, ignorando target=%d", adcTarget);
+            log_w("[MOTOR] setTargetFromS3: no calibrado, ignorando target=%d phase=%d", adcTarget, (int)_motor_phase);
             _lastNoCal = millis();
         }
         return;

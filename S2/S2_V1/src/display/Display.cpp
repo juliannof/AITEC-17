@@ -3,7 +3,6 @@
 #include "Display.h"
 #include "hardware/encoder/Encoder.h"
 #include "../hardware/Hardware.h"
-#include "../hardware/Motor/Motor.h"
 #include <Preferences.h>
 #include "SpriteUtils.h"           // en Display.cpp
 #include "../config.h"
@@ -314,26 +313,21 @@ void drawMainArea() {
     mainArea.setCursor(7, 90);
     mainArea.print(trackName);
 
-    // --- Fader dB / estado calibración (2026-05-26) ---
-    mainArea.setFont(&fonts::FreeSans12pt7b);
-    mainArea.setCursor(7, 145);
-    if (!Motor::isCalibrated()) {
-        mainArea.setTextColor(TFT_ORANGE, TFT_BG_COLOR);
-        mainArea.print("NO CAL");
+    // --- Fader dB ---
+    char faderDbStr[12];
+    if (faderPositions < 0.001f) {
+        snprintf(faderDbStr, sizeof(faderDbStr), "-inf");
+    } else if (faderPositions < 0.75f) {
+        float db = (faderPositions / 0.75f) * 60.0f - 60.0f;
+        snprintf(faderDbStr, sizeof(faderDbStr), "%.1f dB", db);
     } else {
-        char faderDbStr[12];
-        if (faderPositions < 0.001f) {
-            snprintf(faderDbStr, sizeof(faderDbStr), "-inf");
-        } else if (faderPositions < 0.75f) {
-            float db = (faderPositions / 0.75f) * 60.0f - 60.0f;
-            snprintf(faderDbStr, sizeof(faderDbStr), "%.1f dB", db);
-        } else {
-            float db = ((faderPositions - 0.75f) / 0.25f) * 10.0f;
-            snprintf(faderDbStr, sizeof(faderDbStr), "+%.1f dB", db);
-        }
-        mainArea.setTextColor(TFT_DARKGREY, TFT_BG_COLOR);
-        mainArea.print(faderDbStr);
+        float db = ((faderPositions - 0.75f) / 0.25f) * 10.0f;
+        snprintf(faderDbStr, sizeof(faderDbStr), "+%.1f dB", db);
     }
+    mainArea.setFont(&fonts::FreeSans12pt7b);
+    mainArea.setTextColor(TFT_DARKGREY, TFT_BG_COLOR);
+    mainArea.setCursor(7, 145);
+    mainArea.print(faderDbStr);
 
     mainArea.pushSprite(0, HEADER_HEIGHT);
     
