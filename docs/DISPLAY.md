@@ -443,9 +443,55 @@ Llamada cada ciclo de `loop()`. Gestiona tres bucles independientes:
 
 ---
 
-## 9. REFERENCIAS
+## 9. BUG CONOCIDO — dB Fader Intermitente (2026-05-26)
 
-- **MOTOR.md** — SAT suspende/restaura sprites
+### 9.1 Síntoma
+
+El valor de dB en `mainArea` («`-23.4 dB`») **muestra el target de Logic, no la posición física real del fader**. Funciona cuando Logic está controlando el fader activamente. Cuando el usuario mueve el fader a mano, el dB no se actualiza.
+
+### 9.2 Causa Raíz
+
+```cpp
+// RS485Handler.cpp — onMasterData()
+float newFader = pkt.faderTarget / 27000.0f;   // ← target de Logic
+if (fabsf(faderPositions - newFader) > 0.001f) {
+    faderPositions = newFader;                   // ← no es la posición ADC real
+}
+
+// Display.cpp — drawMainArea()
+// faderPositions = lo que Logic QUIERE, no donde está físicamente el fader
+```
+
+`faderPositions` refleja el **comando de Logic**, no la posición real del fader medida por ADS1115.
+
+### 9.3 Escenarios de Error
+
+| Escenario | Valor mostrado | Valor real |
+|-----------|---------------|------------|
+| Logic controla fader | ✅ Correcto | — |
+| Usuario mueve fader a mano | ❌ Congelado en último target Logic | posición real diferente |
+| Fader desconectado de Logic (touchState=1) | ❌ Sigue mostrando target Logic | posición real |
+| Motor calibrando | ❌ muestra target, fader está en 0 | ADC en tránsito |
+
+### 9.4 Fix Pendiente
+
+Cambiar la fuente del valor dB de `faderPositions` (target Logic) a `Motor::getPosition()` (posición ADC real calibrada, 0.0–1.0):
+
+```cpp
+// Display.cpp — drawMainArea()  [FIX PENDIENTE]
+float realPos = Motor::isCalibrated() ? Motor::getPosition() : faderPositions;
+// usar realPos en lugar de faderPositions para el cálculo dB
+```
+
+**Bloqueante:** `Motor::getPosition()` devuelve 0.0 si no calibrado → necesita guard. Tampoco se redibuja `mainArea` cuando cambia el ADC (solo cuando cambia `faderPositions`). Requeriría enganchar el redibujado al ciclo de `Motor::setADC()` o a un timer periódico.
+
+**Estado:** ⚠️ Sin prioridad — afecta solo al display informativo, no al control real del motor.
+
+---
+
+## 10. REFERENCIAS
+
+- **MOTOR.md** — SAT suspende/restaura sprites, `Motor::getPosition()`, `Motor::isCalibrated()`
 - **BUTTONS.md** — Actualización display en response a botones
 - **CLAUDE.md** — Directivas obligatorias
 - **S2/README.md** — Display pinout
@@ -454,5 +500,6 @@ Llamada cada ciclo de `loop()`. Gestiona tres bucles independientes:
 
 ## Últimas Actualizaciones
 
+- **(2026-05-26)** §9 Bug conocido: dB fader muestra target Logic, no posición ADC real — documentado con fix pendiente
 - **(2026-05-26)** §10 VU Meter: geometría, diferencial, peak hold+fade 300ms, blendColor565()
 - **(2026-05-16)** Creado DISPLAY.md como documento exhaustivo, trasladado contenido de CLAUDE.md
