@@ -18,6 +18,26 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 | 🟡 Media | **Protocolo de cierre Logic — GoOffline limpio en P4 y S3** | Observado en captura 2026-05-24: handshake de arranque tiene 3 reintentos en S3 (~3s). El cierre de Logic (GoOffline + desconexión USB) no está validado ni documentado. Implementar secuencia `0x0F` → reset de estados → faders a 0 → LED off, limpia en ambos MCU. Ver `docs/MIDI.md` sección 3.4. |
 | 🟢 Baja | **P4: VU global 16 pistas via MIDI UART S3→P4** | S3 re-emite MIDI de Logic (ch 1–8) a P4 por UART directo (ch 9–16). P4 agrega las 16 pistas en display LVGL. Sin WiFi, sin protocolo custom — reutiliza `processMidiByte()` existente. 1 cable TX→RX. Ver `docs/S3ToP4.md` sección "Feature: Agregación 16 pistas". |
 | 🟢 Baja | **Limpiar código muerto Motor S2** — auditado 2026-05-27 | 4 items: (1) `MotorState::WAITING_FOR_CALIB` nunca asignado — eliminar del enum + comentarios + guard `setADC()` línea 499; (2) `_motor_goingToMin` flag nunca leído — eliminar de `config.h` + `goToMin()` + `setUserDropTarget()`; (3) `setUserDropTarget()` nunca llamada desde fuera — eliminar de Motor.h/cpp; (4) `goToMin()` no establece `_motor_state=GOING_TO_MIN` — riesgo si se llama directa desde SAT/test, añadir la asignación. Sin impacto en comportamiento actual. |
+| 🔴 **VALIDACIÓN HW** | **Fader extremos −∞/+6dB — snap zone no funciona sin calibración** | Snap zone en S3 `main.cpp` (commit `9f19a68`) solo actúa si `ch.calibratedMin/Max > 0`. Si calibración no ha corrido, `span=0` y se usa fallback `faderPos*max/27000` sin snap → Logic muestra −139 dB y 5,2 dB. **Fix pendiente:** añadir snap zone también al path fallback (sin calibración), o verificar que calibración corre y captura min/max correctamente antes de confiar en el snap. |
+| 🔴 Alta | **P4: `case 0x61` sets `g_logicConnected=0` — bug no portado desde S3 (2026-05-27)** | `MIDIProcessor.cpp P4 línea 467`: Logic envía `0x61` (AllFadersToMinimum) inmediatamente después de `0x21` en GoOnline. P4 establece `g_logicConnected=0` → slaves reciben `pkt.connected=0` durante toda la sesión → pantallas oscuras, motores inactivos. Mismo bug corregido en S3 el 2026-05-27 (commit `sesión 17:14`), sin portar a P4. **Fix:** copiar case 0x61 de S3: eliminar `g_logicConnected=0`, añadir `rs485.setFaderTarget(i,0)` para todos los slaves. |
+| 🔴 Alta | **P4: `startTask()` RS485 nunca llamada — slaves sin comunicación (2026-05-27)** | `main.cpp setup()`: `rs485.begin()` configura Serial1 pero `rs485.startTask()` nunca se invoca. El task de polling (`runTask()`) no arranca. P4 no envía ni un paquete a ningún slave S2. `tickCalibracion()` encola calibraciones que nunca se envían. **Fix:** añadir `rs485.startTask()` en `setup()` tras `rs485.begin()`, `main.cpp línea ~254`. Ver `RS485.cpp::startTask()` — pineado a Core 1, prioridad 5. |
+| 🟡 Media | **P4: `_calibPendingFrom` no se resetea en GoOffline (2026-05-27)** | `MIDIProcessor.cpp case 0x0F`: reset de estado no incluye `_calibPendingFrom`. Si Logic desconecta durante calibración (ej. slave 4/9 en progreso), al reconectar `tickCalibracion()` retoma desde el slave 4, salteando 1-3. La calibración del 0x21 pone `_calibPendingFrom=1` y mezcla ambas secuencias. **Fix:** añadir `_calibPendingFrom = 0;` en `case 0x0F`, `MIDIProcessor.cpp`. |
+
+---
+
+### SESIÓN 2026-05-27 — Auditoría P4: 3 bugs críticos identificados (23:34)
+
+**Contexto:** Investigación de "P4 no conecta en todas las ocasiones". Referencia: `docs/S3ToP4.md`.
+
+**Resultado:** 3 bugs nuevos no documentados en S3ToP4.md. Sin cambios de código — solo documentación en Pendientes.
+
+| Bug | Archivo P4 | Gravedad |
+|-----|-----------|----------|
+| `case 0x61` establece `g_logicConnected=0` (mismo bug que S3, no portado) | `midi/MIDIProcessor.cpp` línea 467 | 🔴 Alta |
+| `startTask()` RS485 nunca llamada → slaves sin comunicación | `main.cpp` setup() | 🔴 Alta |
+| `_calibPendingFrom` no resetea en `case 0x0F` | `midi/MIDIProcessor.cpp` case 0x0F | 🟡 Media |
+
+**Nota sobre conexión intermitente:** El handshake SysEx (0x00→0x13→0x0C→0x21) es correcto en P4. La intermitencia más probable es timing USB: Logic envía discovery antes de que el task MIDI procese bytes si P4 arranca con Logic ya abierto. No es un bug de código sino de arranque USB. Los 3 bugs listados son independientes del handshake pero críticos para operación real.
 
 ---
 
