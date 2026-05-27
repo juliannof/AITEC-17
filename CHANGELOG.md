@@ -20,6 +20,52 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 ---
 
+### SESIÓN 2026-05-27 — Fix S3: 0x61 desconectaba slaves + Transport LEDs off (17:14)
+
+**Problema 1 — S2s siempre oscuros al conectar Logic:**
+`MIDIProcessor.cpp` case `0x61` (AllFadersToMinimum) contenía `g_logicConnected = 0`. Logic envía `0x61` **después** de `0x21` en la secuencia GoOnline. Efecto: `0x21` ponía `g_logicConnected=1` y `0x61` lo anulaba de inmediato → los 8 slaves recibían `pkt.connected=0` → pantallas oscuras, motores inactivos, siempre.
+
+**Fix — `MASTER_S3-P4/S3/iMakie-ESP32_S3_EXTENDER/src/midi/MIDIProcessor.cpp`:**
+```cpp
+case 0x61: {
+    // NO cambiar g_logicConnected — solo resetear fader targets (2026-05-27)
+    for (uint8_t i = 1; i <= NUM_SLAVES; i++)
+        rs485.setFaderTarget(i, 0);
+    log_i("[MCU] AllFaderstoMinimum — faders a 0");
+    break;
+}
+```
+
+**Problema 2 — Transport LEDs no se apagaban al desconectar:**
+Al GoOffline o disconnect por PitchBend, los LEDs de transporte mantenían su último estado (ej. STOP encendido).
+
+**Fix — `setAllLedsOff()` llamado en 2 puntos de desconexión:**
+- `case 0x0F:` (GoOffline explícito de Logic)
+- Bloque disconnect por detección 9 faders a 0 en `processPitchBend()`
+
+**Nuevo — `MASTER_S3-P4/S3/.../src/hardware/Transporte.cpp`:**
+```cpp
+void setAllLedsOff() {
+    for (uint8_t i = 0; i < N; i++) setLed(LEDS[i], false);
+}
+```
+
+**Fix S2 — `S2/S2_V1/src/RS485/RS485Handler.cpp`:**
+`onMasterData()` al transicionar a CONNECTED ahora llama `setScreenBrightness(255)` — restaura brillo si `checkTimeout()` lo había puesto a 0 durante reboot.
+
+| MCU | Archivo | Cambio |
+|-----|---------|--------|
+| S3 | MIDIProcessor.cpp case 0x61 | Eliminar `g_logicConnected=0` → solo resetear faders |
+| S3 | MIDIProcessor.cpp case 0x0F | +`Transporte::setAllLedsOff()` |
+| S3 | MIDIProcessor.cpp processPitchBend | +`Transporte::setAllLedsOff()` en disconnect |
+| S3 | Transporte.cpp/.h | Nueva función `setAllLedsOff()` |
+| S2 | RS485Handler.cpp onMasterData | +`setScreenBrightness(255)` en transición CONNECTED |
+
+**Riesgo:** BAJO — todos los cambios aditivos o eliminación de código incorrecto.
+**Validación:** Conectar Logic → S2s deben activar pantallas. Desconectar → LEDs transport apagan.
+
+---
+
 ### SESIÓN 2026-05-27 — Fix S3: recalibración automática tras reinicio de slave S2
 
 **Problema:** Si un S2 se reiniciaba durante operación normal, S3 no lo recalibraba. El fader quedaba sin calibrar (ADC min/max sin mapear).

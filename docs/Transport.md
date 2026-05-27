@@ -1,9 +1,9 @@
 # Transport — Controles y Feedback (iMakie S3 Extender)
 
-Documentación exhaustiva del subsistema de transporte. Incluye botones físicos (RW/FF/STOP/PLAY/REC), LEDs de feedback, mapeo MIDI, y handshake Mackie MCU.
+Documentación exhaustiva del subsistema de transporte. Incluye botones físicos (RW/FF/STOP/PLAY/REC), LEDs de feedback, mapeo MIDI, comportamiento por estado de conexión, y handshake Mackie MCU.
 
 **Responsable:** iMakie Development Team  
-**Última actualización:** 2026-05-16  
+**Última actualización:** 2026-05-27  
 **Estado:** En producción (5 botones, 5 LEDs, MIDI feedback)
 
 ---
@@ -12,207 +12,248 @@ Documentación exhaustiva del subsistema de transporte. Incluye botones físicos
 
 ### 1.1 Pinout Transport (S3)
 
-| Función | Nota MIDI | GPIO BTN | GPIO LED | Lógica | Vel MIDI |
-|---------|-----------|----------|----------|--------|----------|
-| **RW** (Rewind) | 0x5B (91) | 3 | 4 | Activo LOW | 127 on / 0 off |
-| **FF** (Fast Forward) | 0x5C (92) | 7 | 8 | Activo LOW | 127 on / 0 off |
-| **STOP** | 0x5D (93) | 5 | 6 | Activo LOW | 127 on / 0 off |
-| **PLAY** | 0x5E (94) | 9 | 10 | Activo LOW | 127 on / 0 off |
-| **REC** (Record) | 0x5F (95) | 11 | 12 | Activo LOW | 127 on / 0 off |
+| Función | Nota MIDI | GPIO BTN | GPIO LED | Lógica LED | Vel MIDI |
+|---------|-----------|----------|----------|------------|----------|
+| **RW** (Rewind) | 0x5B (91) | BTN_RW | LED_RW | Ánodo común 5V, sink — LOW=ON | 127 on / 0 off |
+| **FF** (Fast Forward) | 0x5C (92) | BTN_FF | LED_FF | Ánodo común 5V, sink — LOW=ON | 127 on / 0 off |
+| **STOP** | 0x5D (93) | BTN_STOP | LED_STOP | Ánodo común 5V, sink — LOW=ON | 127 on / 0 off |
+| **PLAY** | 0x5E (94) | BTN_PLAY | LED_PLAY | Ánodo común 5V, sink — LOW=ON | 127 on / 0 off |
+| **REC** (Record) | 0x5F (95) | BTN_REC | LED_REC | Ánodo común 5V, sink — LOW=ON | 127 on / 0 off |
+
+> Pines GPIO definidos en `config.h` S3. Lógica invertida: `LOW = encendido`, `HIGH = apagado`.
 
 **Hardware:**
-- **Botones:** Switches mecánicos, pull-up interno, activo LOW
-- **LEDs:** Directo GPIO (no PWM), control on/off via MIDI feedback
-- **Debounce:** 20ms (similar a BUTTONS.md)
+- **Botones:** Switches mecánicos, gestión con Button2 library
+- **LEDs:** GPIO directo, on/off binario (no PWM actualmente)
+- **Polaridad:** Ánodo común a 5V → sink a GND para encender
 
 ---
 
 ## 2. MAPEO MIDI TRANSPORT
 
-### 2.1 Notas MIDI
+### 2.1 Notas MIDI (Mackie MCU familia 0x14)
 
 ```cpp
-#define MIDI_RW    0x5B   // 91 - Rewind
-#define MIDI_FF    0x5C   // 92 - Fast Forward
-#define MIDI_STOP  0x5D   // 93 - Stop
-#define MIDI_PLAY  0x5E   // 94 - Play
-#define MIDI_REC   0x5F   // 95 - Record
+// MCU_TRANSPORT_NOTES[] en Transporte.cpp
+0x5F  // REC   (95)
+0x5E  // PLAY  (94)
+0x5C  // FF    (92)
+0x5D  // STOP  (93)
+0x5B  // RW    (91)
 ```
 
-**Canal:** MIDI 1 (omnidireccional)
+**Canal:** MIDI 1 (omnidireccional en Mackie MCU)
 
 **Velocidad:**
-- **127** = encendido (button presionado, LED on)
-- **0** = apagado (button suelto, LED off)
+- **127** = encendido (Logic confirma estado activo, LED on)
+- **0** = apagado (Logic confirma estado inactivo, LED off)
+
+### 2.2 Caso especial — PLAY/STOP
+
+`setLedByNote()` maneja nota 94 como combo:
+```cpp
+case 94:  // PLAY/STOP — vel 127 = reproduciendo, vel 0 = parado
+    setLed(LED_PLAY, on);
+    setLed(LED_STOP, !on);  // STOP es el inverso de PLAY
+    break;
+```
+Cuando Logic envía PLAY ON: LED PLAY enciende, LED STOP apaga.  
+Cuando Logic envía PLAY OFF: LED PLAY apaga, LED STOP enciende.
 
 ---
 
-## 3. FLUJO CONTROL BIDIRECCIONAL
+## 3. COMPORTAMIENTO POR ESTADO DE CONEXIÓN (2026-05-27)
 
-### 3.1 Dirección A: Logic → S3 → LEDs
+### 3.1 Tabla de estados
 
+| Estado Logic | LEDs Transport | Botones | Descripción |
+|-------------|----------------|---------|-------------|
+| **DISCONNECTED** (boot) | Todos apagados | No envían MIDI | S3 no tiene Logic activo |
+| **GoOnline en curso** | Apagados | Funcionales | Handshake SysEx en progreso |
+| **CONNECTED** | Controlados por Logic | Envían MIDI | Logic dicta estado de cada LED |
+| **GoOffline (`0x0F`)** | Todos apagados | No envían MIDI efectivo | `setAllLedsOff()` inmediato |
+| **Disconnect PitchBend** | Todos apagados | No envían MIDI efectivo | `setAllLedsOff()` inmediato |
+
+### 3.2 Regla de comportamiento
+
+> Los LEDs de transporte **solo se encienden si Logic los enciende** (vía nota MIDI).  
+> Al desconectar por cualquier vía, `setAllLedsOff()` apaga todos instantáneamente.  
+> No hay estado "tenue siempre encendido" — es on/off según Logic.
+
+### 3.3 Implementación — `setAllLedsOff()`
+
+```cpp
+// Transporte.cpp
+void setAllLedsOff() {
+    for (uint8_t i = 0; i < N; i++)
+        setLed(LEDS[i], false);
+}
 ```
-Logic Pro
-    │ Note On (nota 91-95, vel 127)
-    ↓
-S3 MidiProcessor::processMidiNote()
-    │ Recibe nota + velocidad
-    │ Identifica función (RW/FF/STOP/PLAY/REC)
-    ↓
-Transporte::setLedByNote(note, velocity)
-    │ Si velocity=127 → LED ON
-    │ Si velocity=0 → LED OFF
-    ↓
-digitalWrite(GPIO_LED, HIGH/LOW)
-    │ Controla LED física
-    ↓
-Usuario ve feedback visual
-    └─ LED enciende cuando Logic prepara/graba
-```
 
-**Ejemplo:**
-- Logic entra en PLAY → envía Note On 0x5E vel 127
-- S3 setLedByNote(0x5E, 127) → digitalWrite(GPIO10, HIGH)
-- LED PLAY enciende
-- Usuario presiona STOP → nota 0x5D vel 127
-- LED STOP enciende, LED PLAY apaga
-
-### 3.2 Dirección B: S3 Botones → Logic
-
-```
-Usuario presiona BTN REC
-    ↓
-GPIO11 transición LOW
-    ↓
-ButtonManager::update() (debounce 20ms)
-    │ Detecta flanco LOW → HIGH (release)
-    ↓
-buttonPressed[REC] = true
-    ↓
-S3 Main loop:
-    ├─ Envía Note On (0x5F, vel 127) a Logic
-    │  (incluido en MIDI output buffer)
-    ↓
-Logic recibe MIDI
-    ├─ Nota 0x5F = REC command
-    ├─ Vel 127 = presionado
-    ├─ Actualiza estado grabación
-    ├─ Envía feedback MIDI confirmando
-    ↓
-S3 recibe feedback
-    ├─ setLedByNote(0x5F, 127)
-    ├─ LED REC se enciende
-```
+Llamado desde `MIDIProcessor.cpp` en dos puntos:
+1. `case 0x0F:` — GoOffline recibido de Logic
+2. Bloque disconnect por detección de 9 faders a 0 en `processPitchBend()`
 
 ---
 
 ## 4. HANDSHAKE MACKIE MCU (FAMILIA 0x14)
 
-### 4.1 Protocolo Completo
+### 4.1 Secuencia GoOnline completa
 
-**Fase 1 — Sondeo (cualquier familia):**
 ```
-Logic → S3:  F0 00 00 66 <any> 00 F7
-S3 → Logic:  F0 00 00 66 14 01 00 00 00 01 00 00 00 00 F7
-             └─ Familia 0x14 (identificar como Extender)
+Logic → S3:  F0 00 00 66 <any> 00 F7          (sondeo — cualquier familia)
+S3 → Logic:  F0 00 00 66 14 01 00..00 F7       (responde familia 0x14)
+
+Logic → S3:  F0 00 00 66 14 13 00 F7           (solicita versión firmware)
+S3 → Logic:  F0 00 00 66 14 14 00 F7           (responde versión)
+
+Logic → S3:  F0 00 00 66 14 21 F7              (GoOnline — solicita conexión)
+S3 → Logic:  F0 00 00 66 14 21 01 F7           (confirma CONNECTED)
+             → g_logicConnected = 1
+             → logicConnectionState = CONNECTED
+
+Logic → S3:  F0 00 00 66 14 61 F7              (AllFadersToMinimum — inicialización)
+             → S3 pone faderTarget=0 en todos los slaves
+             → NO cambia g_logicConnected (ver §4.2)
+
+Logic → S3:  F0 00 00 66 14 0C 00 F7           (tipo superficie = Master)
+S3 → Logic:  F0 00 00 66 14 0C 00 F7           (confirma)
+S3 → Logic:  F0 00 00 66 14 10 00 F7           (suscripción a feedback de notas)
+
+→ Estado final: CONNECTED, LEDs responden a Logic
 ```
 
-**Fase 2 — Handshake (familia 0x14):**
+### 4.2 Bug crítico resuelto — SysEx 0x61 (2026-05-27)
+
+**Problema:** El handler de `0x61` (AllFadersToMinimum) contenía `g_logicConnected = 0`. Como Logic envía `0x61` **después** de `0x21` en la secuencia GoOnline, esto anulaba inmediatamente la conexión: los slaves S2 recibían `pkt.connected=0` y sus pantallas quedaban oscuras siempre.
+
 ```
-Logic → S3:  F0 00 00 66 14 21 01 F7      (solicita conexión)
-S3 → Logic:  F0 00 00 66 14 21 01 F7      (confirma CONNECTED)
-
-Logic → S3:  F0 00 00 66 14 0C 00 F7      (tipo superficie = Master)
-S3 → Logic:  F0 00 00 66 14 0C 00 F7      (confirma)
-
-S3 → Logic:  F0 00 00 66 14 10 00 F7      (suscripción feedback)
-             └─ Solicita recibir Note On/Off en tiempo real
+ANTES (incorrecto):          DESPUÉS (correcto):
+0x21 → g_logicConnected=1   0x21 → g_logicConnected=1
+0x61 → g_logicConnected=0   0x61 → faderTarget=0 a todos los slaves
+         ↑ BUG                       (g_logicConnected intacto)
+S2s: pantallas oscuras       S2s: se activan con Logic
 ```
 
-### 4.2 Resultados
+**Fix en `MIDIProcessor.cpp` case 0x61:**
+```cpp
+case 0x61: {
+    // AllFadersToMinimum — Logic inicializa faders al conectar (parte de GoOnline)
+    // NO cambiar g_logicConnected — S2s deben quedarse CONNECTED (2026-05-27)
+    for (uint8_t i = 1; i <= NUM_SLAVES; i++)
+        rs485.setFaderTarget(i, 0);
+    log_i("[MCU] AllFaderstoMinimum — faders a 0");
+    break;
+}
+```
 
-- **CONNECTED:** Logic considera S3 operacional
-- **Feedback en tiempo real:** Logic envía todas las notas transport
-- **LEDs sincronizados:** Feedback visual instantáneo
+### 4.3 Secuencia GoOffline
+
+```
+Logic → S3:  F0 00 00 66 14 0F F7   (GoOffline)
+             → logicConnectionState = DISCONNECTED
+             → g_logicConnected = 0
+             → Transporte::setAllLedsOff()
+             → rs485.beginDisconnectSequence()
+               (todos los slaves reciben pkt.connected=0)
+             → g_switchToOffline = true
+
+S2 recibe pkt.connected=0:
+             → Motor::setConnected(false)
+             → Motor::off()
+             → setScreenBrightness(0)
+             → neoWaitingHandshake = true (LEDs azul)
+```
 
 ---
 
 ## 5. ARQUITECTURA SOFTWARE
 
-### 5.1 Componentes
+### 5.1 Archivos relevantes
 
-**MidiProcessor.cpp:**
+| Archivo | Responsabilidad |
+|---------|----------------|
+| `Transporte.cpp` | LEDs, botones, `setAllLedsOff()`, `setLedByNote()` |
+| `Transporte.h` | Declaraciones públicas |
+| `MIDIProcessor.cpp` | Recibe notas MIDI, llama `setLedByNote()`, gestiona conexión |
+
+### 5.2 Implementación real
+
+**`Transporte::setLed()`** — lógica invertida (ánodo común):
 ```cpp
-void MidiProcessor::processMidiNote(uint8_t note, uint8_t velocity) {
+void setLed(uint8_t pin, bool on) {
+    digitalWrite(pin, on ? LOW : HIGH);  // LOW = enciende, HIGH = apaga
+}
+```
+
+**`Transporte::setLedByNote()`** — convierte nota MIDI en control LED:
+```cpp
+void setLedByNote(uint8_t note, bool on) {
     switch (note) {
-        case MIDI_RW:    // 0x5B
-        case MIDI_FF:    // 0x5C
-        case MIDI_STOP:  // 0x5D
-        case MIDI_PLAY:  // 0x5E
-        case MIDI_REC:   // 0x5F
-            Transporte::setLedByNote(note, velocity);
+        case 94:  // PLAY/STOP combo
+            setLed(LED_PLAY, on);
+            setLed(LED_STOP, !on);
+            break;
+        case 95:  // REC
+            setLed(LED_REC, on);
+            break;
+        case 97:  // FF
+            setLed(LED_FF, on);
             break;
     }
 }
 ```
 
-**Transporte.cpp:**
+**`Transporte::setAllLedsOff()`** — apaga todos los 5 LEDs (2026-05-27):
 ```cpp
-void Transporte::setLedByNote(uint8_t note, uint8_t velocity) {
-    uint8_t gpio_led;
-    
-    switch (note) {
-        case MIDI_RW:   gpio_led = GPIO_LED_RW; break;
-        case MIDI_FF:   gpio_led = GPIO_LED_FF; break;
-        case MIDI_STOP: gpio_led = GPIO_LED_STOP; break;
-        case MIDI_PLAY: gpio_led = GPIO_LED_PLAY; break;
-        case MIDI_REC:  gpio_led = GPIO_LED_REC; break;
-    }
-    
-    digitalWrite(gpio_led, (velocity > 0) ? HIGH : LOW);
+void setAllLedsOff() {
+    for (uint8_t i = 0; i < N; i++)
+        setLed(LEDS[i], false);
 }
 ```
 
-**ButtonManager.cpp:**
+**`Transporte::begin()`** — secuencia de test al boot:
 ```cpp
-// Detecta presión, envía Note On
-void ButtonManager::update() {
-    for (int i = BUTTON_RW; i <= BUTTON_REC; i++) {
-        if (buttonPressed[i]) {
-            uint8_t note = transport_notes[i];  // 0x5B-0x5F
-            midiOut.noteOn(note, 127, MIDI_CH1);
-            buttonPressed[i] = false;
-        }
+void begin() {
+    for (uint8_t i = 0; i < N; i++) {
+        pinMode(LEDS[i], OUTPUT);
+        setLed(LEDS[i], false);          // Off por defecto
+        buttons[i].setPressedHandler(onButtonPressed);
+        buttons[i].setReleasedHandler(onButtonReleased);
     }
+    // Test visual: enciende cada LED 150ms
+    for (uint8_t i = 0; i < N; i++) {
+        setLed(LEDS[i], true);
+        delay(150);
+        setLed(LEDS[i], false);
+    }
+    // → Tras begin(), todos los LEDs apagados
 }
 ```
 
-### 5.2 Timing Crítico
+### 5.3 Flujo completo S3 Botón → Logic → LED
 
 ```
-Usuario presiona BTN
-         ↓
-GPIO transition (microsegundos)
-         ↓
-ButtonManager::update() ejecuta (cada 20ms loop)
-         ↓
-Debounce 20ms verifica estable
-         ↓
-MIDI transmite (< 10ms en puerto 31250 bauds)
-         ↓
-Logic recibe MIDI (< 1ms)
-         ↓
-Logic actualiza estado
-         ↓
-Logic envía feedback MIDI (< 1ms)
-         ↓
-S3 recibe feedback (< 1ms)
-         ↓
-Transporte::setLedByNote() ejecuta
-         ↓
-LED enciende (instantáneo)
+Usuario presiona BTN (ej. PLAY)
+     ↓
+Button2::loop() detecta flanco
+     ↓
+onButtonPressed() → sendNoteOn(0x5E)
+     │  byte msg[] = {0x90, 0x5E, 0x7F}
+     ↓
+Logic Pro recibe Note On 0x5E vel 127
+     │  → Inicia reproducción
+     │  → Envía feedback: Note On 0x5E vel 127
+     ↓
+S3 processMidiByte() → processNote()
+     ↓
+Transporte::setLedByNote(94, true)
+     │  setLed(LED_PLAY, true)   → LOW
+     │  setLed(LED_STOP, false)  → HIGH
+     ↓
+LED PLAY enciende, LED STOP apaga
 
-Latencia total: < 60ms (imperceptible al usuario)
+Latencia total típica: < 60ms
 ```
 
 ---
@@ -221,47 +262,47 @@ Latencia total: < 60ms (imperceptible al usuario)
 
 ### 6.1 Síntomas Comunes
 
-| Síntoma | Causa Probable | Verificación |
-|---------|----------------|--------------|
-| Botón no responde | GPIO BTN no leído o debounce fallo | Test GPIO con Serial.println() |
-| LED no enciende | GPIO LED abierto o GPIO configuración | Verificar digitalWrite(GPIO_LED, HIGH) en código |
-| MIDI no enviado | MidiProcessor no procesa transporte | Check processMidiNote() llamado |
-| LED lag (>100ms) | Loop principal bloqueante | Verificar timing loop 20ms |
-| Handshake falla | Familia 0x14 no respondida | Verificar respuesta SysEx 0x14 |
-| LED siempre on/off | Lógica invertida (HIGH/LOW) | Probar digitalWrite opuesto |
+| Síntoma | Causa probable | Solución |
+|---------|---------------|----------|
+| LEDs siempre apagados aunque Logic conectado | Bug 0x61 (pre-2026-05-27): `g_logicConnected=0` | Actualizar firmware S3 (fix commit `01dae66`) |
+| LED no enciende al pulsar | GPIO LED abierto o lógica invertida | Verificar `LOW=ON` en hardware real |
+| LED lag >100ms | Loop taskCore1 bloqueante | Verificar `vTaskDelay(10)` en taskCore1 |
+| Handshake falla (Logic no conecta) | Familia 0x14 no respondida en 0x00 | Verificar `DEVICE_FAMILY = 0x14` en config.h |
+| LEDs no se apagan al desconectar | `setAllLedsOff()` no llamado | Verificar en case 0x0F y bloque PitchBend disconnect |
+| Botón no envía MIDI | MIDI buffer lleno o task bloqueada | Verificar `tud_midi_stream_read()` en taskCore0 |
 
-### 6.2 Debugging Logs
+### 6.2 Logs de Referencia
 
-**Botón presionado correctamente:**
+**GoOnline exitoso:**
 ```
-[TRANSPORT] RW presionado (GPIO3 LOW)
-[TRANSPORT] RW release (GPIO3 HIGH después debounce)
-[TRANSPORT] MIDI Note On 0x5B vel 127
-[TRANSPORT] S3 recibe feedback Note On 0x5B vel 127
-[TRANSPORT] LED RW ON (GPIO4 HIGH)
+[I][MIDIProcessor.cpp:447] processMackieSysEx(): [MCU] 0x21 — CONNECTED
+[I][Transporte.cpp:83] setLedByNote(): [TRANSP] PLAY=0 STOP=1
 ```
 
-**Handshake exitoso:**
+**GoOffline:**
 ```
-[MACKIE] Sondeo recibido
-[MACKIE] Respondiendo familia 0x14
-[MACKIE] Connect request recibido (0x21 01)
-[MACKIE] Connected!
-[MACKIE] Suscripción feedback (0x10 00)
+[I][MIDIProcessor.cpp:346] processMackieSysEx(): [MCU] GoOffline recibido — iniciando DISCONNECT SEQUENCE
+[I][RS485.cpp:514] beginDisconnectSequence(): [RS485] DISCONNECT SEQUENCE iniciada para slaves 1..8
+[I][main.cpp:184] taskCore0(): [MAIN] Desconexión completada — todos los slaves en DISCONNECTED
 ```
 
 ---
 
 ## 7. REFERENCIAS
 
-- **BUTTONS.md** — Arquitectura ButtonManager, debounce, GPIO
-- **LEDS.md** — NeoPixel (S2), no relacionado pero similar debounce
-- **SAT.md** — Sistema Auto-Test, no impacta transport
-- **MASTER_S3-P4/S3/.../README.md** — Hardware S3, pinout
-- **CLAUDE.md** — Directivas generales
+- **RS485.md** — Protocolo, pkt.connected, calibración cascada
+- **MIDI.md** — Protocolo Mackie MCU completo, SysEx, handshake
+- **BUTTONS.md** — ButtonManager S2, debounce (no transport pero similar)
+- **MASTER_S3-P4/S3/.../src/hardware/Transporte.cpp** — Implementación
+- **MASTER_S3-P4/S3/.../src/midi/MIDIProcessor.cpp** — Integración MIDI
 
 ---
 
 ## Últimas Actualizaciones
 
+- **(2026-05-27)** §3 Comportamiento por estado de conexión — tabla completa conectado/desconectado
+- **(2026-05-27)** §4.2 Bug 0x61 documentado y fix explicado — causa: S2s siempre oscuros al conectar
+- **(2026-05-27)** §4.3 Secuencia GoOffline completa con `setAllLedsOff()`
+- **(2026-05-27)** §5.3 Flujo completo botón → Logic → LED con latencias
+- **(2026-05-27)** §6 Troubleshooting actualizado con nuevos síntomas
 - **(2026-05-16)** Creado Transport.md como documento exhaustivo, extraído de S3 README
