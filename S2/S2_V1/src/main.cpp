@@ -187,7 +187,7 @@ void setup() {
     // }
 
     drawSplashScreen();
-    setScreenBrightness(255);
+    setScreenBrightness(BRIGHTNESS_SPLASH);
 
     otaManager.begin();
 

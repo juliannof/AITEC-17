@@ -234,6 +234,12 @@ static constexpr uint32_t TOUCH_BASE_MIN_VALUE     = 50;      // valor mínimo i
 
 
 
+// --- Brillo pantalla ---
+#define BRIGHTNESS_SPLASH       50   // Boot y espera (sin Logic)
+#define BRIGHTNESS_SELECTED    180   // Canal activo/seleccionado
+#define BRIGHTNESS_UNSELECTED   70   // Canal no seleccionado
+#define BRIGHTNESS_OTA          50   // Pantalla OTA WiFi
+
 // --- NEOPixel ---
 #define NEOPIXEL_PIN        36  // Pin GPIO donde están conectados los Neopixels
 #define NEOPIXEL_COUNT      4   // Número total de Neopixels

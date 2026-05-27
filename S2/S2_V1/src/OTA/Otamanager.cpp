@@ -112,7 +112,7 @@ void OtaManager::enableForUpload(bool otaOnlyMode) {
     Serial.println("[OTA] HTTP server started");
 
     // 4. Mostrar pantalla OTA (2026-05-27)
-    setScreenBrightness(200);
+    setScreenBrightness(BRIGHTNESS_OTA);
     delay(50);
 
     uint8_t lastOctet = WiFi.localIP()[3];

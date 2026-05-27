@@ -303,6 +303,21 @@ void _satRestoreSprites() {
 
 **Status:** ✅ Resuelto
 
+### 8.3 2026-05-27: Brightness a config.h — valores revisados
+
+Todos los valores hardcodeados movidos a `config.h` como fuente única de verdad.
+
+| Define | Valor | Momento |
+|--------|-------|---------|
+| `BRIGHTNESS_SPLASH` | 50 | Boot, splash, espera Logic desconectado |
+| `BRIGHTNESS_SELECTED` | 180 | Canal activo/seleccionado (Logic conectado) |
+| `BRIGHTNESS_UNSELECTED` | 70 | Canal no seleccionado |
+| `BRIGHTNESS_OTA` | 50 | Pantalla OTA WiFi |
+
+**Comportamiento añadido (2026-05-27):** Al desconectar Logic (`DISCONNECTED` o timeout RS485), `RS485Handler.cpp` llama `drawSplashScreen()` + `setScreenBrightness(BRIGHTNESS_SPLASH)` — pantalla vuelve al splash en lugar de apagarse a negro.
+
+**Status:** ✅ Implementado, pendiente validación hardware
+
 ### 8.2 2026-05-26: VU Meter — refactor completo
 
 | Cambio | Detalle |

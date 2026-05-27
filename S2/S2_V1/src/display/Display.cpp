@@ -273,7 +273,7 @@ void drawHeaderSprite() {
 
     header.fillSprite(headerColor);
 
-    screenBrightness = selectStates ? 255 : 70;
+    screenBrightness = selectStates ? BRIGHTNESS_SELECTED : BRIGHTNESS_UNSELECTED;
     setScreenBrightness(screenBrightness);
     header.pushSprite(0, 0);
 }

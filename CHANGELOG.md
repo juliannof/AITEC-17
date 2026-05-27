@@ -297,6 +297,34 @@ Regenera `.vscode/c_cpp_properties.json` desde cero. Nunca editar manualmente.
 - [ ] Cambio de banco (+16) → todos los faders llegan a nuevas posiciones sin interferencia
 - [ ] Fader settled en target → Logic confirma posición (path B: sync, una sola vez)
 
+### SESIÓN 2026-05-27 — Brillo pantalla S2 a config.h (17:42)
+
+**Cambio — Brightness centralizado en `config.h`:**
+Todos los valores de brillo de pantalla hardcodeados (255/70/0/200) movidos a defines en `config.h` como fuente única de verdad.
+
+**`S2/S2_V1/src/config.h`:**
+```cpp
+#define BRIGHTNESS_SPLASH       50   // Boot y espera (sin Logic)
+#define BRIGHTNESS_SELECTED    180   // Canal activo/seleccionado
+#define BRIGHTNESS_UNSELECTED   70   // Canal no seleccionado
+#define BRIGHTNESS_OTA          50   // Pantalla OTA WiFi
+```
+
+**Archivos actualizados:**
+| Archivo | Línea | Antes | Después |
+|---------|-------|-------|---------|
+| `main.cpp` | 190 | `setScreenBrightness(255)` | `BRIGHTNESS_SPLASH` |
+| `Display.cpp` | 276 | `selectStates ? 255 : 70` | `BRIGHTNESS_SELECTED : BRIGHTNESS_UNSELECTED` |
+| `RS485Handler.cpp` | 53 | `setScreenBrightness(255)` | `BRIGHTNESS_SELECTED` |
+| `RS485Handler.cpp` | 199 | `setScreenBrightness(0)` | `drawSplashScreen()` + `BRIGHTNESS_SPLASH` |
+| `OtaManager.cpp` | 115 | `setScreenBrightness(200)` | `BRIGHTNESS_OTA` |
+
+**Comportamiento añadido:** Al desconectar Logic (`DISCONNECTED`), la pantalla vuelve al splash en lugar de apagarse a negro.
+
+**MCU afectadas:** Solo S2.
+
+---
+
 ### Upload log S2
 - `2026-05-27 17:23` · Commit S2 · **FW 0.4.16** (sin upload)
 - `2026-05-27 17:14` · Commit S2 · **FW 0.4.15** (sin upload)
