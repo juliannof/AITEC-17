@@ -20,6 +20,43 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 ---
 
+### SESIÓN 2026-05-27 — Calibración S2 robusta + toque selecciona pista (22:23)
+
+**Problema 1 — Calibración nunca completa correctamente:**
+Tres bugs estructurales hacían fallar la calibración en hardware con variación física:
+
+- **`GOING_UP` stuck → `KICK_DOWN`**: si el ruido EMF en el tope superior superaba `ADC_STABILITY_THRESHOLD`, la estabilidad nunca se detectaba y el motor abandonaba el tope sin registrar `_motor_adcTop`. El flujo completo fallaba.
+- **`KICK_DOWN` sin stuck detection**: si el tope físico inferior era > 200 ADC (variación HW), la condición `pos <= 200` nunca se cumplía → motor empujaba contra el tope indefinidamente hasta `CALIB_TIMEOUT`.
+- **`GOING_DOWN` stuck → `ERROR`**: análogo a `GOING_UP`, el fondo físico se trataba como atasco → error en vez de calibración.
+- **`SETTLE_UP/DOWN` usaban posición instantánea**: `_motor_adcTop = _motor_adcPos` podía estar 20-50 cuentas por debajo del máximo real si el fader se asentó tras parar el motor.
+
+**Fix — `S2/S2_V1/src/hardware/Motor/Motor.cpp` + `config.h`:**
+- `GOING_UP` stuck → **`SETTLE_UP`** con posición actual como top (no `KICK_DOWN`)
+- `KICK_DOWN`: añade stuck detection simétrica a `KICK_UP` → `GOING_DOWN` al detectar tope
+- `GOING_DOWN` stuck → **`SETTLE_DOWN`** (no `ERROR`)
+- `SETTLE_UP`: `_motor_adcTop = _motor_settleMax` (máximo medido, no instantáneo)
+- `SETTLE_DOWN`: `adcBot = _motor_settleMin` (mínimo medido, no instantáneo)
+- `ADC_STABILITY_THRESHOLD`: 100 → **200** (más tolerante al ruido EMF en topes mecánicos)
+
+**Problema 2 — Detección de toque tardía y cede control rápido:**
+- `MANUAL_TOUCH_THRESHOLD = 150` era demasiado alto para detección inmediata en AT_TARGET (motor off).
+- `MANUAL_TOUCH_DEBOUNCE_MS = 200` ms cedía control a Logic antes de que el usuario terminara de posicionar.
+
+**Fix — `config.h` + `Motor.cpp` `setADCDelta()`:**
+- Threshold adaptativo: **50 cuentas** en `AT_TARGET`/`IDLE` (motor off, todo delta es del usuario), **150** en `MOVING_TO_TARGET` (motor activo, guard de dirección necesario)
+- `MANUAL_TOUCH_DEBOUNCE_MS`: 200 → **600 ms**
+
+**Problema 3 — Toque de fader no seleccionaba la pista en Logic:**
+Al tomar control del fader, Logic no seleccionaba el canal correspondiente.
+
+**Fix — `S2/S2_V1/src/RS485/RS485Handler.cpp` `buildResponse()`:**
+- Flanco rising de `isManualTouchDetected()` → `resp.buttons |= FLAG_SELECT`
+- S3 detecta el cambio en `buttons ^ prevButtons` (bit 3) → envía Note On 24+midiCh → Logic selecciona la pista
+
+**Commits:** `37c92fd`
+
+---
+
 ### SESIÓN 2026-05-27 — Fix S3: 0x61 desconectaba slaves + Transport LEDs off (17:14)
 
 **Problema 1 — S2s siempre oscuros al conectar Logic:**
