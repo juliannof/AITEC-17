@@ -637,6 +637,7 @@ void dumpAdsLog() {
 |---------|-------------|-----|
 | Logs dicen "Iniciada" pero sin KICK_UP | Motor no responde a PWM | Verificar GPIO14 (EN) LOW en init() |
 | KICK_UP llega a 26000 pero no baja | Motor pegado arriba | Mover manualmente o revisar fricción |
+| Fader sube y se queda arriba con fuerza | ADC tope físico < 26000 — KICK_UP stuck | Fix 2026-05-27: stuck timeout 1000ms → GOING_UP. Log: `KICK_UP stuck pos=XXXX` |
 | ERROR "rango insuficiente" | Span <100 | Medir voltaje motor, revisar DRV8833 |
 | Timeout 1000ms sin movimiento | Motor stalled | Test Mode: presionar REC/SOLO para forzar |
 
@@ -1053,6 +1054,16 @@ updateAllNeopixels();
 **Síntoma:** Cada vez que Logic desconecta (PB -8192), S3 detecta "no calibrado" → FLAG_CALIB automático → S2 calibra innecesariamente.
 
 **Fix:** Clipear negativos a 0, mapear 0..8191 → 0..27000.
+
+### 2026-05-27 — KICK_UP stuck detection
+
+**Problema:** Fader subía en calibración y se quedaba arriba con fuerza sin bajar (primer S2).
+
+**Causa raíz:** `KICK_UP` espera `pos >= 26000` sin timeout. Si el tope físico real del fader entrega ADC < 26000 (varía por unidad, igual que el tope inferior varía respecto a `MOTOR_ADC_MIN`), el motor empuja con `PWM_MAX` hasta `CALIB_TIMEOUT = 6s` → `ERROR` → `IDLE` → fader arriba.
+
+**Fix:** Stuck detection en `KICK_UP` — si ADC estable 1000ms y < 26000 → transición a `GOING_UP` igualmente. Log: `[CALIB] KICK_UP stuck pos=XXXX (<26000)`.
+
+**Lección:** Los topes mecánicos se detectan por stall, nunca por umbral absoluto. Ver **MOTOR.md §2.6**.
 
 ### 2026-05-19 — Protección topes mecánicos (stall detection)
 

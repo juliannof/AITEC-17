@@ -20,6 +20,88 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 ---
 
+### SESIÓN 2026-05-27 — Fix S3: recalibración automática tras reinicio de slave S2
+
+**Problema:** Si un S2 se reiniciaba durante operación normal, S3 no lo recalibraba. El fader quedaba sin calibrar (ADC min/max sin mapear).
+
+**Causa raíz:** S3 marca `_ch[id].calibrated = true` tras la primera calibración y nunca lo reevalúa. No había mecanismo de detección de reinicio del slave.
+
+**Señal disponible en protocolo:** Tras calibración exitosa, S2 envía `SLAVE_FLAG_CALIB_DONE = 1` en cada paquete normal (Motor::CalibState::DONE persistente). Tras un reinicio, CalibState vuelve a IDLE y ese flag desaparece. S3 puede detectar la transición.
+
+**Fix — `MASTER_S3-P4/S3/iMakie-ESP32_S3_EXTENDER/src/RS485/RS485.cpp`:**
+
+En el bloque `else` de `_handleResponse()` (slave en tránsito — ni CALIB_DONE ni CALIB_ERROR):
+
+```cpp
+// Detectar reinicio: slave calibrado que ya no reporta CALIB_DONE (2026-05-27)
+if (_ch[_currentId].calibrated && !_ch[_currentId].calibrating) {
+    _ch[_currentId].calibrated      = false;
+    _ch[_currentId].calibRetries    = 0;
+    _ch[_currentId].stableRespCount = 0;
+    _ch[_currentId].calibrate       = true;
+    _ch[_currentId].calibrating     = true;
+    _ch[_currentId].dirty           = true;
+    log_w("[CALIB] Slave %d: reinicio detectado — recalibrando automáticamente", _currentId);
+}
+```
+
+**Guards:**
+- `calibrated == true` — evita falsos disparos en boot inicial (cuando calibrated=false)
+- `!calibrating` — evita disparos durante fase CALIB_SENDING (calibrating=true en ese momento)
+- Inline (sin llamar setCalibrate()) — evita deadlock por mutex ya tomado
+
+| MCU | Archivo | Cambio |
+|-----|---------|--------|
+| S3 | RS485.cpp else block `_handleResponse()` | +10 líneas detección reinicio |
+| S2 | — | Sin cambios |
+| P4 | — | Sin cambios |
+
+**Riesgo:** BAJO — S3 únicamente, lógica aditiva, no toca flujo de calibración normal.
+
+---
+
+### SESIÓN 2026-05-27 — Fix calibración KICK_UP stuck en tope físico (16:25)
+
+**Problema:** El primer S2 subía durante calibración y se quedaba arriba con fuerza sin bajar.
+
+**Causa raíz:** `CalibPhase::KICK_UP` en `Motor.cpp` espera `pos >= 26000` para transicionar a `GOING_UP`. Si el ADC real del tope físico del fader es < 26000 (variación de hardware entre unidades), la condición nunca se cumple. El motor empuja con `PWM_MAX` durante `CALIB_TIMEOUT = 6000ms` → `CalibPhase::ERROR` → `MotorState::IDLE` con `_connected=true` → motor no baja → fader queda arriba.
+
+No había stuck timeout en `KICK_UP` (a diferencia de `GOING_UP` que sí lo tiene).
+
+**Fix — `S2/S2_V1/src/hardware/Motor/Motor.cpp`:**
+
+Añadido stuck detection en `KICK_UP`: si el ADC lleva `CALIB_STUCK_TIMEOUT = 1000ms` estable (fader en tope físico pero ADC < 26000 por variación de hardware), transiciona a `GOING_UP` igualmente.
+
+```cpp
+} else {
+    // Stuck detection: ADC < 26000 pero fader en tope físico (variación HW entre unidades)
+    if (abs(pos - _motor_stableRef) > ADC_STABILITY_THRESHOLD) {
+        _motor_stableRef   = pos;
+        _motor_stableStart = now;
+    } else if (now - _motor_stableStart >= CALIB_STUCK_TIMEOUT) {
+        _motor_phase       = CalibPhase::GOING_UP;
+        _hwUp(_pwm_min);
+        _motor_currentPWM  = _pwm_min;
+        _motor_stableRef   = pos;
+        _motor_stableStart = now;
+        log_w("[CALIB] KICK_UP stuck pos=%d (<26000) — tope físico detectado → GOING_UP", pos);
+    }
+}
+```
+
+Log diagnóstico si activa: `[CALIB] KICK_UP stuck pos=XXXX (<26000) — tope físico detectado → GOING_UP`
+
+| MCU | Archivo | Cambio |
+|-----|---------|--------|
+| S2 | `Motor.cpp` KICK_UP | Añadido stuck detection — transición a GOING_UP si ADC estable 1000ms y < 26000 |
+| S3 | — | Sin cambios |
+| P4 | — | Sin cambios |
+
+**Riesgo:** BAJO — solo añade camino alternativo de salida, camino normal (`pos >= 26000`) sin tocar.  
+**Validación pendiente:** Flash S2 → confirmar calibración completa (buscando log `KICK_UP stuck` o transición normal a GOING_UP).
+
+---
+
 ### SESIÓN 2026-05-26 — OTA WiFi S2 + VUMeter completo (17:48)
 
 **Objetivo:** Resolver OTA WiFi S2 + VUMeter flickering
@@ -170,6 +252,7 @@ Regenera `.vscode/c_cpp_properties.json` desde cero. Nunca editar manualmente.
 - [ ] Fader settled en target → Logic confirma posición (path B: sync, una sola vez)
 
 ### Upload log S2
+- `2026-05-27 17:02` · Commit S2 · **FW 0.4.14** (sin upload)
 - `2026-05-26 18:50` · Flash S2 · **FW 0.4.13** · `lolin_s2_mini`
 - `2026-05-26 18:49` · Flash S2 · **FW 0.4.12** · `lolin_s2_mini`
 - `2026-05-26 18:46` · Flash S2 · **FW 0.4.11** · `lolin_s2_mini`

@@ -338,6 +338,16 @@ void RS485Master::_handleResponse() {
             // Si !calibrating: grace period activo — ignorar ERROR duplicados del mismo fallo
         } else {
             // S2 en tránsito — calibrating solo lo limpia CALIB_DONE o CALIB_ERROR
+            // Detectar reinicio: slave calibrado que ya no reporta CALIB_DONE (2026-05-27)
+            if (_ch[_currentId].calibrated && !_ch[_currentId].calibrating) {
+                _ch[_currentId].calibrated      = false;
+                _ch[_currentId].calibRetries    = 0;
+                _ch[_currentId].stableRespCount = 0;
+                _ch[_currentId].calibrate       = true;
+                _ch[_currentId].calibrating     = true;
+                _ch[_currentId].dirty           = true;
+                log_w("[CALIB] Slave %d: reinicio detectado — recalibrando automáticamente", _currentId);
+            }
         }
 
         xSemaphoreGive(_mutex);

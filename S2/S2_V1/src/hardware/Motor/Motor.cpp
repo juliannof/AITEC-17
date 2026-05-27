@@ -91,6 +91,20 @@ static void _calibUpdate() {
             _motor_stableRef   = pos;
             _motor_stableStart = now;
             log_i("[CALIB] → GOING_UP");
+        } else {
+            // Stuck detection: ADC < 26000 pero fader en tope físico (variación HW entre unidades)
+            if (abs(pos - _motor_stableRef) > ADC_STABILITY_THRESHOLD) {
+                _motor_stableRef   = pos;
+                _motor_stableStart = now;
+            } else if (now - _motor_stableStart >= CALIB_STUCK_TIMEOUT) {
+                now = millis();
+                _motor_phase       = CalibPhase::GOING_UP;
+                _hwUp(_pwm_min);
+                _motor_currentPWM  = _pwm_min;
+                _motor_stableRef   = pos;
+                _motor_stableStart = now;
+                log_w("[CALIB] KICK_UP stuck pos=%d (<26000) — tope físico detectado → GOING_UP", pos);
+            }
         }
         break;
 
@@ -491,6 +505,7 @@ void setADCDelta(uint16_t currentADC) {
                        _motor_state == MotorState::CALIBRATING;
     if (inCalibFlow) {
         _motor_lastADCForDelta = currentADC;
+        _motor_manualTouchDetected = false;  // motor bajo control automático — resetear flag usuario (2026-05-27)
         return;
     }
 

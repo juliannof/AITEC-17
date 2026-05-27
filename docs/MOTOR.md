@@ -724,6 +724,7 @@ Este log indica que la protección global disparó (MOVING_TO_TARGET pegó contr
 | Movimiento invertido | IN1/IN2 lógica invertida | Test manual con PWM → observar dirección |
 | PWM insuficiente | PWM_MIN/MAX mal calibrados | Test Mode SAT |
 | Calibración timeout | Motor atascado o sensor roto | Check ADS1115 lectura en Test Mode |
+| Fader sube y se queda arriba con fuerza | ADC tope físico < 26000 — KICK_UP stuck | Fix aplicado 2026-05-27: stuck timeout 1000ms → pasa a GOING_UP. Log: `KICK_UP stuck pos=XXXX` |
 | Reinicios infinitos | S3 envía FLAG_CALIB continuamente | Verificar cooldown guard (2000ms) |
 | GOING_TO_MIN no transiciona | `_pendingCalib` no seteado | Verificar `requestCalibration()` setea `_pendingCalib=true` |
 
@@ -775,6 +776,22 @@ void setTargetFromS3(uint16_t adcTarget) {
 ---
 
 ## 7. HISTORIA DE FIXES
+
+### 2026-05-27 — KICK_UP Stuck Detection (variación ADC entre unidades)
+
+**Problema:** Fader subía durante calibración y se quedaba arriba con fuerza sin bajar.
+
+**Causa raíz:** `KICK_UP` espera `pos >= 26000` para pasar a `GOING_UP`. Si el ADC real del tope físico es < 26000 (varía por unidad), la condición nunca se cumple. Motor empuja con `PWM_MAX` durante `CALIB_TIMEOUT = 6s` → `ERROR` → `IDLE` con `_connected=true` → fader queda arriba sin bajar.
+
+No había timeout en `KICK_UP` (a diferencia de `GOING_UP` que tiene `CALIB_STUCK_TIMEOUT`).
+
+**Fix:** Añadido stuck detection en `KICK_UP`. Si ADC estable `CALIB_STUCK_TIMEOUT = 1000ms` y `pos < 26000` → transiciona a `GOING_UP` igualmente (asume tope físico alcanzado).
+
+**Log diagnóstico:** `[CALIB] KICK_UP stuck pos=XXXX (<26000) — tope físico detectado → GOING_UP`
+
+**Lección:** El umbral `26000` en `KICK_UP` es teórico. El tope real varía por unidad, igual que `MOTOR_ADC_MIN` no es el tope real del mínimo (ver §2.6). Siempre preferir detección dinámica por stall sobre umbrales absolutos.
+
+---
 
 ### 2026-05-19 — Protección Global Topes Mecánicos
 
