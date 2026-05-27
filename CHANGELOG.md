@@ -21,6 +21,18 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 ---
 
+### SESIÓN 2026-05-27 — SELECT pista: lógica movida a S3 vía touchState (23:13)
+
+**Problema:** S2 enviaba `FLAG_SELECT` en un solo paquete RS485 (rising edge). Si S3 perdía ese paquete, no se seleccionaba la pista.
+
+**Fix:**
+- `S3/main.cpp`: rising/falling edge de `touchState` → Note On/Off SELECT (`24 + midiCh`). Igual que botón físico.
+- `S2/RS485Handler.cpp`: eliminado bloque `FLAG_SELECT` de `buildResponse()`.
+
+**Commit:** `be2a134` · FW **0.4.19**
+
+---
+
 ### SESIÓN 2026-05-27 — Calibración S2 robusta + toque selecciona pista (22:23)
 
 **Problema 1 — Calibración nunca completa correctamente:**
