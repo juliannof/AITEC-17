@@ -120,7 +120,7 @@ static constexpr uint16_t ADC_SPIKE_GUARD          = 500;     // cuentas máxima
 
 // Motor — calibración (constantes)
 static constexpr uint16_t DEAD_ZONE                = 80;      // error < esto → apagar motor (S1 ruido=60, margen 20)
-static constexpr uint16_t ADC_STABILITY_THRESHOLD  = 100;     // cambio máximo para considerar "estable" (2026-05-12 20:35)
+static constexpr uint16_t ADC_STABILITY_THRESHOLD  = 200;     // cambio máximo para considerar "estable" — aumentado para tolerar ruido EMF en topes (2026-05-27)
 static constexpr uint32_t CALIB_STABLE_TIME        = 500;     // ms para considerar estable
 static constexpr uint32_t CALIB_SETTLE_MS          = 200;     // ms para medir ruido (antes 500, era demasiado)
 static constexpr uint32_t CALIB_MIN_TRAVEL_MS      = 300;     // ms mínimo de viaje antes de medir
@@ -189,8 +189,9 @@ static uint16_t           _stallProtectLastADC = 0;
 static uint16_t   _motor_lastADCForDelta = 0;  // ADC anterior para calcular delta
 static bool       _motor_manualTouchDetected = false;  // Flag toque manual en curso
 static uint32_t   _motor_manualTouchStartTime = 0;  // Cuándo inició movimiento manual
-static constexpr uint16_t MANUAL_TOUCH_THRESHOLD = 150;  // umbral delta para detectar movimiento (cuentas)
-static constexpr uint32_t MANUAL_TOUCH_DEBOUNCE_MS = 200;  // esperar estable antes de reanudar (ms)
+static constexpr uint16_t MANUAL_TOUCH_THRESHOLD          = 150;  // umbral delta — motor activo (MOVING_TO_TARGET)
+static constexpr uint16_t MANUAL_TOUCH_AT_TARGET_THRESHOLD =  50;  // umbral delta — motor off (AT_TARGET/IDLE): solo movimiento deliberado (2026-05-27)
+static constexpr uint32_t MANUAL_TOUCH_DEBOUNCE_MS        = 600;  // ms sin movimiento antes de ceder control (aumentado 200→600, 2026-05-27)
 
 // ─── FADERTOUCH — detección por sostenimiento ────────────────
 static constexpr uint32_t TOUCH_POLL_MS            = 20;      // intervalo de muestreo (ms)

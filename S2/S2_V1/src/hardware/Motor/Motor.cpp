@@ -125,18 +125,15 @@ static void _calibUpdate() {
                 _motor_stableStart = now;
             }
         } else if (now - _motor_stableStart >= CALIB_STUCK_TIMEOUT) {
-            // Motor no se movió UP → intentar DOWN inmediatamente
-            log_e("[CALIB] Sin movimiento en GOING_UP (pos=%d) → intentando DOWN", pos);
-            now = millis();  // Recapturar timestamp fresco
-            _motor_calibMinDetect = now + CALIB_MIN_TRAVEL_MS;
-            _motor_stableRef      = (int)_motor_adcPos;  // usar posición actual
-            _motor_stableStart    = now;
-            _motor_settleMin      = 27000;
-            _motor_settleMax      = 0;
-            _motor_phase          = CalibPhase::KICK_DOWN;
-            _hwDown(_pwm_max);
-            _motor_phaseStart     = now;
-            log_i("[CALIB] KICK_DOWN iniciado desde GOING_UP");
+            // Motor no avanzó en GOING_UP → fader en tope físico, registrar como top (2026-05-27)
+            log_w("[CALIB] GOING_UP stall pos=%d → tope físico → SETTLE_UP", pos);
+            now = millis();
+            _motor_adcTop     = pos;
+            _motor_phase      = CalibPhase::SETTLE_UP;
+            _hwOff();
+            _motor_settleMin  = 27000;
+            _motor_settleMax  = 0;
+            _motor_phaseStart = now;
         } else if (now - _motor_stableStart >= CALIB_STABLE_TIME) {
             now = millis();  // Recapturar timestamp fresco
             _motor_phase      = CalibPhase::SETTLE_UP;
@@ -154,7 +151,7 @@ static void _calibUpdate() {
         if (_motor_adcPos > _motor_settleMax) _motor_settleMax = _motor_adcPos;
 
         if (now - _motor_phaseStart >= CALIB_SETTLE_MS) {
-            _motor_adcTop       = _motor_adcPos;
+            _motor_adcTop       = _motor_settleMax;  // máximo medido durante settle = tope real (2026-05-27)
             _motor_noiseTopSpan = _motor_settleMax - _motor_settleMin;
             log_i("[CALIB] TOP=%d noise_span=%d", _motor_adcTop, _motor_noiseTopSpan);
             log_i("[CALIB] Tope superior: %d  noise_span=%d", _motor_adcTop, _motor_noiseTopSpan);
@@ -181,6 +178,20 @@ static void _calibUpdate() {
             _motor_stableRef   = pos;
             _motor_stableStart = now;
             log_i("[CALIB] → GOING_DOWN  pwm=%d", _pwm_min);
+        } else {
+            // Stuck detection: tope físico inferior por encima del umbral 200 (variación HW) (2026-05-27)
+            if (abs(pos - _motor_stableRef) > ADC_STABILITY_THRESHOLD) {
+                _motor_stableRef   = pos;
+                _motor_stableStart = now;
+            } else if (now - _motor_stableStart >= CALIB_STUCK_TIMEOUT) {
+                now = millis();
+                _motor_phase       = CalibPhase::GOING_DOWN;
+                _hwDown(_pwm_min);
+                _motor_currentPWM  = _pwm_min;
+                _motor_stableRef   = pos;
+                _motor_stableStart = now;
+                log_w("[CALIB] KICK_DOWN stall pos=%d (>200) — tope físico detectado → GOING_DOWN", pos);
+            }
         }
         break;
 
@@ -202,10 +213,14 @@ static void _calibUpdate() {
                 _motor_stableStart = now;
             }
         } else if (now - _motor_stableStart >= CALIB_STUCK_TIMEOUT) {
-            // Motor no se movió en tiempo máximo → ATASCADO
-            _motor_phase = CalibPhase::ERROR;
-            log_e("[CALIB] MOTOR BLOQUEADO — sin movimiento en GOING_DOWN (pos=%d)", pos);
+            // Motor no avanzó en GOING_DOWN → fader en tope físico, registrar como bottom (2026-05-27)
+            log_w("[CALIB] GOING_DOWN stall pos=%d → tope físico → SETTLE_DOWN", pos);
+            now = millis();
+            _motor_phase      = CalibPhase::SETTLE_DOWN;
             _hwOff();
+            _motor_settleMin  = 27000;
+            _motor_settleMax  = 0;
+            _motor_phaseStart = now;
         } else if (now - _motor_stableStart >= CALIB_STABLE_TIME) {
             now = millis();  // Recapturar timestamp fresco
             _motor_phase      = CalibPhase::SETTLE_DOWN;
@@ -225,7 +240,7 @@ static void _calibUpdate() {
         now = millis();  // Recapturar timestamp fresco
         if (now - _motor_phaseStart < CALIB_SETTLE_MS) break;
 
-        uint16_t adcBot       = _motor_adcPos;
+        uint16_t adcBot        = _motor_settleMin;  // mínimo medido durante settle = fondo real (2026-05-27)
         _motor_noiseBottomSpan = _motor_settleMax - _motor_settleMin;
 
         uint16_t marginBot = max((uint16_t)(_motor_noiseBottomSpan * 2), (uint16_t)20);
@@ -533,8 +548,13 @@ void setADCDelta(uint16_t currentADC) {
     uint16_t delta = abs((int)currentADC - (int)_motor_lastADCForDelta);
     _motor_lastADCForDelta = currentADC;
 
-    // bool userTouch = (delta > MANUAL_TOUCH_THRESHOLD) || FaderTouch::isTouched();  // FaderTouch desactivado (2026-05-19)
-    bool userTouch = (delta > MANUAL_TOUCH_THRESHOLD);
+    // Threshold adaptativo: bajo cuando motor off (AT_TARGET/IDLE), alto cuando motor activo (2026-05-27)
+    // En AT_TARGET el motor está apagado → todo delta es del usuario, no del motor
+    uint16_t touchThreshold = (_motor_state == MotorState::AT_TARGET ||
+                               _motor_state == MotorState::IDLE)
+        ? MANUAL_TOUCH_AT_TARGET_THRESHOLD
+        : MANUAL_TOUCH_THRESHOLD;
+    bool userTouch = (delta > touchThreshold);
 
     if (userTouch) {
         _motor_manualTouchStartTime = millis();  // Refresh en cada movimiento — evita reset prematuro (2026-05-19)

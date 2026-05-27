@@ -144,6 +144,15 @@ SlavePacket buildResponse(FaderADC& faderADC, SatMenu& satMenu) {
     resp.touchState    = Motor::isManualTouchDetected() ? 1 : 0;  // FaderTouch reemplazado — delta-based (2026-05-19)
     if (resp.touchState) log_w("[S2-RESP] touchState=1 faderPos=%d", Motor::getRawADC());
     resp.buttons       = ButtonManager::getButtonFlags();
+
+    // Flanco rising de toque → SELECT automático (selecciona pista al tomar control) (2026-05-27)
+    static bool _prevTouchForSelect = false;
+    bool curTouch = (resp.touchState == 1);
+    if (curTouch && !_prevTouchForSelect) {
+        resp.buttons |= FLAG_SELECT;
+        log_i("[S2-RESP] toque usuario → FLAG_SELECT");
+    }
+    _prevTouchForSelect = curTouch;
     resp.encoderDelta  = (int8_t)constrain(Encoder::getCount(), -127, 127);
     resp.encoderButton = ButtonManager::getEncoderButton();
 
