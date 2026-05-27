@@ -111,18 +111,42 @@ void OtaManager::enableForUpload(bool otaOnlyMode) {
     server.begin();
     Serial.println("[OTA] HTTP server started");
 
-    // 4. Mostrar IP simple en display
-    if (!otaOnlyMode) {
-        setScreenBrightness(20);
-        delay(50);
-    }
+    // 4. Mostrar pantalla OTA (2026-05-27)
+    setScreenBrightness(200);
+    delay(50);
+
+    uint8_t lastOctet = WiFi.localIP()[3];
+    char lastOctetStr[4];
+    snprintf(lastOctetStr, sizeof(lastOctetStr), "%d", lastOctet);
 
     tft.fillScreen(TFT_BLACK);
+    tft.setTextDatum(MC_DATUM);
+
+    // Header rojo
+    tft.fillRect(0, 0, tft.width(), 38, TFT_RED);
+    tft.setTextFont(4);
+    tft.setTextColor(TFT_WHITE, TFT_RED);
+    tft.drawString("WiFi OTA", tft.width() / 2, 19);
+
+    // Subtítulo
     tft.setTextFont(2);
-    tft.setTextColor(TFT_WHITE);
+    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    tft.drawString("Esperando upload...", tft.width() / 2, 54);
+
+    // Línea separadora roja
+    tft.drawFastHLine(20, 68, tft.width() - 40, TFT_RED);
+
+    // Último octeto IP — grande, rojo, centrado
+    tft.setTextFont(7);
+    tft.setTextSize(2);
+    tft.setTextColor(TFT_RED, TFT_BLACK);
+    tft.drawString(lastOctetStr, tft.width() / 2, 155);
     tft.setTextSize(1);
-    tft.drawString("OTA LISTO", 10, 50);
-    tft.drawString(WiFi.localIP().toString().c_str(), 10, 100);
+
+    // IP completa — pequeña, gris, referencia
+    tft.setTextFont(2);
+    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    tft.drawString(WiFi.localIP().toString().c_str(), tft.width() / 2, 248);
 
     // 5. Loop bloqueante ElegantOTA (LITERAL al ejemplo)
     while (true) {
