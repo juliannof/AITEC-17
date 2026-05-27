@@ -141,11 +141,18 @@ SlavePacket buildResponse(FaderADC& faderADC, SatMenu& satMenu) {
     static Motor::CalibState _last_cs = Motor::CalibState::IDLE;
 
     SlavePacket resp = {};
-    resp.touchState    = Motor::isManualTouchDetected() ? 1 : 0;  // FaderTouch reemplazado — delta-based (2026-05-19)
+
+    // Durante calibración/goToMin el motor mueve el fader — nunca es toque de usuario (2026-05-27)
+    Motor::MotorState mstate = Motor::getState();
+    bool motorCalibrating = (mstate == Motor::MotorState::CALIBRATING ||
+                             mstate == Motor::MotorState::GOING_TO_MIN);
+
+    resp.touchState = (!motorCalibrating && Motor::isManualTouchDetected()) ? 1 : 0;
     if (resp.touchState) log_w("[S2-RESP] touchState=1 faderPos=%d", Motor::getRawADC());
-    resp.buttons       = ButtonManager::getButtonFlags();
+    resp.buttons    = ButtonManager::getButtonFlags();
 
     // Flanco rising de toque → SELECT automático (selecciona pista al tomar control) (2026-05-27)
+    // Guard: no disparar SELECT durante calibración
     static bool _prevTouchForSelect = false;
     bool curTouch = (resp.touchState == 1);
     if (curTouch && !_prevTouchForSelect) {
