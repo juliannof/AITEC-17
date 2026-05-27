@@ -50,6 +50,7 @@ void onMasterData(const MasterPacket& pkt) {
 
     if (newState == ConnectionState::CONNECTED) {
         Motor::setConnected(true);  // Notificar motor que S3 conectó (2026-05-16 10:52)
+        setScreenBrightness(255);   // Restaurar brillo al conectar (2026-05-27)
         neoWaitingHandshake = false;
         // Cambio de azul a colores tenues
         // ¡CRÍTICO! NO llamar updateAllNeopixels() aquí — retarda RS485 response

@@ -9,4 +9,5 @@ namespace Transporte {
     void update();
     void setLed(uint8_t pin, bool on);
     void setLedByNote(uint8_t note, bool on);
+    void setAllLedsOff();
 }

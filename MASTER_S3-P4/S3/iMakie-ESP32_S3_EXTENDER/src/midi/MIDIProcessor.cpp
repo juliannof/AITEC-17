@@ -336,12 +336,8 @@ void processMackieSysEx(byte* payload, int len) {
             g_logicConnected     = 0;   // Todos los slaves recibirán connected=0
             fadersAtMinMask      = 0;
             firstFaderMinTime    = 0;
-
-            // Inicia secuencia de notificación a slaves
+            Transporte::setAllLedsOff();  // LEDs transport off al desconectar (2026-05-27)
             rs485.beginDisconnectSequence();
-
-            // UI cambio será permitido SOLO cuando isDisconnectComplete() retorne true
-            // (ver main.cpp — no cambiar a offline hasta que todos reciban DISCONNECTED)
             g_switchToOffline    = true;
             log_i("[MCU] GoOffline recibido — iniciando DISCONNECT SEQUENCE");
             break;
@@ -399,8 +395,11 @@ void processMackieSysEx(byte* payload, int len) {
         }
 
         case 0x61: {
-            g_logicConnected = 0;
-            log_i("[MCU] AllFaderstoMinimum — bloqueando fader targets");
+            // AllFadersToMinimum — Logic inicializa faders al conectar (parte de GoOnline)
+            // NO cambiar g_logicConnected — S2s deben quedarse CONNECTED (2026-05-27)
+            for (uint8_t i = 1; i <= NUM_SLAVES; i++)
+                rs485.setFaderTarget(i, 0);
+            log_i("[MCU] AllFaderstoMinimum — faders a 0");
             break;
         }
 
@@ -566,6 +565,7 @@ void processPitchBend(byte channel, int bendValue) {
                 g_logicConnected     = 0;
                 fadersAtMinMask      = 0;
                 firstFaderMinTime    = 0;
+                Transporte::setAllLedsOff();  // LEDs transport off al desconectar (2026-05-27)
                 for (uint8_t i = 1; i <= NUM_SLAVES; i++)
                     rs485.setFaderTarget(i, rs485.getChannel(i).faderPos);
                 g_switchToOffline = true;

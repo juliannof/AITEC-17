@@ -42,6 +42,25 @@ Controlador Mackie fader individual para iMakie. Controla 1 fader (ADS1115 16-bi
 
 ---
 
+## Sistemas S2 — Tabla de Referencia
+
+| Sistema | Módulo | Reacciona a conexión | Estado desconectado | Estado conectado |
+|---------|--------|----------------------|---------------------|-----------------|
+| **Motor** | DRV8833 H-bridge | ✅ Sí | `goToMin()` (fader baja a 0) | Sigue targets de S3 |
+| **FaderADC** | ADS1115 16-bit I2C | ❌ No | Lee siempre (860 SPS ISR) | Lee siempre |
+| **FaderTouch** | Capacitivo GPIO | ❌ No | Detecta siempre | Detecta siempre |
+| **ButtonManager** | GPIO 37-40 | Parcial | Flags capturados, no se envían MIDI | Envía notas MIDI a S3 |
+| **Encoder** | GPIO 11-13 ISR | Parcial | Delta acumulado, no se envía | Envía CC MIDI a S3 vía RS485 |
+| **Display** | ST7789V3 SPI3 | ✅ Sí | Pantalla "waiting" (dim/off) | Muestra track name, VU, fader |
+| **NeoPixels** | WS2812B ×12 | ✅ Sí | Azul (waiting handshake) | Colores por estado canal |
+| **RS485** | UART slave | Es la fuente | Timeout >500ms → DISCONNECTED | Recibe MasterPacket, envía SlavePacket |
+| **WiFi/OTA** | ElegantOTA | ❌ No | Independiente de Logic | Independiente de Logic |
+
+**Flag de conexión en S2:** `RS485Handler::logicConnectionState` (`CONNECTED` / `DISCONNECTED`)  
+Cambia en `onMasterData()` cuando `pkt.connected` cambia, y en `checkTimeout()` tras 500ms sin RS485.
+
+---
+
 ## Hardware
 
 ---

@@ -252,6 +252,7 @@ Regenera `.vscode/c_cpp_properties.json` desde cero. Nunca editar manualmente.
 - [ ] Fader settled en target → Logic confirma posición (path B: sync, una sola vez)
 
 ### Upload log S2
+- `2026-05-27 17:14` · Commit S2 · **FW 0.4.15** (sin upload)
 - `2026-05-27 17:02` · Commit S2 · **FW 0.4.14** (sin upload)
 - `2026-05-26 18:50` · Flash S2 · **FW 0.4.13** · `lolin_s2_mini`
 - `2026-05-26 18:49` · Flash S2 · **FW 0.4.12** · `lolin_s2_mini`

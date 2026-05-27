@@ -95,6 +95,11 @@ void setLedByNote(uint8_t note, bool on) {
     }
 }
 
+void setAllLedsOff() {
+    for (uint8_t i = 0; i < N; i++)
+        setLed(LEDS[i], false);
+}
+
 void update() {
     for (uint8_t i = 0; i < N; i++) {
         buttons[i].loop();
