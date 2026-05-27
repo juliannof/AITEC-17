@@ -17,6 +17,7 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 | 🟢 Baja | Optimización tráfico MIDI PitchBend (`DEADBAND=150`) | Reducir mensajes redundantes S2→Logic |
 | 🟡 Media | **Protocolo de cierre Logic — GoOffline limpio en P4 y S3** | Observado en captura 2026-05-24: handshake de arranque tiene 3 reintentos en S3 (~3s). El cierre de Logic (GoOffline + desconexión USB) no está validado ni documentado. Implementar secuencia `0x0F` → reset de estados → faders a 0 → LED off, limpia en ambos MCU. Ver `docs/MIDI.md` sección 3.4. |
 | 🟢 Baja | **P4: VU global 16 pistas via MIDI UART S3→P4** | S3 re-emite MIDI de Logic (ch 1–8) a P4 por UART directo (ch 9–16). P4 agrega las 16 pistas en display LVGL. Sin WiFi, sin protocolo custom — reutiliza `processMidiByte()` existente. 1 cable TX→RX. Ver `docs/S3ToP4.md` sección "Feature: Agregación 16 pistas". |
+| 🟢 Baja | **Limpiar código muerto Motor S2** — auditado 2026-05-27 | 4 items: (1) `MotorState::WAITING_FOR_CALIB` nunca asignado — eliminar del enum + comentarios + guard `setADC()` línea 499; (2) `_motor_goingToMin` flag nunca leído — eliminar de `config.h` + `goToMin()` + `setUserDropTarget()`; (3) `setUserDropTarget()` nunca llamada desde fuera — eliminar de Motor.h/cpp; (4) `goToMin()` no establece `_motor_state=GOING_TO_MIN` — riesgo si se llama directa desde SAT/test, añadir la asignación. Sin impacto en comportamiento actual. |
 
 ---
 
