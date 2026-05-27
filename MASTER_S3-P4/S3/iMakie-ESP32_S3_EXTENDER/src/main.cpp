@@ -80,11 +80,15 @@ static void processSlaveResponse(uint8_t slaveId) {
     uint8_t midiCh = slaveId - 1;
 
     // --- Fader → Pitch Bend ---
-    // DIAG: log cada vez que touchState cambia (2026-05-19 — TEMPORAL)
+    // Touch → SELECT MIDI: rising edge = Note On, falling = Note Off (2026-05-27)
+    // Mismo comportamiento que botón físico SELECT — S3 es punto único de conversión
     static uint8_t _prevTouch[9] = {0};
     if (ch.touchState != _prevTouch[slaveId]) {
         log_w("[FADER→LOGIC] slave=%d touchState=%d faderPos=%d", slaveId, ch.touchState, ch.faderPos);
         _prevTouch[slaveId] = ch.touchState;
+        uint8_t note = 24 + midiCh;
+        byte selMsg[3] = { (byte)(ch.touchState ? 0x90 : 0x80), note, (byte)(ch.touchState ? 127 : 0) };
+        sendMIDIBytes(selMsg, 3);
     }
 
     // NO ENVIAR si slave está en calibración (CALIB_SENDING activo) — valores raw no son válidos para Logic

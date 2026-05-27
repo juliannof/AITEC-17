@@ -151,15 +151,7 @@ SlavePacket buildResponse(FaderADC& faderADC, SatMenu& satMenu) {
     if (resp.touchState) log_w("[S2-RESP] touchState=1 faderPos=%d", Motor::getRawADC());
     resp.buttons    = ButtonManager::getButtonFlags();
 
-    // Flanco rising de toque → SELECT automático (selecciona pista al tomar control) (2026-05-27)
-    // Guard: no disparar SELECT durante calibración
-    static bool _prevTouchForSelect = false;
-    bool curTouch = (resp.touchState == 1);
-    if (curTouch && !_prevTouchForSelect) {
-        resp.buttons |= FLAG_SELECT;
-        log_i("[S2-RESP] toque usuario → FLAG_SELECT");
-    }
-    _prevTouchForSelect = curTouch;
+    // SELECT gestionado en S3 desde touchState — no enviar FLAG_SELECT desde S2 (2026-05-27)
     resp.encoderDelta  = (int8_t)constrain(Encoder::getCount(), -127, 127);
     resp.encoderButton = ButtonManager::getEncoderButton();
 
