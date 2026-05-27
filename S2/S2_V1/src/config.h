@@ -185,13 +185,16 @@ static bool               _motor_hw_active     = false; // true cuando _hwUp()/_
 static uint32_t           _stallProtectStart   = 0;
 static uint16_t           _stallProtectLastADC = 0;
 
-// Motor — detección movimiento manual (delta ADC rápido)
-static uint16_t   _motor_lastADCForDelta = 0;  // ADC anterior para calcular delta
-static bool       _motor_manualTouchDetected = false;  // Flag toque manual en curso
-static uint32_t   _motor_manualTouchStartTime = 0;  // Cuándo inició movimiento manual
+// Motor — detección movimiento manual (delta ADC acumulado en ventana de tiempo)
+static uint16_t   _motor_lastADCForDelta    = 0;   // ADC anterior (compatibilidad)
+static uint32_t   _deltaWindowStart         = 0;   // inicio ventana delta (2026-05-27)
+static uint16_t   _deltaWindowRef           = 0;   // ADC referencia inicio ventana (2026-05-27)
+static bool       _motor_manualTouchDetected = false;
+static uint32_t   _motor_manualTouchStartTime = 0;
 static constexpr uint16_t MANUAL_TOUCH_THRESHOLD          = 150;  // umbral delta — motor activo (MOVING_TO_TARGET)
-static constexpr uint16_t MANUAL_TOUCH_AT_TARGET_THRESHOLD =  50;  // umbral delta — motor off (AT_TARGET/IDLE): solo movimiento deliberado (2026-05-27)
-static constexpr uint32_t MANUAL_TOUCH_DEBOUNCE_MS        = 600;  // ms sin movimiento antes de ceder control (aumentado 200→600, 2026-05-27)
+static constexpr uint16_t MANUAL_TOUCH_AT_TARGET_THRESHOLD =  30;  // umbral en ventana 80ms — motor off (50→30, 2026-05-27)
+static constexpr uint32_t MANUAL_TOUCH_DEBOUNCE_MS        = 600;  // ms sin movimiento antes de ceder control
+static constexpr uint32_t TOUCH_DELTA_WINDOW_MS           =  80;  // ventana acumulación delta — captura movimientos lentos (2026-05-27)
 
 // ─── FADERTOUCH — detección por sostenimiento ────────────────
 static constexpr uint32_t TOUCH_POLL_MS            = 20;      // intervalo de muestreo (ms)

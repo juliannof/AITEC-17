@@ -243,8 +243,8 @@ static void _calibUpdate() {
         uint16_t adcBot        = _motor_settleMin;  // mínimo medido durante settle = fondo real (2026-05-27)
         _motor_noiseBottomSpan = _motor_settleMax - _motor_settleMin;
 
-        uint16_t marginBot = max((uint16_t)(_motor_noiseBottomSpan * 2), (uint16_t)20);
-        uint16_t marginTop = max((uint16_t)(_motor_noiseTopSpan * 2), (uint16_t)20);
+        uint16_t marginBot = 20;  // margen fijo — DEAD_ZONE protege tope físico (2026-05-27)
+        uint16_t marginTop = 20;  // antes: noiseSpan*2 dejaba fader corto en extremos
         uint16_t minGapRequired = marginBot + marginTop;
 
         log_i("[CALIB] Tope inferior: %d  noise_span=%d  margin=%d", adcBot, _motor_noiseBottomSpan, marginBot);
@@ -545,7 +545,13 @@ void setADCDelta(uint16_t currentADC) {
         return;  // No actualizar referencia — mantiene base válida para siguiente lectura
     }
 
-    uint16_t delta = abs((int)currentADC - (int)_motor_lastADCForDelta);
+    // Delta acumulado en ventana de tiempo — captura movimientos lentos (2026-05-27)
+    uint32_t nowMs = millis();
+    if (nowMs - _deltaWindowStart >= TOUCH_DELTA_WINDOW_MS) {
+        _deltaWindowRef   = currentADC;
+        _deltaWindowStart = nowMs;
+    }
+    uint16_t delta = abs((int)currentADC - (int)_deltaWindowRef);
     _motor_lastADCForDelta = currentADC;
 
     // Threshold adaptativo: bajo cuando motor off (AT_TARGET/IDLE), alto cuando motor activo (2026-05-27)
