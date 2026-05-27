@@ -284,7 +284,7 @@ MÍNIMA:  Sin comando: Motor idle en posición actual
   - Si `_consecutiveTimeouts > MAX_CALIBRATION_RETRIES`:
     - NeoPixel **ROJO** (error crítico)
     - Log error: `[CALIB] ✗ FALLO CRÍTICO Slave X`
-    - Sistema entra en **halt infinito** (requiere reset manual)
+    - Slave marcado defectuoso, cascada continúa (NO HALT — 2026-05-27)
   - Si timeout ≤ 5: salta a siguiente slave, log warning
 - `main.cpp` (línea ~20): `static uint32_t bootLEDTime = 0;` — boot LED tracking
 - `main.cpp::setup()` (línea ~240): Verde LED por 1s
@@ -301,15 +301,15 @@ MÍNIMA:  Sin comando: Motor idle en posición actual
 | **Init** | Azul | S3 arranca, esperando comunicación Logic | Sistema operacional, en espera |
 | **Boot OK** | Verde 1s | S3 init completado, LED enciende no-bloqueante | Timer auto-apaga tras 1s |
 | **Calibración activa** | Gris apagado | S3 ordena calibración a slaves | LED apagado durante ciclos normal |
-| **Error crítico** | **Rojo fijo** | TIMEOUT > 5 reintentos en slave → calibración irrecuperable | **Sistema HALTED** — loop infinito, requiere reset manual |
+| **Error crítico** | **Rojo fijo** | TIMEOUT > 5 reintentos en slave → slave marcado defectuoso | Slave saltado, cascada continúa con siguiente — NO HALT (2026-05-27) |
 
 **Detalles error crítico:**
 - Evento: S3 timeout en slave X durante calibración → contador llega a `MAX_CALIBRATION_RETRIES = 5`
-- LED: `pixels.setPixelColor(0, pixels.Color(255, 0, 0))` — ROJO
-- Log: `[CALIB] ✗ FALLO CRÍTICO Slave X — comunicación perdida. Sistema DETENIDO.`
-- Sistema: `while(1) delay(1000);` — loop infinito (evita continuar con slave borrado)
-- Recuperación: Reset manual S3 (botón reset o power cycle)
-- Propósito: Alertar operador de fallo de hardware S2 — no continuar calibración sin comunicación
+- LED: `pixels.setPixelColor(0, pixels.Color(255, 0, 0))` — ROJO (señal visual, no bloquea)
+- Log: `[CALIB] ✗ TIMEOUT Slave X — marcado defectuoso, continuando cascada`
+- Sistema: `calibRetries = MAX` → `_triggerNextCalibration()` → salta slave, continúa
+- Recuperación: Automática — sistema continúa con slaves restantes
+- Razón del cambio (2026-05-27): reflash S2 causa timeouts transitorios que disparaban HALT de Core 1, dejando S2s muertos con Logic conectado
 
 **Test mínimo requerido:**
 - [ ] Boot: fader baja a 0 (Motor::goToMin() en setup)

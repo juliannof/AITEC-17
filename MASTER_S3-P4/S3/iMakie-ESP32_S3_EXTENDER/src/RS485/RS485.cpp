@@ -103,22 +103,23 @@ void RS485Master::runTask() {
                               _currentId, _consecutiveTimeouts);
 
                     // ── Límite de reintentos (2026-05-16 19:25) ──
-                    // HALT solo si calibración ACTIVA — no durante operación normal (2026-05-19)
+                    // Skip + cascade si timeouts > MAX durante calibración activa (2026-05-27)
+                    // NUNCA HALT — reflash S2 causa timeouts transitorios que antes bloqueaban Core 1
                     if (!_ch[_currentId].calibrated && _ch[_currentId].calibrating && _consecutiveTimeouts > MAX_CALIBRATION_RETRIES) {
-                        // ✗ FALLO CRÍTICO: Calibración falló después de máx reintentos (2026-05-16 19:40)
-                        pixels.setPixelColor(0, pixels.Color(255, 0, 0));  // Rojo puro
+                        pixels.setPixelColor(0, pixels.Color(255, 0, 0));  // Rojo: error visible
                         pixels.show();
                         if (xSemaphoreTake(_mutex, pdMS_TO_TICKS(2)) == pdTRUE) {
-                            _ch[_currentId].calibrating = false;
-                            _ch[_currentId].responded = false;
-                            log_e("[CALIB] ✗ FALLO CRÍTICO Slave %d — comunicación perdida. Sistema DETENIDO.",
+                            _ch[_currentId].calibrating  = false;
+                            _ch[_currentId].calibRetries = MAX_CALIBRATION_RETRIES;
+                            _ch[_currentId].responded    = false;
+                            log_e("[CALIB] ✗ TIMEOUT Slave %d — marcado defectuoso, continuando cascada",
                                   _currentId);
                             xSemaphoreGive(_mutex);
                         }
-                        // SISTEMA DETENIDO: loop infinito (requiere reset manual)
-                        while(1) {
-                            delay(1000);  // Espera infinita
-                        }
+                        _triggerNextCalibration(_currentId);
+                        _consecutiveTimeouts = 0;
+                        _busState   = BusState::GAP;
+                        _stateTimer = micros();
                     } else {
                         // Continuar esperando
                         if (xSemaphoreTake(_mutex, 0) == pdTRUE) {
