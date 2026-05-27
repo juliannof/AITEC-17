@@ -297,6 +297,26 @@ Regenera `.vscode/c_cpp_properties.json` desde cero. Nunca editar manualmente.
 - [ ] Cambio de banco (+16) → todos los faders llegan a nuevas posiciones sin interferencia
 - [ ] Fader settled en target → Logic confirma posición (path B: sync, una sola vez)
 
+### SESIÓN 2026-05-27 — Fix S3: HALT en Core 1 tras reflash S2 (18:08)
+
+**Problema — S2s muertos tras reflash:**
+Síntoma: Logic conectaba (transport LEDs funcionaban, `0x21 CONNECTED` en log), pero S2s quedaban en splash indefinidamente sin calibrar ni moverse.
+
+**Causa raíz:**
+La reboot detection (§4.4, commit `15af488`) pone `calibrating=true` inmediatamente al detectar un slave reiniciado. Durante un reflash S2 hay ~2-5s de silencio RS485 (bootloader + setup). Si la reboot detection había disparado, esos timeouts con `calibrating=true` activo llegaban a `MAX_CALIBRATION_RETRIES (5)` → `while(1)` en Core 1 (RS485 task). Core 0 (MIDI) seguía vivo: Logic conectaba y los transport LEDs respondían, pero ningún paquete RS485 llegaba a los S2s.
+
+**Fix — `MASTER_S3-P4/S3/iMakie-ESP32_S3_EXTENDER/src/RS485/RS485.cpp`:**
+
+| Antes | Después |
+|-------|---------|
+| `while(1) { delay(1000); }` | `calibRetries=MAX` + `_triggerNextCalibration()` + `_consecutiveTimeouts=0` |
+
+NeoPixel ROJO se mantiene como señal visual de error. Sistema continúa con slaves restantes.
+
+**MCU afectada:** Solo S3.
+
+---
+
 ### SESIÓN 2026-05-27 — Brillo pantalla S2 a config.h (17:42)
 
 **Cambio — Brightness centralizado en `config.h`:**
