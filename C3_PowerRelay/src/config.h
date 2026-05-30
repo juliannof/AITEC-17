@@ -61,7 +61,7 @@ const unsigned long ENDSTOP_DEBOUNCE = 50;  // 50ms
 // ============================================================================
 // RELÉ
 // ============================================================================
-#define RELAY_ACTIVATION_TIME   15     // Segundos
+#define RELAY_ACTIVATION_TIME   2     // Segundos
 
 // ============================================================================
 // WIFI (opcional, para futuras funciones de monitoreo remoto)
