@@ -28,7 +28,7 @@ enum class ConnectionState {
 // HW_STATUS: RS485=1       Comunicación funcional. Timeouts periódicos pendientes.
 // HW_STATUS: Display=2     ST7789V3 + LovyanGFX. Dibuja perfecto. Ver HW_DISPLAY abajo.
 // HW_STATUS: ADC=2         ADS1115 resolvió todos los problemas. Estable.
-// HW_STATUS: Fader=1       Lectura ADC OK. Mapeo Logic↔ADC en progreso.
+// HW_STATUS: Fader=2       Lectura ADC OK. Mapeo Logic↔ADC + AutoMode routing completo (2026-05-30).
 // HW_STATUS: FaderTouch=1  Pin T capacitivo. Base sólida. Falsos positivos en calibración pendientes.
 // HW_STATUS: NeoPixels=2   WS2812B con nueva librería. Estable.
 // HW_STATUS: Encoder=1     ISR Gray code OK. S2→Logic no funciona aún.
@@ -195,6 +195,31 @@ static constexpr uint16_t MANUAL_TOUCH_THRESHOLD          = 150;  // umbral delt
 static constexpr uint16_t MANUAL_TOUCH_AT_TARGET_THRESHOLD =  30;  // umbral en ventana 80ms — motor off (50→30, 2026-05-27)
 static constexpr uint32_t MANUAL_TOUCH_DEBOUNCE_MS        = 600;  // ms sin movimiento antes de ceder control
 static constexpr uint32_t TOUCH_DELTA_WINDOW_MS           =  80;  // ventana acumulación delta — captura movimientos lentos (2026-05-27)
+
+// ─── AutoMode routing — RS485Handler (2026-05-30 09:35) ──────
+// WHAT: estado + constantes para enrutar el faderTarget según AutoMode (OFF/READ/WRITE/TRIM/TOUCH/LATCH).
+// WHY:  el Motor es actuador puro; toda la lógica de modo vive en RS485Handler.
+//       Estas variables están aquí (no en el .cpp) por la directiva CLAUDE.md:
+//       "NUNCA static de estado en .cpp, todo en config.h".
+// Debounce por modo: TOUCH=80ms (Mackie spec corto), LATCH=300ms (transición suave).
+// Resto de modos: MANUAL_TOUCH_DEBOUNCE_MS (600ms) como referencia base.
+static constexpr uint32_t AUTOMODE_TOUCH_DEBOUNCE_MS  =  80;  // ms: TOUCH y TRIM
+static constexpr uint32_t AUTOMODE_LATCH_DEBOUNCE_MS  = 300;  // ms: LATCH (más largo, transición a "frozen")
+// Umbral en cuentas ADC para considerar que Logic ha movido el target lo suficiente
+// como para que LATCH abandone el estado frozen (≈1.5% del rango 0-27000).
+static constexpr uint16_t AUTOMODE_LATCH_UNFREEZE_ADC = 200;
+
+// Estado RS485Handler: rastrea modo activo, freeze de LATCH y ventana touch reportada.
+// _rsCurrentMode      ─ último modo aplicado; en cambio de modo se hace reset.
+// _rsLatchFrozen      ─ true cuando LATCH ha capturado posición y mantiene fader fijo.
+// _rsLatchFrozenADC   ─ ADC capturado al entrar en frozen (referencia para comparar con target DAW).
+// _rsTouchActive      ─ ventana de touch reportada a S3; respeta debounce por modo.
+// _rsLastTouchTime    ─ timestamp del último touch crudo detectado (Motor::isManualTouchDetected()).
+static AutoMode  _rsCurrentMode      = AUTO_OFF;
+static bool      _rsLatchFrozen      = false;
+static uint16_t  _rsLatchFrozenADC   = 0;
+static bool      _rsTouchActive      = false;
+static uint32_t  _rsLastTouchTime    = 0;
 
 // ─── FADERTOUCH — detección por sostenimiento ────────────────
 static constexpr uint32_t TOUCH_POLL_MS            = 20;      // intervalo de muestreo (ms)

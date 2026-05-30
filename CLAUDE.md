@@ -423,6 +423,7 @@ ESP32-S3  ←→  RS485 bus B  ←→  8× ESP32-S2 (PTxx Track)
 **Sistemas Compartidos (S2/S3/P4):**
 - **RS485.md** — Protocolo binario, timing, paquetes, máquina estados (Buses A y B)
 - **MIDI.md** — Protocolo Mackie MCU completo: handshake SysEx, faders, VU, botones, encoders, desconexión
+- **AUTOMODE.md** — Routing del fader S2 según AutoMode (OFF/READ/WRITE/TRIM/TOUCH/LATCH) (2026-05-30)
 - **WIFI-OTA.md** — Provisioning credenciales, OTA, ElegantOTA, NVS
 - **SAT.md** — Sistema Auto-Test, navegación menú, integración módulos
 - **Transport.md** — Controles transport (S3), MIDI notas, handshake Mackie, bidireccional

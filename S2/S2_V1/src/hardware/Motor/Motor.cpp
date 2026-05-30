@@ -743,6 +743,38 @@ void setTargetFromS3(uint16_t adcTarget) {
     _motor_state = MotorState::MOVING_TO_TARGET;
 }
 
+// ─── setTargetForced — AUTO_OFF/READ: DAW absoluto (2026-05-30 09:35) ──
+// WHAT: Aplica un target ADC sin respetar _motor_manualTouchDetected.
+// WHY:  En AUTO_OFF y AUTO_READ el DAW manda en absoluto. Si el usuario
+//       empuja el fader, el motor debe volver al target sin esperar
+//       debounce. Esta función es la ruta "forced" que usa el handler
+//       RS485 cuando AutoMode == OFF/READ.
+// ASSUMES: motor calibrado (CalibPhase::DONE). Si no, ignora.
+void setTargetForced(uint16_t adcTarget) {
+    _s3Target = adcTarget;
+    if (_motor_phase != CalibPhase::DONE) {
+        static unsigned long _lastNoCalForced = 0;
+        if (millis() - _lastNoCalForced > 2000) {
+            log_w("[MOTOR] setTargetForced: no calibrado, ignorando target=%d", adcTarget);
+            _lastNoCalForced = millis();
+        }
+        return;
+    }
+    // NO guard _motor_manualTouchDetected — DAW absoluto en OFF/READ
+    _motor_targetADC = adcTarget;
+
+    // No reactivar si ya estamos en posición: fricción mantiene el fader
+    if (_motor_state == MotorState::AT_TARGET &&
+        abs((int)_motor_adcPos - (int)adcTarget) < DEAD_ZONE) {
+        return;
+    }
+
+    if (_motor_state != MotorState::MOVING_TO_TARGET) {
+        log_i("[MOTOR] FORCED → MOVING_TO_TARGET adc=%d target=%d", _motor_adcPos, adcTarget);
+    }
+    _motor_state = MotorState::MOVING_TO_TARGET;
+}
+
 void setUserDropTarget(uint16_t adcValue) {
     // Usuario soltó fader en posición adcValue → motor va allá
     _motor_state = MotorState::GOING_TO_MIN;  // Reutiliza lógica goToMin

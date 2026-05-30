@@ -25,6 +25,54 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 ---
 
+### SESIÓN 2026-05-30 — AutoMode awareness fader S2 (09:35)
+
+**Contexto:** El `MasterPacket.flags` ya transmitía AutoMode (bits 5-7) desde S3, pero el S2 lo ignoraba en lo que afectaba al motor — solo lo usaba para colorear el VPot. Implementación del routing real del faderTarget según modo.
+
+**Cambios — S2 únicamente:**
+
+| Archivo | Cambio |
+|---------|--------|
+| `S2/S2_V1/src/hardware/Motor/Motor.h` | + declaración `Motor::setTargetForced(uint16_t)` |
+| `S2/S2_V1/src/hardware/Motor/Motor.cpp` | + implementación `setTargetForced()` — copia de `setTargetFromS3()` sin el guard `_motor_manualTouchDetected` |
+| `S2/S2_V1/src/config.h` | + constantes `AUTOMODE_TOUCH_DEBOUNCE_MS=80`, `AUTOMODE_LATCH_DEBOUNCE_MS=300`, `AUTOMODE_LATCH_UNFREEZE_ADC=200` + estado `_rsCurrentMode`, `_rsLatchFrozen`, `_rsLatchFrozenADC`, `_rsTouchActive`, `_rsLastTouchTime` |
+| `S2/S2_V1/src/RS485/RS485Handler.h` | + `namespace Internal` con `_applyFaderTarget()` y `_touchDebounceForMode()` |
+| `S2/S2_V1/src/RS485/RS485Handler.cpp` | + implementación helpers `Internal`. `onMasterData()` detecta cambio de modo + reset total + delegación. `buildResponse()` con touchState debounceado por modo |
+
+**Behaviour final:**
+
+| Modo | Motor | touchState debounce |
+|------|-------|--------------------:|
+| OFF / READ | `setTargetForced()` — DAW absoluto | 600ms |
+| WRITE | inhibido | 600ms |
+| TOUCH / TRIM | `setTargetFromS3()` (guard) | 80ms |
+| LATCH | `setTargetFromS3()` + freeze hasta `Δtarget > 200 cuentas` | 300ms |
+
+**Decisiones de diseño confirmadas con usuario:**
+- AUTO_TRIM tratado como AUTO_TOUCH (no estaba en spec original, valor 3 del enum).
+- Cambio de modo → reset total (`_rsLatchFrozen`, `_rsTouchActive`, `_rsLastTouchTime`).
+- Reevaluación en CADA paquete, no solo cuando `faderTarget` cambia — así al soltar TOUCH el motor vuelve al target sin esperar a que Logic reenvíe.
+
+**Punto único de futuro upgrade:** cuando `FaderTouch::isTouched()` sea fiable, el cambio es una línea en `buildResponse()` (sustituir `Motor::isManualTouchDetected()` por `FaderTouch::isTouched()` — TODO marcado en el código).
+
+**MCU afectadas:** Solo S2. S3 (ya enviaba AutoMode) y P4 sin cambios.
+
+**Riesgo:** MEDIO — toca path RS485 RX y rama del motor, no toca protocolo binario.
+
+**Validación pendiente (hardware obligatorio antes de merge):**
+- [ ] OFF/READ: usuario empuja → motor vuelve sin debounce
+- [ ] WRITE: motor nunca se mueve, posición física a Logic
+- [ ] TOUCH/TRIM: tocar para, soltar reanuda tras ~80ms
+- [ ] LATCH: tocar congela; soltar mantiene; Logic mueve >200 cuentas → descongela
+- [ ] Cambio de modo con frozen activo → reset limpio
+- [ ] FLAG_CALIB prevalece en cualquier modo
+
+**Documentación:** [`docs/AUTOMODE.md`](docs/AUTOMODE.md) (nuevo, exhaustivo). Punteros añadidos en `docs/MOTOR.md` (sección 2.5.2) y `docs/RS485.md` (sección 5.1). CLAUDE.md actualizado con entrada en índice de docs.
+
+**Commit:** pendiente — implementación lista, esperando "commit".
+
+---
+
 ### SESIÓN 2026-05-27 — Auditoría P4: 3 bugs críticos identificados (23:34)
 
 **Contexto:** Investigación de "P4 no conecta en todas las ocasiones". Referencia: `docs/S3ToP4.md`.

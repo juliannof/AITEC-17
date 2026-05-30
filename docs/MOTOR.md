@@ -396,12 +396,15 @@ Fader en 0, motor apagado, esperando órdenes S3
 
 ```cpp
 void requestCalibration();           // FLAG_CALIB desde RS485
-void setTargetFromS3(uint16_t adc);  // setTarget ADC desde RS485 — GUARDED por usuario
+void setTargetFromS3(uint16_t adc);  // setTarget ADC — GUARDED por usuario (TOUCH/TRIM/LATCH)
+void setTargetForced(uint16_t adc);  // setTarget ADC — DAW absoluto, bypass guard (OFF/READ) (2026-05-30)
 void setUserDropTarget(uint16_t adc); // Usuario soltó fader en ADC
 void setConnected(bool connected);   // Notifica estado conexión S3
 MotorState getState();               // Consulta estado motor
 void setADCDelta(uint16_t currentADC); // Detecta movimiento usuario (delta OR capacitivo)
 ```
+
+**Routing por AutoMode (2026-05-30):** la elección entre `setTargetFromS3()` y `setTargetForced()` vive en `RS485Handler::Internal::_applyFaderTarget()`. El Motor no conoce el AutoMode — solo expone las dos APIs. Ver **[AUTOMODE.md](AUTOMODE.md)** para detalles del routing.
 
 ---
 

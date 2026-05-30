@@ -51,7 +51,8 @@ namespace Motor {
 
     // Máquina de estados v2 (2026-05-16) — S3 commands
     void       requestCalibration();          // FLAG_CALIB desde S3 → inicia calib o goToMin si necesario
-    void       setTargetFromS3(uint16_t adc); // setTarget desde S3 (ADC ya mapeado)
+    void       setTargetFromS3(uint16_t adc); // setTarget desde S3 (ADC ya mapeado, respeta guard usuario)
+    void       setTargetForced(uint16_t adc); // setTarget DAW absoluto — bypass guard usuario (AUTO_OFF/READ) (2026-05-30 09:35)
     void       setUserDropTarget(uint16_t adc); // Usuario soltó fader en posición ADC
     MotorState getState();                    // Consulta estado actual
 

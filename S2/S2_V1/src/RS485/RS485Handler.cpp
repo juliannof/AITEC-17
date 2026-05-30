@@ -23,6 +23,112 @@ extern void handleButtonLedState(ButtonId id);
 namespace RS485Handler {
 
 // =============================================================
+//  Internal — AutoMode routing helpers (2026-05-30 09:35)
+// =============================================================
+namespace Internal {
+
+// ─── _touchDebounceForMode ───────────────────────────────────
+// WHAT: devuelve el debounce (ms) que aplica al reporte de touchState
+//       según el AutoMode activo.
+// WHY:  cada modo tiene una ventana distinta antes de "soltar" el
+//       touchState a S3. Centralizar aquí evita números mágicos
+//       repetidos por el resto del handler.
+// ASSUMES: nada — pura función.
+uint32_t _touchDebounceForMode(AutoMode mode) {
+    switch (mode) {
+        case AUTO_TOUCH:
+        case AUTO_TRIM:   return AUTOMODE_TOUCH_DEBOUNCE_MS;   //  80ms (TRIM tratado como TOUCH)
+        case AUTO_LATCH:  return AUTOMODE_LATCH_DEBOUNCE_MS;   // 300ms
+        default:          return MANUAL_TOUCH_DEBOUNCE_MS;     // 600ms (OFF/READ/WRITE base)
+    }
+}
+
+// ─── _applyFaderTarget ───────────────────────────────────────
+// WHAT: enruta el faderTarget del DAW al Motor según AutoMode.
+// WHY:  punto único de decisión para AutoMode. Motor no sabe de modos.
+//       Cada rama llama a la API de Motor apropiada (setTargetForced
+//       para autoridad absoluta, setTargetFromS3 para autoridad
+//       cooperativa, o no llama para inhibición total).
+// ASSUMES: Motor calibrado. pkt validado por onMasterData() antes.
+//          Si cambio de modo: caller ya hizo reset de _rsLatchFrozen
+//          y _rsTouchActive (regla "reset total al cambiar modo").
+void _applyFaderTarget(AutoMode mode, uint16_t target) {
+    switch (mode) {
+
+        // ── OFF / READ ─ DAW absoluto ──────────────────────
+        // Usuario empuja → motor regresa al target sin esperar debounce.
+        // Cualquier estado frozen previo se descarta aquí.
+        case AUTO_OFF:
+        case AUTO_READ:
+            if (_rsLatchFrozen) {
+                log_i("[AUTOMODE] OFF/READ: descongelando LATCH (frozen=%d → target=%d)",
+                      _rsLatchFrozenADC, target);
+                _rsLatchFrozen = false;
+            }
+            Motor::setTargetForced(target);
+            break;
+
+        // ── WRITE ─ motor inhibido ─────────────────────────
+        // Usuario libre. Logic registra la posición física vía SlavePacket.
+        // No se llama nunca al motor en este modo.
+        case AUTO_WRITE:
+            // intencionalmente vacío
+            break;
+
+        // ── TOUCH / TRIM ─ usuario gana mientras toca ──────
+        // Motor::setTargetFromS3() ya implementa el guard de touch.
+        // El debounce de "qué reportar a S3" es distinto y vive en
+        // buildResponse() (_rsTouchActive con _touchDebounceForMode).
+        case AUTO_TOUCH:
+        case AUTO_TRIM:
+            Motor::setTargetFromS3(target);
+            break;
+
+        // ── LATCH ─ usuario congela hasta que Logic mueva mucho ──
+        // Lógica:
+        //   1. Si usuario toca AHORA → congelar en posición actual.
+        //   2. Si ya está frozen → comparar target con ADC congelado:
+        //      delta > AUTOMODE_LATCH_UNFREEZE_ADC → Logic ha tomado
+        //      decisión nueva, descongelamos y seguimos target.
+        //   3. Si no está frozen y no toca → seguimiento normal.
+        case AUTO_LATCH: {
+            bool touching = Motor::isManualTouchDetected();
+            if (touching) {
+                if (!_rsLatchFrozen) {
+                    _rsLatchFrozen    = true;
+                    _rsLatchFrozenADC = Motor::getRawADC();
+                    log_i("[AUTOMODE] LATCH: frozen en adc=%d (usuario tocando)", _rsLatchFrozenADC);
+                }
+                // No mover motor mientras usuario toca
+                break;
+            }
+            if (_rsLatchFrozen) {
+                int delta = abs((int)target - (int)_rsLatchFrozenADC);
+                if (delta > AUTOMODE_LATCH_UNFREEZE_ADC) {
+                    log_i("[AUTOMODE] LATCH: descongelando — Logic movió target frozen=%d target=%d delta=%d",
+                          _rsLatchFrozenADC, target, delta);
+                    _rsLatchFrozen = false;
+                    Motor::setTargetFromS3(target);
+                }
+                // Si delta no supera umbral: mantener frozen, no mover motor.
+                break;
+            }
+            // No frozen, no tocando: seguimiento normal con guard cooperativo.
+            Motor::setTargetFromS3(target);
+            break;
+        }
+
+        // ── Reservados / desconocidos ──────────────────────
+        // Comportamiento conservador: trato como AUTO_READ (DAW manda).
+        default:
+            Motor::setTargetForced(target);
+            break;
+    }
+}
+
+} // namespace Internal
+
+// =============================================================
 //  onMasterData
 // =============================================================
 void onMasterData(const MasterPacket& pkt) {
@@ -114,20 +220,38 @@ void onMasterData(const MasterPacket& pkt) {
         needsVUMetersRedraw = true;
     }
 
-    // ── Fader / Motor ─────────────────────────────────────────
-    float newFader = pkt.faderTarget / 27000.0f;
-    if (fabsf(faderPositions - newFader) > 0.001f) {
-        faderPositions = newFader;
-        Motor::setTargetFromS3(pkt.faderTarget);  // User can override (master) (2026-05-16 10:52)
+    // ── Modo de automatización (bits 5-7) ─────────────────────
+    // CRÍTICO: extraer AutoMode ANTES de enrutar el fader. (2026-05-30 09:35)
+    // El modo decide cómo se aplica el target — debe procesarse primero.
+    AutoMode pktMode = getAutoMode(pkt.flags);
+
+    // Reset total al cambiar de modo (regla: modo nuevo arranca limpio)
+    // WHY: si veníamos de LATCH frozen y pasamos a READ, el freeze
+    //      previo no debe arrastrarse. Lo mismo con _rsTouchActive.
+    if (pktMode != _rsCurrentMode) {
+        log_i("[AUTOMODE] cambio modo %d → %d (reset freeze+touch)", _rsCurrentMode, pktMode);
+        _rsCurrentMode    = pktMode;
+        _rsLatchFrozen    = false;
+        _rsTouchActive    = false;
+        _rsLastTouchTime  = 0;
     }
 
-    // ── Modo de automatización (bits 5-7) ─────────────────────
-    uint8_t newAutoMode = (pkt.flags >> 5) & 0x07;
+    uint8_t newAutoMode = (uint8_t)pktMode;  // legacy: setAutoMode(uint8_t) para display
     if (newAutoMode != currentAutoMode) {
         setAutoMode(newAutoMode);
         needsVPotRedraw   = true;
         needsHeaderRedraw = true;
     }
+
+    // ── Fader / Motor ─────────────────────────────────────────
+    // Reevaluación en CADA paquete (regla: re-aplicar modo aunque target no cambie). (2026-05-30 09:35)
+    // WHY: si entras en TOUCH y sueltas el fader, motor debe volver al target
+    //      sin esperar a que Logic reenvíe un valor distinto.
+    float newFader = pkt.faderTarget / 27000.0f;
+    if (fabsf(faderPositions - newFader) > 0.001f) {
+        faderPositions = newFader;  // solo redibujar display si cambia visualmente
+    }
+    Internal::_applyFaderTarget(pktMode, pkt.faderTarget);  // enrutado por modo
 
     // ── VPot ──────────────────────────────────────────────────
     setVPotRaw(pkt.vpotValue);
@@ -147,8 +271,25 @@ SlavePacket buildResponse(FaderADC& faderADC, SatMenu& satMenu) {
     bool motorCalibrating = (mstate == Motor::MotorState::CALIBRATING ||
                              mstate == Motor::MotorState::GOING_TO_MIN);
 
-    resp.touchState = (!motorCalibrating && Motor::isManualTouchDetected()) ? 1 : 0;
-    if (resp.touchState) log_w("[S2-RESP] touchState=1 faderPos=%d", Motor::getRawADC());
+    // ─── touchState con debounce por AutoMode (2026-05-30 09:35) ─
+    // WHAT: ventana de reporte de touchState que respeta el debounce del modo activo.
+    // WHY:  el "touch crudo" (Motor::isManualTouchDetected) tiene su propio debounce
+    //       (600ms) optimizado para autoridad de fader, pero S3/Logic esperan ventanas
+    //       distintas según AutoMode (TOUCH=80ms, LATCH=300ms). Reportamos una ventana
+    //       virtual que extiende/recorta la cruda según _touchDebounceForMode().
+    // TODO: cuando FaderTouch::isTouched() sea fiable en todo el recorrido,
+    //       sustituir `rawTouch` por `FaderTouch::isTouched()` (cambio de UNA línea).
+    bool rawTouch = Motor::isManualTouchDetected();
+    uint32_t now  = millis();
+    if (rawTouch) {
+        _rsTouchActive   = true;
+        _rsLastTouchTime = now;
+    } else if (_rsTouchActive &&
+               (now - _rsLastTouchTime) > Internal::_touchDebounceForMode(_rsCurrentMode)) {
+        _rsTouchActive = false;
+    }
+    resp.touchState = (!motorCalibrating && _rsTouchActive) ? 1 : 0;
+    if (resp.touchState) log_w("[S2-RESP] touchState=1 faderPos=%d mode=%d", Motor::getRawADC(), _rsCurrentMode);
     resp.buttons    = ButtonManager::getButtonFlags();
 
     // SELECT gestionado en S3 desde touchState — no enviar FLAG_SELECT desde S2 (2026-05-27)
