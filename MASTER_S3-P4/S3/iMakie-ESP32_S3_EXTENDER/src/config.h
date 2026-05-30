@@ -44,7 +44,7 @@ extern volatile ConnectionState logicConnectionState;
 // --- Timing (µs) ---
 #define RS485_TX_ENABLE_US   30      // ← aumentado: transceiver setup típico 30-50µs
 #define RS485_TX_DONE_US     30      // ← aumentado: esperar a transceiver deshabilitar
-#define RS485_RESP_TIMEOUT_US 5000   // ← 5ms: absorbe stalls ESP32-S2 ~4ms cada ~2s (2026-05-23)
+#define RS485_RESP_TIMEOUT_US 8000   // ← 8ms: margen extra para loop S2 variable (2026-05-30, era 5ms)
 #define RS485_GAP_US         300
 #define POLL_CYCLE_MS        20   // Tiempo mínimo de ronda completa (todos los slaves).
                                   // Con 1 slave (testing): 20ms → 50Hz, da margen al loop S2 (~10ms worst-case).

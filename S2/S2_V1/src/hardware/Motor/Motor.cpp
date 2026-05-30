@@ -770,7 +770,11 @@ void setTargetForced(uint16_t adcTarget) {
     }
 
     if (_motor_state != MotorState::MOVING_TO_TARGET) {
-        log_i("[MOTOR] FORCED → MOVING_TO_TARGET adc=%d target=%d", _motor_adcPos, adcTarget);
+        static unsigned long _lastForcedLog = 0;
+        if (millis() - _lastForcedLog > 2000) {
+            log_i("[MOTOR] FORCED → MOVING_TO_TARGET adc=%d target=%d", _motor_adcPos, adcTarget);
+            _lastForcedLog = millis();
+        }
     }
     _motor_state = MotorState::MOVING_TO_TARGET;
 }

@@ -8,7 +8,7 @@
 #if defined(DEVICE_P4_MASTER)
     #define DEVICE_FAMILY       0x14
     #define VERSION_REPLY_CMD   0x14
-    #define NUM_SLAVES          9
+    #define NUM_SLAVES          0
 
 #elif defined(DEVICE_S3_EXTENDER)
     #define DEVICE_FAMILY       0x15

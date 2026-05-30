@@ -21,7 +21,31 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 | 🔴 **VALIDACIÓN HW** | **Fader extremos −∞/+6dB — snap zone no funciona sin calibración** | Snap zone en S3 `main.cpp` (commit `9f19a68`) solo actúa si `ch.calibratedMin/Max > 0`. Si calibración no ha corrido, `span=0` y se usa fallback `faderPos*max/27000` sin snap → Logic muestra −139 dB y 5,2 dB. **Fix pendiente:** añadir snap zone también al path fallback (sin calibración), o verificar que calibración corre y captura min/max correctamente antes de confiar en el snap. |
 | 🔴 Alta | **P4: `case 0x61` sets `g_logicConnected=0` — bug no portado desde S3 (2026-05-27)** | `MIDIProcessor.cpp P4 línea 467`: Logic envía `0x61` (AllFadersToMinimum) inmediatamente después de `0x21` en GoOnline. P4 establece `g_logicConnected=0` → slaves reciben `pkt.connected=0` durante toda la sesión → pantallas oscuras, motores inactivos. Mismo bug corregido en S3 el 2026-05-27 (commit `sesión 17:14`), sin portar a P4. **Fix:** copiar case 0x61 de S3: eliminar `g_logicConnected=0`, añadir `rs485.setFaderTarget(i,0)` para todos los slaves. |
 | 🔴 Alta | **P4: `startTask()` RS485 nunca llamada — slaves sin comunicación (2026-05-27)** | `main.cpp setup()`: `rs485.begin()` configura Serial1 pero `rs485.startTask()` nunca se invoca. El task de polling (`runTask()`) no arranca. P4 no envía ni un paquete a ningún slave S2. `tickCalibracion()` encola calibraciones que nunca se envían. **Fix:** añadir `rs485.startTask()` en `setup()` tras `rs485.begin()`, `main.cpp línea ~254`. Ver `RS485.cpp::startTask()` — pineado a Core 1, prioridad 5. |
+| 🔴 Alta | **ADS1115 no lineal — ADC=225 en posición física media (esperado ~13500) (2026-05-30)** | Con `GAIN_ONE` + pot lineal 3.3V, mid-travel debería dar ~13200 ADC counts. En test real: bottom=27, mid=225, top=22795. La respuesta es casi logarítmica (bottom 0.87% del rango total en mid-travel). Causa posible: (1) potenciómetro logarítmico (audio taper) en lugar de lineal — hardware no modificable; (2) carga resistiva externa; (3) wiring inusual. **Impacto:** en AUTO_READ, Logic envía target=X que S3 mapea linealmente al rango calibrado, pero el fader físico en esa posición ADC no corresponde visualmente. Motores pueden buscar posiciones que parecen incorrectas al ojo. **Fix pendiente:** diagnóstico físico (medir resistencia pot en mid-travel) o compensación logarítmica en el mapeo S3→ADC si la no-linealidad es reproducible. |
+| 🟡 Media | **Calibración mismatch — calibratedMin=168 vs ADC físico min=27 (2026-05-30)** | S3 guardó calibratedMin=168 en la sesión de test (motor paró antes del tope físico durante GOING_TO_MIN). El fader físico llega hasta ADC=27. En AUTO_READ con Logic en fondo: S3 manda target=168, motor busca 168, fader en 27 → motor buzzea contra tope. **Fix:** forzar recalibración limpia con slave correcto (ID1/ID2) conectado. Puede ser síntoma del bug de nonlinealidad + motor que no llega al tope físico real. |
 | 🟡 Media | **P4: `_calibPendingFrom` no se resetea en GoOffline (2026-05-27)** | `MIDIProcessor.cpp case 0x0F`: reset de estado no incluye `_calibPendingFrom`. Si Logic desconecta durante calibración (ej. slave 4/9 en progreso), al reconectar `tickCalibracion()` retoma desde el slave 4, salteando 1-3. La calibración del 0x21 pone `_calibPendingFrom=1` y mezcla ambas secuencias. **Fix:** añadir `_calibPendingFrom = 0;` en `case 0x0F`, `MIDIProcessor.cpp`. |
+
+---
+
+### SESIÓN 2026-05-30 — Debugging RS485 timeouts + fixes (10:30)
+
+**Contexto:** Tras flashear AutoMode, S3 mostraba `TIMEOUT slave 1 (#1 consecuciones)` repetido. Diagnóstico y correcciones aplicadas.
+
+**Root cause real:** Slave ID mismatch — S2 conectado tenía `trackId=5` (configurado en NVS vía SAT), S3 sondeaba `slave 1`. Corregido manualmente cambiando el ID.
+
+**Fixes defensivos aplicados (mejoras de timing):**
+
+| Archivo | Cambio |
+|---------|--------|
+| `S2/S2_V1/src/hardware/Motor/Motor.cpp` | `setTargetForced()`: throttle `log_i` a 1 vez/2s (antes: cada 20ms si motor en tránsito → USB CDC bloat en path crítico) |
+| `MASTER_S3-P4/S3/iMakie-ESP32_S3_EXTENDER/src/config.h` | `RS485_RESP_TIMEOUT_US` 5000µs → 8000µs (más margen para loop S2 variable) |
+| `S2/S2_V1/src/RS485/RS485Handler.cpp` | Log diagnóstico `[FADER]` target/adc/diff/mode a 500ms (era `log_d` 5s) para debugging activo |
+
+**Descubrimiento ADS1115:** En test de rango completo, mid-travel físico del fader devuelve ADC=225 (esperado ~13500). Documentado como pendiente en tabla Pendientes.
+
+**Patrón `#1 consecutivo` explicado:** `_consecutiveTimeouts` se resetea con cualquier respuesta recibida (éxito o CRC error). Con slave ID incorrecto: ningún S2 responde → counter sube; cualquier byte extraño en el bus que empiece en 0xBB resetea el counter → siempre aparece #1. Con slave correcto: issue desaparece.
+
+**MCU afectadas:** S2 (log throttle + log diagnóstico), S3 (timeout).
 
 ---
 
@@ -489,6 +513,7 @@ Todos los valores de brillo de pantalla hardcodeados (255/70/0/200) movidos a de
 ---
 
 ### Upload log S2
+- `2026-05-30 11:53` · Commit S2 · **FW 0.5.20** (sin upload)
 - `2026-05-27 23:14` · Commit S2 · **FW 0.4.19** (sin upload)
 - `2026-05-27 22:36` · Commit S2 · **FW 0.4.18** (sin upload)
 - `2026-05-27 17:46` · Commit S2 · **FW 0.4.17** (sin upload)

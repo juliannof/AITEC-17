@@ -132,10 +132,13 @@ void _applyFaderTarget(AutoMode mode, uint16_t target) {
 //  onMasterData
 // =============================================================
 void onMasterData(const MasterPacket& pkt) {
-    // Log cada 5s — diagnóstico RS485 recepción (reducido 2026-05-19)
+    // Log fader cada 500ms — target de Logic vs posición ADC actual
     static unsigned long lastLog = 0;
-    if (millis() - lastLog > 5000) {
-        log_d("[RS485 RX] id=%d target=%d connected=%d touch=%d", pkt.id, pkt.faderTarget, pkt.connected, Motor::isManualTouchDetected());
+    if (millis() - lastLog > 500) {
+        log_i("[FADER] target=%d adc=%d diff=%d mode=%d conn=%d",
+              pkt.faderTarget, Motor::getRawADC(),
+              (int)pkt.faderTarget - (int)Motor::getRawADC(),
+              (int)getAutoMode(pkt.flags), pkt.connected);
         lastLog = millis();
     }
 
