@@ -129,6 +129,15 @@ board_build.psram_type = opi
 
 ---
 
+## 🔄 Orientación de pantalla: Portrait dibujado → Landscape visualizado (2026-05-30 11:30)
+
+El P4 **dibuja toda la UI en un lienzo portrait nativo 480×800**, pero el dispositivo se monta girado 90° y **se mira en landscape**. La conversión **NO es global** (el panel va con `swap_xy=0` y no hay `lv_display_set_rotation`): cada elemento de **texto** se rota individualmente 90° con `lv_obj_set_style_transform_rotation(obj, 900, 0)` + pivote al centro. Es frágil — cualquier label nuevo sin rotar aparece girado respecto al resto.
+
+> **Documentación canónica y exhaustiva** (diagrama de capas, patrón de código, las 5 trampas de `transform_rotation` solo-visual / touch sin compensar, y hallazgos de limpieza):
+> → **[docs/DISPLAY_P4.md §3 — Sistema de orientación](../../docs/DISPLAY_P4.md#3--sistema-de-orientación-portrait-dibujado--landscape-visualizado)**
+
+---
+
 ## Capacidades no utilizadas (expansion futura)
 
 | Capacidad | Hardware | Uso potencial |
@@ -149,7 +158,7 @@ board_build.psram_type = opi
 ## Subsistemas P4
 
 ### Display P4 (ST7701S MIPI-DSI)
-→ **[docs/DISPLAY_P4.md](../../docs/DISPLAY_P4.md)** (ST7701S 480×800, LVGL v9, portrait/landscape, rotación widgets)
+→ **[docs/DISPLAY_P4.md](../../docs/DISPLAY_P4.md)** (ST7701S 480×800, LVGL v9, orientación portrait→landscape, pantalla de botones UIPage1 con los 32 botones MCU)
 
 ### Touch (GT911)
 → **[docs/TOUCH.md](../../docs/TOUCH.md)** (GT911 capacitivo, I2C_NUM_1, calibración, gestos)

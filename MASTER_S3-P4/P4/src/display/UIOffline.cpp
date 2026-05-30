@@ -30,6 +30,8 @@ void uiOfflineCreate(lv_obj_t* parent) {
     lv_obj_set_style_bg_color(s_root, lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_opa(s_root, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(s_root, 0, 0);
+    lv_obj_set_style_border_width(s_root, 0, 0);   // sin marco del tema (2026-05-30 11:50)
+    lv_obj_set_style_radius(s_root, 0, 0);         // sin esquinas redondeadas del tema
     lv_obj_clear_flag(s_root, LV_OBJ_FLAG_SCROLLABLE);
 
     if (LittleFS.exists("/logo.jpg")) {
