@@ -22,17 +22,28 @@
 
 
 // --- RS485 pines P4 ---
+// ⚠️ PENDIENTE confirmar contra esquemático JC1060P470C (conector JST MX 1.25 4P)
+//    Valores heredados de la placa antigua JC4880P433C (2026-06-09)
 #define RS485_TX_PIN      52
 #define RS485_RX_PIN      51
 #define RS485_ENABLE_PIN  50
 #define RS485_BAUD       500000
 
-// ── I2C ──────────────────────────────────────────────────
-// NeoTrellis — I2C_NUM_0
-#define TRELLIS_SDA_PIN  33
-#define TRELLIS_SCL_PIN  31
-#define TRELLIS_ADDR_L   0x2F   // tile izquierdo
-#define TRELLIS_ADDR_R   0x2E   // tile derecho
+// ── Display JD9165 (MIPI-DSI, 1024×600 landscape nativo) (2026-06-09) ──
+#define LCD_RST_PIN    27
+#define LCD_BL_PIN     23
+
+// ── Touch GT911 (I2C) (2026-06-09) ──
+// RST/INT a NC (-1): así iba en la placa que funcionaba; el driver se salta la
+// secuencia de reset por GPIO y lee directo. Volver a probar 21/22 solo si se
+// confirma cableado real contra esquemático.
+#define TOUCH_INT_PIN  -1
+#define TOUCH_RST_PIN  -1
+#define TOUCH_SDA_PIN  7
+#define TOUCH_SCL_PIN  8
+#define TOUCH_I2C_ADDR 0x5D
+
+// NOTA: la JC1060P470C NO lleva NeoTrellis (defines TRELLIS_* eliminados 2026-06-09)
 
 // --- Timing RS485 ---
 #define RS485_TX_ENABLE_US    10
@@ -42,13 +53,21 @@
 #define POLL_CYCLE_MS         20
 
 
-// ── Dimensiones display ──────────────────────────────────────────
-#define P4_W    480
-#define P4_H    800
+// ── Dimensiones display (JD9165 1024×600 landscape nativo) (2026-06-09) ──
+#define P4_W    1024
+#define P4_H    600
 #define NUM_CH  8
+// TODO landscape: geometría calculada sobre portrait 480×800 — rediseñar en paso 5
 #define CH_H    (P4_H / NUM_CH)   // 100px
 
-// ── Header strip ─────────────────────────────────────────────────
+// ── Layout landscape nativo 1024×600 (header arriba + 8 canales en columnas) (2026-06-09) ──
+#define HEADER_H    88                  // franja superior: timecode + modo BEAT/SMPT
+#define CONTENT_Y   HEADER_H            // inicio del área de canales (y)
+#define CONTENT_H   (P4_H - HEADER_H)   // 512px alto del área de canales
+#define CH_W        (P4_W / NUM_CH)     // 128px ancho por canal (columna)
+
+// ── Header strip (LEGADO portrait — se elimina cuando todas las páginas migren) ──
+// TODO landscape: HEADER_X/HEADER_W/CH_H asumían portrait 480×800
 #define MENU_PANEL_H   300
 #define MENU_HAM_SIZE  44
 #define HEADER_X  410
@@ -72,9 +91,7 @@
 #define COL_AUTO_WRITE  0xAA0000
 #define COL_AUTO_OFF    0x333333
 
-// --- Slaves ---
-#define NUM_SLAVES  9
-
+// NOTA: NUM_SLAVES se define una sola vez en el bloque DEVICE_* (arriba) (2026-06-09)
 
 // --- Enums ---
 enum class ConnectionState {

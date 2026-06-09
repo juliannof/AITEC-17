@@ -26,7 +26,7 @@ static lv_image_dsc_t s_img_dsc;
 void uiOfflineCreate(lv_obj_t* parent) {
     s_root = lv_obj_create(parent);
     lv_obj_set_pos(s_root, 0, 0);
-    lv_obj_set_size(s_root, HEADER_X, P4_H);  // era P4_W
+    lv_obj_set_size(s_root, P4_W, P4_H);  // pantalla completa landscape 1024×600 (2026-06-09)
     lv_obj_set_style_bg_color(s_root, lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_opa(s_root, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(s_root, 0, 0);
@@ -52,11 +52,9 @@ void uiOfflineCreate(lv_obj_t* parent) {
                 s_img_dsc.data         = s_logo_buf;
 
                 s_logo = lv_image_create(s_root);
-                lv_obj_set_style_transform_rotation(s_logo, 900, 0);
-                lv_obj_set_style_transform_pivot_x(s_logo, LV_PCT(50), 0);
-                lv_obj_set_style_transform_pivot_y(s_logo, LV_PCT(50), 0);
+                // landscape nativo: sin rotación de 90° (2026-06-09)
                 lv_image_set_src(s_logo, &s_img_dsc);
-                lv_obj_set_pos(s_logo, LOGO_X + 40, LOGO_Y + 10);
+                lv_obj_set_pos(s_logo, LOGO_X, LOGO_Y);
                 lv_obj_set_size(s_logo, 0, LOGO_H);
                 s_logo_ready = true;
                 log_i("[Offline] logo OK");
@@ -73,10 +71,8 @@ void uiOfflineCreate(lv_obj_t* parent) {
     lv_label_set_text(s_blink_label, "Esperando Logic Pro...");
     lv_obj_set_style_text_color(s_blink_label, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_font(s_blink_label, &lv_font_montserrat_16, 0);
-    lv_obj_set_pos(s_blink_label, 30, LOGO_Y + LOGO_H - 30);
-    lv_obj_set_style_transform_rotation(s_blink_label, 900, 0);
-    lv_obj_set_style_transform_pivot_x(s_blink_label, LV_PCT(50), 0);
-    lv_obj_set_style_transform_pivot_y(s_blink_label, LV_PCT(50), 0);
+    // centrado horizontal bajo el logo, sin rotación (landscape nativo, 2026-06-09)
+    lv_obj_set_pos(s_blink_label, LOGO_X, LOGO_Y + LOGO_H + 20);
     // label visible desde el arranque
     s_logo_reveal    = 0;
     s_blink_cnt      = 0;

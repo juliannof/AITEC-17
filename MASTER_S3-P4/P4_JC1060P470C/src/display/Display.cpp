@@ -8,14 +8,13 @@
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_mipi_dsi.h"
-#include "lcd/esp_lcd_st7701.h"
+#include "lcd/esp_lcd_jd9165.h"
 #include "touch/esp_lcd_touch_gt911.h"
 #include "lvgl.h"
 
-#define LCD_H_RES           480
-#define LCD_V_RES           800
-#define LCD_RST_PIN         GPIO_NUM_5
-#define LCD_BACKLIGHT_PIN   GPIO_NUM_23
+// Resolución y pines: fuente única en config.h (JD9165 1024×600) (2026-06-09)
+#define LCD_H_RES           P4_W
+#define LCD_V_RES           P4_H
 #define LCD_LEDC_CHANNEL    LEDC_CHANNEL_0
 #define MIPI_DSI_PHY_LDO_CHAN   3
 #define MIPI_DSI_PHY_LDO_MV     2500
@@ -39,7 +38,7 @@ static void backlight_init() {
         .clk_cfg         = LEDC_AUTO_CLK
     };
     const ledc_channel_config_t channel_cfg = {
-        .gpio_num   = LCD_BACKLIGHT_PIN,
+        .gpio_num   = LCD_BL_PIN,
         .speed_mode = LEDC_LOW_SPEED_MODE,
         .channel    = LCD_LEDC_CHANNEL,
         .intr_type  = LEDC_INTR_DISABLE,
@@ -73,54 +72,75 @@ void initDisplay() {
     backlight_init();
     init_mipi_dsi_power();
 
-    // DSI bus
+    // DSI bus — valores del JD9165 (2 lanes, 750 Mbps). Structs rellenadas
+    // a mano: las macros JD9165_*_CONFIG() son C99 y no compilan en C++.
     esp_lcd_dsi_bus_handle_t dsi_bus = NULL;
     esp_lcd_dsi_bus_config_t bus_cfg = {
         .bus_id             = 0,
         .num_data_lanes     = 2,
         .phy_clk_src        = MIPI_DSI_PHY_CLK_SRC_DEFAULT,
-        .lane_bit_rate_mbps = 1000,
+        .lane_bit_rate_mbps = 750,
     };
     esp_lcd_new_dsi_bus(&bus_cfg, &dsi_bus);
 
     // DBI IO
     esp_lcd_panel_io_handle_t io = NULL;
-    esp_lcd_dbi_io_config_t dbi_cfg = ST7701_PANEL_IO_DBI_CONFIG();
+    esp_lcd_dbi_io_config_t dbi_cfg = {
+        .virtual_channel = 0,
+        .lcd_cmd_bits    = 8,
+        .lcd_param_bits  = 8,
+    };
     esp_lcd_new_panel_io_dbi(dsi_bus, &dbi_cfg, &io);
 
-    // DPI config
-    esp_lcd_dpi_panel_config_t dpi_cfg =
-        ST7701_480_360_PANEL_60HZ_DPI_CONFIG(LCD_COLOR_PIXEL_FORMAT_RGB565);
-    dpi_cfg.num_fbs = 2;
+    // DPI config — timing JD9165 1024×600 60Hz (valores del componente v2.0.2)
+    esp_lcd_dpi_panel_config_t dpi_cfg = {
+        .virtual_channel    = 0,
+        .dpi_clk_src        = MIPI_DSI_DPI_CLK_SRC_DEFAULT,
+        .dpi_clock_freq_mhz = 50,
+        .pixel_format       = LCD_COLOR_PIXEL_FORMAT_RGB565,
+        .num_fbs            = 2,
+        .video_timing       = {
+            .h_size            = 1024,
+            .v_size            = 600,
+            .hsync_pulse_width = 20,
+            .hsync_back_porch  = 136,
+            .hsync_front_porch = 160,
+            .vsync_pulse_width = 2,
+            .vsync_back_porch  = 12,
+            .vsync_front_porch = 20,
+        },
+        .flags = { .use_dma2d = true },
+    };
 
     // Panel
-    st7701_vendor_config_t vendor_cfg = {
+    jd9165_vendor_config_t vendor_cfg = {
         .init_cmds      = NULL,
         .init_cmds_size = 0,
         .mipi_config = {
             .dsi_bus    = dsi_bus,
             .dpi_config = &dpi_cfg,
         },
-        .flags = { .use_mipi_interface = 1 },
     };
     esp_lcd_panel_dev_config_t panel_cfg = {
-        .reset_gpio_num = LCD_RST_PIN,
+        .reset_gpio_num = (gpio_num_t)LCD_RST_PIN,   // GPIO27 (config.h)
         .rgb_ele_order  = ESP_LCD_COLOR_SPACE_RGB,
         .bits_per_pixel = 16,
         .vendor_config  = &vendor_cfg,
     };
-    esp_lcd_new_panel_st7701(io, &panel_cfg, &s_panel);
+    esp_lcd_new_panel_jd9165(io, &panel_cfg, &s_panel);
     esp_lcd_panel_reset(s_panel);
     esp_lcd_panel_init(s_panel);
 
     // I2C para GT911
     i2c_master_bus_handle_t i2c_bus = NULL;
     i2c_master_bus_config_t i2c_cfg = {
-        .i2c_port          = I2C_NUM_1,
-        .sda_io_num        = GPIO_NUM_7,
-        .scl_io_num        = GPIO_NUM_8,
+        .i2c_port          = I2C_NUM_1,                 // NUM_0 lo usa Wire del core → conflicto display (2026-06-09)
+        .sda_io_num        = (gpio_num_t)TOUCH_SDA_PIN,
+        .scl_io_num        = (gpio_num_t)TOUCH_SCL_PIN,
         .clk_source        = I2C_CLK_SRC_DEFAULT,
         .glitch_ignore_cnt = 7,
+        // PRUEBA 2026-06-09: pull-up quitado temporalmente para aislar si la negra
+        // viene del touch funcionando (indev) y no del bus en sí.
     };
     i2c_new_master_bus(&i2c_cfg, &i2c_bus);
 
@@ -133,13 +153,17 @@ void initDisplay() {
     esp_lcd_touch_config_t tp_cfg = {
         .x_max        = LCD_H_RES,
         .y_max        = LCD_V_RES,
-        .rst_gpio_num = GPIO_NUM_NC,
-        .int_gpio_num = GPIO_NUM_NC,
+        .rst_gpio_num = (gpio_num_t)TOUCH_RST_PIN,   // GPIO22 (config.h)
+        .int_gpio_num = (gpio_num_t)TOUCH_INT_PIN,   // GPIO21 (config.h)
         .levels       = {.reset = 0, .interrupt = 0},
         .flags        = {.swap_xy = 0, .mirror_x = 0, .mirror_y = 0},
     };
     static esp_lcd_touch_handle_t s_tp = NULL;
-    esp_lcd_touch_new_i2c_gt911(tp_io, &tp_cfg, &s_tp);
+    esp_err_t tp_ret = esp_lcd_touch_new_i2c_gt911(tp_io, &tp_cfg, &s_tp);
+    if (tp_ret != ESP_OK) {
+        log_e("[Display] GT911 init FALLO (0x%x) — arranque SIN touch", tp_ret);
+        s_tp = NULL;
+    }
 
     // LVGL init
     lv_init();
@@ -162,23 +186,25 @@ void initDisplay() {
         lv_display_flush_ready(disp);
     });
 
-   // LVGL input device touch
-lv_indev_t* indev = lv_indev_create();
-lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
-lv_indev_set_read_cb(indev, [](lv_indev_t* drv, lv_indev_data_t* data) {
-    esp_lcd_touch_handle_t tp = (esp_lcd_touch_handle_t)lv_indev_get_user_data(drv);
-    uint16_t x, y, strength;
-    uint8_t count = 0;
-    esp_lcd_touch_read_data(tp);
-    if (esp_lcd_touch_get_coordinates(tp, &x, &y, &strength, &count, 1) && count > 0) {
-        data->point.x = x;
-        data->point.y = y;
-        data->state = LV_INDEV_STATE_PRESSED;
-    } else {
-        data->state = LV_INDEV_STATE_RELEASED;
-    }
-});
-lv_indev_set_user_data(indev, s_tp);
+   // LVGL input device touch — SOLO si el GT911 inicializó (evita assert/boot loop)
+if (s_tp != NULL) {
+    lv_indev_t* indev = lv_indev_create();
+    lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
+    lv_indev_set_read_cb(indev, [](lv_indev_t* drv, lv_indev_data_t* data) {
+        esp_lcd_touch_handle_t tp = (esp_lcd_touch_handle_t)lv_indev_get_user_data(drv);
+        uint16_t x, y, strength;
+        uint8_t count = 0;
+        esp_lcd_touch_read_data(tp);
+        if (esp_lcd_touch_get_coordinates(tp, &x, &y, &strength, &count, 1) && count > 0) {
+            data->point.x = x;
+            data->point.y = y;
+            data->state = LV_INDEV_STATE_PRESSED;
+        } else {
+            data->state = LV_INDEV_STATE_RELEASED;
+        }
+    });
+    lv_indev_set_user_data(indev, s_tp);
+}
    
     
     // ── Pantalla raíz ────────────────────────────────────────────────
