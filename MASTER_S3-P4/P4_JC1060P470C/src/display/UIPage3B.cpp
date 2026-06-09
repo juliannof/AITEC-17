@@ -5,20 +5,20 @@
 #include "Display.h"
 #include "lvgl.h"
 
-#define FADER_X      0
-#define FADER_W      220
-#define TRACKNAME_X  (FADER_X + FADER_W)
-#define TRACKNAME_W  35
-#define AUTOMODE_X   (TRACKNAME_X + TRACKNAME_W)
-#define AUTOMODE_W   50
-#define MUTE_X       (AUTOMODE_X + AUTOMODE_W)
-#define MUTE_W       50
-#define PANORAMA_X   (MUTE_X + MUTE_W)
-#define PANORAMA_W   55
-
+// Layout landscape: cada canal = columna CH_W × CONTENT_H, zonas apiladas (2026-06-09)
+#define FADER_TOP    8
+#define FADER_H      210                 // fader vertical
+#define FADER_WIDTH  44
+#define NAME_TOP     (FADER_TOP + FADER_H + 6)   // 224
+#define NAME_H       28
+#define PAN_TOP      (NAME_TOP + NAME_H + 6)      // 258
+#define PAN_SZ       52
+#define AUTO_TOP     (PAN_TOP + PAN_SZ + 8)       // 318
+#define AUTO_H       52
+#define MUTE_TOP     (AUTO_TOP + AUTO_H + 6)      // 376
+#define MUTE_H       52
 
 #define NUM_CH       8
-#define CH_H         (P4_H / NUM_CH)
 
 // ── Colores ───────────────────────────────────────────────
 #define COLOR_BG         lv_color_hex(0x000000)
@@ -70,12 +70,6 @@ extern String formatTimecodeString();
 extern uint8_t g_channelAutoMode[8];
 
 
-static void set_rotated(lv_obj_t* obj) {
-    lv_obj_set_style_transform_rotation(obj, 900, 0);
-    lv_obj_set_style_transform_pivot_x(obj, LV_PCT(50), 0);
-    lv_obj_set_style_transform_pivot_y(obj, LV_PCT(50), 0);
-}
-
 static lv_color_t automode_color(uint8_t state) {
     switch (state) {
         case 0: return COLOR_AUTO_READ;
@@ -89,7 +83,7 @@ static lv_color_t automode_color(uint8_t state) {
 void uiPage3BCreate(lv_obj_t* parent) {
     s_page_root = lv_obj_create(parent);
     lv_obj_set_pos(s_page_root, 0, 0);
-    lv_obj_set_size(s_page_root, HEADER_X, P4_H);
+    lv_obj_set_size(s_page_root, P4_W, CONTENT_H);   // landscape (1024×512)
     lv_obj_set_style_bg_color(s_page_root, lv_color_hex(COL_BG), 0);
     lv_obj_set_style_bg_opa(s_page_root, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(s_page_root, 0, 0);
@@ -97,60 +91,59 @@ void uiPage3BCreate(lv_obj_t* parent) {
     lv_obj_clear_flag(s_page_root, LV_OBJ_FLAG_SCROLLABLE);
 
     for (int i = 0; i < NUM_CH; i++) {
-        int y = i * CH_H;
+        int x = i * CH_W;   // columna del canal (landscape)
 
         s_track_bg[i] = lv_obj_create(s_page_root);
-        lv_obj_set_pos(s_track_bg[i], 0, y);
-        lv_obj_set_size(s_track_bg[i], HEADER_X, CH_H - 1);
+        lv_obj_set_pos(s_track_bg[i], x, 0);
+        lv_obj_set_size(s_track_bg[i], CH_W - 1, CONTENT_H);
         lv_obj_set_style_bg_color(s_track_bg[i], lv_color_hex(COL_TRACK_BG), 0);
         lv_obj_set_style_border_width(s_track_bg[i], 0, 0);
         lv_obj_set_style_radius(s_track_bg[i], 0, 0);
         lv_obj_clear_flag(s_track_bg[i], LV_OBJ_FLAG_SCROLLABLE);
 
+        // Fader vertical
         s_fader[i] = lv_slider_create(s_page_root);
-lv_obj_set_pos(s_fader[i], FADER_X + 20, y + 50);
-lv_obj_set_size(s_fader[i], FADER_W - 20, CH_H - 8);
-lv_slider_set_range(s_fader[i], 0, 16383);
-lv_slider_set_value(s_fader[i], 0, LV_ANIM_OFF);
-lv_obj_set_style_bg_color(s_fader[i], lv_color_hex(0x000000), LV_PART_MAIN);
-lv_obj_set_style_bg_color(s_fader[i], lv_color_hex(0x888888), LV_PART_KNOB);
-lv_obj_set_style_height(s_fader[i], 4, LV_PART_MAIN);
-lv_obj_set_style_pad_top(s_fader[i], 15, LV_PART_KNOB);
-lv_obj_set_style_pad_bottom(s_fader[i], 15, LV_PART_KNOB);
-lv_obj_set_style_pad_left(s_fader[i], 15, LV_PART_KNOB);
-lv_obj_set_style_pad_right(s_fader[i], 15, LV_PART_KNOB);
+        lv_obj_set_pos(s_fader[i], x + (CH_W - FADER_WIDTH) / 2, FADER_TOP);
+        lv_obj_set_size(s_fader[i], FADER_WIDTH, FADER_H);
+        lv_slider_set_range(s_fader[i], 0, 16383);
+        lv_slider_set_value(s_fader[i], 0, LV_ANIM_OFF);
+        lv_obj_set_style_bg_color(s_fader[i], lv_color_hex(0x222222), LV_PART_MAIN);
+        lv_obj_set_style_bg_color(s_fader[i], lv_color_hex(0x00AA00), LV_PART_INDICATOR);
+        lv_obj_set_style_bg_color(s_fader[i], lv_color_hex(0xCCCCCC), LV_PART_KNOB);
 
-lv_obj_add_event_cb(s_fader[i], [](lv_event_t* e) {
-    int ch = (int)(intptr_t)lv_event_get_user_data(e);
-    byte sel[3] = { 0x90, (uint8_t)(0x08 + ch), 127 };
-    sendMIDIBytes(sel, 3);
-}, LV_EVENT_PRESSED, (void*)(intptr_t)i);
+        lv_obj_add_event_cb(s_fader[i], [](lv_event_t* e) {
+            int ch = (int)(intptr_t)lv_event_get_user_data(e);
+            byte sel[3] = { 0x90, (uint8_t)(0x08 + ch), 127 };
+            sendMIDIBytes(sel, 3);
+        }, LV_EVENT_PRESSED, (void*)(intptr_t)i);
 
-lv_obj_add_event_cb(s_fader[i], [](lv_event_t* e) {
-    int ch = (int)(intptr_t)lv_event_get_user_data(e);
-    lv_obj_t* sl = (lv_obj_t*)lv_event_get_target(e);
-    int val = lv_slider_get_value(sl);
-    byte lsb = val & 0x7F;
-    byte msb = (val >> 7) & 0x7F;
-    byte msg[3] = { (byte)(0xE0 + ch), lsb, msb };
-    sendMIDIBytes(msg, 3);
-}, LV_EVENT_VALUE_CHANGED, (void*)(intptr_t)i);
+        lv_obj_add_event_cb(s_fader[i], [](lv_event_t* e) {
+            int ch = (int)(intptr_t)lv_event_get_user_data(e);
+            lv_obj_t* sl = (lv_obj_t*)lv_event_get_target(e);
+            int val = lv_slider_get_value(sl);
+            byte lsb = val & 0x7F;
+            byte msb = (val >> 7) & 0x7F;
+            byte msg[3] = { (byte)(0xE0 + ch), lsb, msb };
+            sendMIDIBytes(msg, 3);
+        }, LV_EVENT_VALUE_CHANGED, (void*)(intptr_t)i);
 
-lv_obj_add_event_cb(s_fader[i], [](lv_event_t* e) {
-    int ch = (int)(intptr_t)lv_event_get_user_data(e);
-    lv_obj_t* sl = (lv_obj_t*)lv_event_get_target(e);
-    int val = lv_slider_get_value(sl);
-    byte lsb = val & 0x7F;
-    byte msb = (val >> 7) & 0x7F;
-    byte msg[3] = { (byte)(0xE0 + ch), lsb, msb };
-    sendMIDIBytes(msg, 3);
-}, LV_EVENT_VALUE_CHANGED, (void*)(intptr_t)i);
+        // nombre de pista
+        lv_obj_t* tn_cont = lv_obj_create(s_page_root);
+        lv_obj_set_pos(tn_cont, x, NAME_TOP);
+        lv_obj_set_size(tn_cont, CH_W, NAME_H);
+        lv_obj_set_style_bg_opa(tn_cont, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(tn_cont, 0, 0);
+        lv_obj_clear_flag(tn_cont, LV_OBJ_FLAG_SCROLLABLE);
+        s_trackname[i] = lv_label_create(tn_cont);
+        lv_label_set_text(s_trackname[i], "---");
+        lv_obj_set_style_text_color(s_trackname[i], lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_text_font(s_trackname[i], &lv_font_montserrat_14, 0);
+        lv_obj_center(s_trackname[i]);
 
+        // panorama (arco)
         s_arc[i] = lv_arc_create(s_page_root);
-        lv_obj_set_pos(s_arc[i],
-                       PANORAMA_X + (PANORAMA_W - 40) / 2,
-                       y + (CH_H - 40) / 2);
-        lv_obj_set_size(s_arc[i], 40, 40);
+        lv_obj_set_pos(s_arc[i], x + (CH_W - PAN_SZ) / 2, PAN_TOP);
+        lv_obj_set_size(s_arc[i], PAN_SZ, PAN_SZ);
         lv_arc_set_range(s_arc[i], -100, 100);
         lv_arc_set_value(s_arc[i], 0);
         lv_arc_set_bg_angles(s_arc[i], 135, 405);
@@ -161,7 +154,6 @@ lv_obj_add_event_cb(s_fader[i], [](lv_event_t* e) {
         lv_obj_set_style_arc_width(s_arc[i], 4, LV_PART_INDICATOR);
         lv_obj_set_style_opa(s_arc[i], LV_OPA_TRANSP, LV_PART_KNOB);
         lv_obj_remove_flag(s_arc[i], LV_OBJ_FLAG_CLICKABLE);
-        set_rotated(s_arc[i]);
 
         s_arc_lbl[i] = lv_label_create(s_arc[i]);
         lv_label_set_text(s_arc_lbl[i], "C");
@@ -169,28 +161,10 @@ lv_obj_add_event_cb(s_fader[i], [](lv_event_t* e) {
         lv_obj_set_style_text_font(s_arc_lbl[i], &lv_font_montserrat_12, 0);
         lv_obj_center(s_arc_lbl[i]);
 
-        s_mute[i] = lv_obj_create(s_page_root);
-        lv_obj_set_pos(s_mute[i], MUTE_X + 4, y + 4);
-        lv_obj_set_size(s_mute[i], MUTE_W - 8, CH_H - 8);
-        lv_obj_set_style_bg_color(s_mute[i], lv_color_hex(COL_MUTE_OFF), 0);
-        lv_obj_set_style_border_width(s_mute[i], 0, 0);
-        lv_obj_set_style_radius(s_mute[i], 6, 0);
-        lv_obj_clear_flag(s_mute[i], LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_add_flag(s_mute[i], LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_t* mute_lbl = lv_label_create(s_mute[i]);
-        lv_label_set_text(mute_lbl, "M");
-        lv_obj_set_style_text_color(mute_lbl, lv_color_hex(0xFFFFFF), 0);
-        lv_obj_center(mute_lbl);
-        set_rotated(mute_lbl);
-        lv_obj_add_event_cb(s_mute[i], [](lv_event_t* e) {
-            int ch = (int)(intptr_t)lv_event_get_user_data(e);
-            byte msg[3] = { 0x90, (uint8_t)(0x10 + ch), 127 };
-            sendMIDIBytes(msg, 3);
-        }, LV_EVENT_CLICKED, (void*)(intptr_t)i);
-
+        // AUTOMODE
         s_automode[i] = lv_obj_create(s_page_root);
-        lv_obj_set_pos(s_automode[i], AUTOMODE_X + 4, y + 4);
-        lv_obj_set_size(s_automode[i], AUTOMODE_W - 8, CH_H - 8);
+        lv_obj_set_pos(s_automode[i], x + 8, AUTO_TOP);
+        lv_obj_set_size(s_automode[i], CH_W - 16, AUTO_H);
         lv_obj_set_style_bg_color(s_automode[i], lv_color_hex(COL_AUTO_READ), 0);
         lv_obj_set_style_border_width(s_automode[i], 0, 0);
         lv_obj_set_style_radius(s_automode[i], 6, 0);
@@ -200,7 +174,6 @@ lv_obj_add_event_cb(s_fader[i], [](lv_event_t* e) {
         lv_label_set_text(s_automode_lbl[i], "R");
         lv_obj_set_style_text_color(s_automode_lbl[i], lv_color_hex(0xFFFFFF), 0);
         lv_obj_center(s_automode_lbl[i]);
-        set_rotated(s_automode_lbl[i]);
         lv_obj_add_event_cb(s_automode[i], [](lv_event_t* e) {
             int ch = (int)(intptr_t)lv_event_get_user_data(e);
             s_automode_state[ch] = (s_automode_state[ch] + 1) % 4;
@@ -208,18 +181,24 @@ lv_obj_add_event_cb(s_fader[i], [](lv_event_t* e) {
             sendMIDIBytes(msg, 3);
         }, LV_EVENT_CLICKED, (void*)(intptr_t)i);
 
-        lv_obj_t* tn_cont = lv_obj_create(s_page_root);
-        lv_obj_set_pos(tn_cont, TRACKNAME_X, y);
-        lv_obj_set_size(tn_cont, TRACKNAME_W, CH_H);
-        lv_obj_set_style_bg_opa(tn_cont, LV_OPA_TRANSP, 0);
-        lv_obj_set_style_border_width(tn_cont, 0, 0);
-        lv_obj_clear_flag(tn_cont, LV_OBJ_FLAG_SCROLLABLE);
-        s_trackname[i] = lv_label_create(tn_cont);
-        lv_label_set_text(s_trackname[i], "---");
-        lv_obj_set_style_text_color(s_trackname[i], lv_color_hex(0xFFFFFF), 0);
-        lv_obj_set_style_text_font(s_trackname[i], &lv_font_montserrat_14, 0);
-        lv_obj_center(s_trackname[i]);
-        set_rotated(s_trackname[i]);
+        // MUTE
+        s_mute[i] = lv_obj_create(s_page_root);
+        lv_obj_set_pos(s_mute[i], x + 8, MUTE_TOP);
+        lv_obj_set_size(s_mute[i], CH_W - 16, MUTE_H);
+        lv_obj_set_style_bg_color(s_mute[i], lv_color_hex(COL_MUTE_OFF), 0);
+        lv_obj_set_style_border_width(s_mute[i], 0, 0);
+        lv_obj_set_style_radius(s_mute[i], 6, 0);
+        lv_obj_clear_flag(s_mute[i], LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_flag(s_mute[i], LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_t* mute_lbl = lv_label_create(s_mute[i]);
+        lv_label_set_text(mute_lbl, "M");
+        lv_obj_set_style_text_color(mute_lbl, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_center(mute_lbl);
+        lv_obj_add_event_cb(s_mute[i], [](lv_event_t* e) {
+            int ch = (int)(intptr_t)lv_event_get_user_data(e);
+            byte msg[3] = { 0x90, (uint8_t)(0x10 + ch), 127 };
+            sendMIDIBytes(msg, 3);
+        }, LV_EVENT_CLICKED, (void*)(intptr_t)i);
     }
 
     needsButtonsRedraw = true;

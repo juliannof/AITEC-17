@@ -1,5 +1,50 @@
 # iMakie — ESP32-P4 Master MCU
 
+> ⚠️ **Placa actual: JC1060P470C.** La especificación de más abajo describe la placa
+> ANTIGUA `JC4880P443C` (480×800, ST7701S, NeoTrellis). La placa en uso es la
+> **JC1060P470C**: ESP32-P4 + display **JD9165 MIPI-DSI 1024×600 landscape nativo** +
+> touch **GT911**, **sin NeoTrellis**.
+
+---
+
+## Migración JC4880P433C → JC1060P470C (2026-06-10)
+
+**Estado:** display + touch **funcionando**, UI completa migrada a **landscape 1024×600**.
+
+Referencia (fuente de verdad de pines y driver): demo del fabricante **`JC1060P470C_I_W`**
+(Arduino, LVGL v9).
+
+### Pines (`src/config.h`)
+- **Display JD9165**: `LCD_RST=27`, `LCD_BL=23`, 1024×600 landscape nativo.
+- **Touch GT911**: `SDA=7`, `SCL=8`, `RST=NC`, `INT=NC`, addr `0x5D`, **`I2C_NUM_1`** (`i2c_new_master_bus`).
+
+### Driver del display — lo crítico
+El `esp_lcd_jd9165` de **esp-iot-solution NO sirve** para este panel: init genérico
+(`0x11/0x29`) y timing distinto. Hay que usar el del **demo del fabricante**
+(`src/lcd/esp_lcd_jd9165.c/.h`), que trae:
+- Secuencia de init **real** del panel (~50 comandos).
+- `lane_bit_rate = 550` (no 750).
+- `dpi_clock = 56 MHz`, hsync `40/160/160`, vsync `10/23/12`, `num_fbs = 1`.
+
+> Con el driver equivocado, el panel **enciende (backlight) pero no pinta**. Fue la causa
+> raíz del "iluminado en negro".
+
+### Trampas / lecciones aprendidas
+- `idf_component.yml` **NO se procesa** con `framework=arduino` puro → drivers **vendorizados** en `src/` (incluir con ruta, p.ej. `"lcd/esp_lcd_jd9165.h"`).
+- Las macros `JD9165_*_CONFIG()` son **C99** → en C++ rellenar las structs a mano respetando el **orden de declaración** de los campos:
+  - `esp_lcd_dpi_panel_config_t`: `virtual_channel` primero.
+  - `esp_lcd_video_timing_t`: `h_size, v_size, hsync_pw, hsync_bp, hsync_fp, vsync_pw, vsync_bp, vsync_fp`.
+  - `jd9165_vendor_config_t` **no** tiene campo `.flags`.
+- **`I2C_NUM_0`** lo usa Wire del core → usar **`I2C_NUM_1`** para el touch.
+- UI portrait→landscape: quitar todas las `transform_rotation(900)` y recolocar en 1024×600
+  (header arriba `HEADER_H=88`, 8 canales en columnas `CH_W=128`, área `CONTENT_H=512`).
+
+### Pendiente
+- **Arranque sin monitor**: el informe del core (`CORE_DEBUG_LEVEL=5`) bloquea el USB-CDC hasta que un host abre el puerto.
+- Eliminar el subproyecto legado `P4_JC4880P433C` tras la validación final.
+
+---
+
 Master Mackie Control Universal (MCU) para Logic Pro. Controla 9 tracks S2 locales vía RS485 bus A, display IPS táctil 480×800, y matriz NeoTrellis 4×8.
 
 **Placa de desarrollo:** GUITION ESP32-P4 Capacitive Touch IPS 4.3"  

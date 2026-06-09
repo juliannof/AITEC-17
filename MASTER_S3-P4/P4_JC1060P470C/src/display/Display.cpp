@@ -221,8 +221,9 @@ lv_obj_clear_flag(s_root, LV_OBJ_FLAG_SCROLL_CHAIN_VER);  // ← añadir
 
 // ── Content area — padre de todas las páginas ────────────────────
 s_content_area = lv_obj_create(s_root);
-lv_obj_set_pos(s_content_area, 0, 0);
-lv_obj_set_size(s_content_area, HEADER_X, P4_H);
+// área de canales: bajo la franja del header (landscape 1024×512) (2026-06-09)
+lv_obj_set_pos(s_content_area, 0, CONTENT_Y);
+lv_obj_set_size(s_content_area, P4_W, CONTENT_H);
 lv_obj_set_style_pad_all(s_content_area, 0, 0);
 lv_obj_set_style_border_width(s_content_area, 0, 0);
 lv_obj_set_style_bg_color(s_content_area, lv_color_hex(COL_BG), 0);

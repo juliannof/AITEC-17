@@ -79,7 +79,7 @@ void uiPage1Create(lv_obj_t* parent) {
     log_i("[UIPage1] Create start, parent=%p", parent);
     s_page = lv_obj_create(parent);
     lv_obj_set_pos(s_page, 0, 0);
-    lv_obj_set_size(s_page, HEADER_X, P4_H);
+    lv_obj_set_size(s_page, P4_W, CONTENT_H);   // landscape, llena el content_area
     lv_obj_set_style_pad_all(s_page, 0, 0);
     lv_obj_set_style_border_width(s_page, 0, 0);
     lv_obj_set_style_bg_color(s_page, lv_color_hex(COL_BG), 0);
@@ -91,15 +91,15 @@ void uiPage1Create(lv_obj_t* parent) {
     lv_obj_clear_flag(s_page, LV_OBJ_FLAG_SCROLL_CHAIN_VER);
     lv_obj_add_flag(s_page, LV_OBJ_FLAG_CLICKABLE);
 
-    // En portrait: X=filas(4), Y=columnas(8)
-    int32_t cell_x = HEADER_X / P1_ROWS;   // ~102px — eje X portrait = filas landscape
-    int32_t cell_y = P4_H     / P1_COLS;   // 100px  — eje Y portrait = columnas landscape
-    int32_t btn_w  = cell_x - P1_BTN_MARGIN * 2;
-    int32_t btn_h  = cell_y - P1_BTN_MARGIN * 2;
+    // Landscape: 8 columnas × 4 filas
+    int32_t cell_w = P4_W      / P1_COLS;   // 128px
+    int32_t cell_h = CONTENT_H / P1_ROWS;   // 128px
+    int32_t btn_w  = cell_w - P1_BTN_MARGIN * 2;
+    int32_t btn_h  = cell_h - P1_BTN_MARGIN * 2;
 
     for (int i = 0; i < P1_BTN_COUNT; i++) {
-        int col = i % P1_COLS;   // 0-7 → eje Y portrait
-        int row = i / P1_COLS;   // 0-3 → eje X portrait
+        int col = i % P1_COLS;   // 0-7
+        int row = i / P1_COLS;   // 0-3
 
         uint8_t ci = BTN_COLOR_IDX[i];
         s_colActive[i]   = lv_color_hex(PALETTE_HEX[ci]);
@@ -107,8 +107,8 @@ void uiPage1Create(lv_obj_t* parent) {
 
         lv_obj_t* btn = lv_obj_create(s_page);
         lv_obj_set_pos(btn,
-               (P1_ROWS - 1 - row) * cell_x + P1_BTN_MARGIN,  // ← invertir filas
-               col * cell_y + P1_BTN_MARGIN);
+               col * cell_w + P1_BTN_MARGIN,
+               row * cell_h + P1_BTN_MARGIN);
         lv_obj_set_size(btn, btn_w, btn_h);
         lv_obj_set_style_radius(btn, P1_RADIUS, 0);
         lv_obj_set_style_border_width(btn, 1, 0);
@@ -123,10 +123,6 @@ void uiPage1Create(lv_obj_t* parent) {
         lv_label_set_long_mode(lbl, LV_LABEL_LONG_CLIP);
         lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
         lv_obj_center(lbl);
-        // Rotar etiqueta para que sea legible en landscape
-        lv_obj_set_style_transform_rotation(lbl, 900, 0);
-        lv_obj_set_style_transform_pivot_x(lbl, LV_PCT(50), 0);
-        lv_obj_set_style_transform_pivot_y(lbl, LV_PCT(50), 0);
 
         lv_obj_add_event_cb(btn, btn_event_cb, LV_EVENT_PRESSED,  (void*)(intptr_t)i);
         lv_obj_add_event_cb(btn, btn_event_cb, LV_EVENT_RELEASED, (void*)(intptr_t)i);
@@ -137,8 +133,8 @@ void uiPage1Create(lv_obj_t* parent) {
         applyButtonState(i, false);
     }
 
-    log_i("[UIPage1] Creada: cell_x=%d cell_y=%d btn=%dx%d",
-          (int)cell_x, (int)cell_y, (int)btn_w, (int)btn_h);
+    log_i("[UIPage1] Creada: cell_w=%d cell_h=%d btn=%dx%d",
+          (int)cell_w, (int)cell_h, (int)btn_w, (int)btn_h);
 }
 
 void uiPage1UpdateButton(int index, bool active) {

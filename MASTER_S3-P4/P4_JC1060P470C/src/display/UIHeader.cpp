@@ -22,8 +22,9 @@ static bool hasDigit(const char* s) {
 void uiHeaderCreate(lv_obj_t* parent) {
     // ── Strip azul ────────────────────────────────────────────────
     s_strip = lv_obj_create(parent);
-    lv_obj_set_pos(s_strip, HEADER_X, 0);
-    lv_obj_set_size(s_strip, HEADER_W, P4_H);
+    // Franja superior landscape: ancho completo × HEADER_H (2026-06-09)
+    lv_obj_set_pos(s_strip, 0, 0);
+    lv_obj_set_size(s_strip, P4_W, HEADER_H);
     lv_obj_set_style_bg_color(s_strip, lv_color_hex(COL_HEADER), 0);
     lv_obj_set_style_border_width(s_strip, 0, 0);
     lv_obj_set_style_radius(s_strip, 0, 0);
@@ -32,13 +33,14 @@ void uiHeaderCreate(lv_obj_t* parent) {
     lv_obj_set_style_shadow_width(s_strip, 15, 0);
     lv_obj_set_style_shadow_color(s_strip, lv_color_black(), 0);
     lv_obj_set_style_shadow_opa(s_strip, LV_OPA_70, 0);
-    lv_obj_set_style_shadow_offset_x(s_strip, -10, 0);
-    lv_obj_set_style_shadow_offset_y(s_strip, 0, 0);
+    lv_obj_set_style_shadow_offset_x(s_strip, 0, 0);
+    lv_obj_set_style_shadow_offset_y(s_strip, 10, 0);   // sombra hacia abajo
 
     // ── Indicador BEAT/SMPT — botón ──────────────────────────────────
 s_mode_lbl = lv_obj_create(parent);
-lv_obj_set_pos(s_mode_lbl, HEADER_X + 5, 10);
-lv_obj_set_size(s_mode_lbl, HEADER_W - 10, 30);
+// a la izquierda de la franja superior, sin rotación (2026-06-09)
+lv_obj_set_pos(s_mode_lbl, 12, (HEADER_H - 44) / 2);
+lv_obj_set_size(s_mode_lbl, 90, 44);
 lv_obj_set_style_bg_color(s_mode_lbl, lv_color_hex(0x003333), 0);
 lv_obj_set_style_border_width(s_mode_lbl, 0, 0);
 lv_obj_set_style_radius(s_mode_lbl, 4, 0);
@@ -52,13 +54,6 @@ lv_label_set_text(mode_txt,
 lv_obj_set_style_text_color(mode_txt, lv_color_hex(0x006666), 0);
 lv_obj_set_style_text_font(mode_txt, &lv_font_montserrat_12, 0);
 lv_obj_center(mode_txt);
-
-lv_obj_update_layout(parent);
-int mw = lv_obj_get_width(s_mode_lbl);
-int mh = lv_obj_get_height(s_mode_lbl);
-lv_obj_set_style_transform_rotation(s_mode_lbl, 900, 0);
-lv_obj_set_style_transform_pivot_x(s_mode_lbl, mw / 2, 0);
-lv_obj_set_style_transform_pivot_y(s_mode_lbl, mh / 2, 0);
 
 lv_obj_add_event_cb(s_mode_lbl, [](lv_event_t* e) {
     currentTimecodeMode = (currentTimecodeMode == MODE_BEATS)
@@ -87,18 +82,12 @@ lv_obj_add_event_cb(s_mode_lbl, [](lv_event_t* e) {
     lv_obj_update_layout(parent);
     int tw    = lv_obj_get_width(s_timecode);
     int th    = lv_obj_get_height(s_timecode);
-    int pos_x = HEADER_X + HEADER_W / 2 - tw / 2;
-    int pos_y = P4_H / 2 - th / 2 + 15;
+    // centrado horizontal en la franja superior, sin rotación (2026-06-09)
+    int pos_x = (P4_W - tw) / 2;
+    int pos_y = (HEADER_H - th) / 2;
 
     lv_obj_set_pos(s_tc_ghost, pos_x, pos_y);
-    lv_obj_set_style_transform_rotation(s_tc_ghost, 900, 0);
-    lv_obj_set_style_transform_pivot_x(s_tc_ghost, tw / 2, 0);
-    lv_obj_set_style_transform_pivot_y(s_tc_ghost, th / 2, 0);
-
     lv_obj_set_pos(s_timecode, pos_x, pos_y);
-    lv_obj_set_style_transform_rotation(s_timecode, 900, 0);
-    lv_obj_set_style_transform_pivot_x(s_timecode, tw / 2, 0);
-    lv_obj_set_style_transform_pivot_y(s_timecode, th / 2, 0);
 
     uiMenuInit(parent);
 }
