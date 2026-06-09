@@ -197,7 +197,6 @@ void taskCore1(void* pvParameters) {
 void setup() {
     randomSeed(esp_random());  // ← AÑADIR al principio
     Serial.begin(115200);
-    Serial.setTxTimeoutMs(0);  // no bloquear el arranque esperando al host USB-CDC (2026-06-09)
     log_i("=== BOOT P4 Master ===");
 
     // 1. LittleFS

@@ -79,7 +79,7 @@ void initDisplay() {
         .bus_id             = 0,
         .num_data_lanes     = 2,
         .phy_clk_src        = MIPI_DSI_PHY_CLK_SRC_DEFAULT,
-        .lane_bit_rate_mbps = 750,
+        .lane_bit_rate_mbps = 550,   // valor del driver del FABRICANTE para esta placa (no 750) (2026-06-09)
     };
     esp_lcd_new_dsi_bus(&bus_cfg, &dsi_bus);
 
@@ -96,18 +96,18 @@ void initDisplay() {
     esp_lcd_dpi_panel_config_t dpi_cfg = {
         .virtual_channel    = 0,
         .dpi_clk_src        = MIPI_DSI_DPI_CLK_SRC_DEFAULT,
-        .dpi_clock_freq_mhz = 50,
+        .dpi_clock_freq_mhz = 56,    // timing del FABRICANTE para esta placa (2026-06-09)
         .pixel_format       = LCD_COLOR_PIXEL_FORMAT_RGB565,
-        .num_fbs            = 2,
+        .num_fbs            = 1,
         .video_timing       = {
             .h_size            = 1024,
             .v_size            = 600,
-            .hsync_pulse_width = 20,
-            .hsync_back_porch  = 136,
+            .hsync_pulse_width = 40,
+            .hsync_back_porch  = 160,
             .hsync_front_porch = 160,
-            .vsync_pulse_width = 2,
-            .vsync_back_porch  = 12,
-            .vsync_front_porch = 20,
+            .vsync_pulse_width = 10,
+            .vsync_back_porch  = 23,
+            .vsync_front_porch = 12,
         },
         .flags = { .use_dma2d = true },
     };

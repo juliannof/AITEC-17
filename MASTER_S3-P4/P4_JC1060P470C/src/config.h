@@ -33,10 +33,7 @@
 #define LCD_RST_PIN    27
 #define LCD_BL_PIN     23
 
-// ── Touch GT911 (I2C) (2026-06-09) ──
-// RST/INT a NC (-1): así iba en la placa que funcionaba; el driver se salta la
-// secuencia de reset por GPIO y lee directo. Volver a probar 21/22 solo si se
-// confirma cableado real contra esquemático.
+// ── Touch GT911 (I2C) — como la placa pequeña: RST/INT en NC (2026-06-09) ──
 #define TOUCH_INT_PIN  -1
 #define TOUCH_RST_PIN  -1
 #define TOUCH_SDA_PIN  7
