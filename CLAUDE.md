@@ -69,7 +69,8 @@
 - **Cada MCU tiene su propio config.h**
   - `S2/S2_V1/src/config.h` — configuración S2
   - `MASTER_S3-P4/S3/iMakie-ESP32_S3_EXTENDER/src/config.h` — configuración S3
-  - `MASTER_S3-P4/P4/src/config.h` — configuración P4
+  - `MASTER_S3-P4/P4_JC1060P470C/src/config.h` — configuración P4 (placa JC1060P470C, activa)
+  - `MASTER_S3-P4/P4_JC4880P433C/src/config.h` — configuración P4 (placa JC4880P433C, legado)
 - **NUNCA asumir valores** — verificar config.h ANTES de hacer cambios
 - **NUM_SLAVES y pines GPIO están SIEMPRE en config.h**, no en memoria u otro lado
 - **Ejemplo actual (2026-05-16):**
@@ -382,7 +383,8 @@ ESP32-S3  ←→  RS485 bus B  ←→  8× ESP32-S2 (PTxx Track)
 ```
 /AITEC/
 ├── MASTER_S3-P4/
-│   ├── P4/                            ← Master MCU (ESP32-P4)
+│   ├── P4_JC1060P470C/                ← Master MCU (ESP32-P4, placa activa)
+│   ├── P4_JC4880P433C/                ← Master MCU (ESP32-P4, placa legado)
 │   ├── S3/iMakie-ESP32_S3_EXTENDER/   ← Extender (ESP32-S3)
 ├── S2/S2_V1/                          ← Slaves (ESP32-S2 ×17)
 ├── C3_PowerRelay/                     ← Proyecto separado (power control)
@@ -444,7 +446,8 @@ ESP32-S3  ←→  RS485 bus B  ←→  8× ESP32-S2 (PTxx Track)
 
 | Directorio | MCU | Rol | Compilar |
 |---|---|---|---|
-| `MASTER_S3-P4/P4/` | ESP32-P4 | Master MCU — USB-MIDI + RS485 bus A | `cd MASTER_S3-P4/P4 && pio run` |
+| `MASTER_S3-P4/P4_JC1060P470C/` | ESP32-P4 | Master MCU (placa JC1060P470C, **activo**) — USB-MIDI + RS485 bus A | `cd MASTER_S3-P4/P4_JC1060P470C && pio run` |
+| `MASTER_S3-P4/P4_JC4880P433C/` | ESP32-P4 | Master MCU (placa JC4880P433C, legado → proyecto propio) | `cd MASTER_S3-P4/P4_JC4880P433C && pio run` |
 | `MASTER_S3-P4/S3/iMakie-ESP32_S3_EXTENDER/` | ESP32-S3 | Extender — RS485 bus B (8 slaves) | `cd MASTER_S3-P4/S3/iMakie-ESP32_S3_EXTENDER && pio run` |
 | `S2/S2_V1/` | ESP32-S2 | Slave — 1 canal físico completo | `cd S2/S2_V1 && pio run` |
 
@@ -578,10 +581,14 @@ loop() {
 
 ---
 
-## Hardware P4 (master) — 📌 Ver MASTER_S3-P4/P4/README.md
+## Hardware P4 (master) — 📌 Ver MASTER_S3-P4/P4_JC1060P470C/README.md
+
+**Migración de placa (2026-06-09):** JC4880P433C → JC1060P470C.
+- `P4_JC1060P470C/` — placa activa (display JD9165 1024×600, touch GT911, sin NeoTrellis)
+- `P4_JC4880P433C/` — legado, se traslada a proyecto propio
 
 **Documentación exhaustiva:**
-→ **[MASTER_S3-P4/P4/README.md](MASTER_S3-P4/P4/README.md)** (pinout, subsistemas diferenciados)
+→ **[MASTER_S3-P4/P4_JC1060P470C/README.md](MASTER_S3-P4/P4_JC1060P470C/README.md)** (pinout, subsistemas diferenciados)
 
 **Subsistemas P4 (documentados por MCU):**
 - **Display P4:** [docs/DISPLAY_P4.md](docs/DISPLAY_P4.md)
@@ -621,8 +628,8 @@ loop() {
 
 **Compilar cada subproyecto:**
 ```bash
-# Master P4
-cd MASTER_S3-P4/P4 && pio run
+# Master P4 (placa activa JC1060P470C)
+cd MASTER_S3-P4/P4_JC1060P470C && pio run
 
 # Extender S3
 cd MASTER_S3-P4/S3/iMakie-ESP32_S3_EXTENDER && pio run
