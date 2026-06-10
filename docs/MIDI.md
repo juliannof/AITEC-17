@@ -826,6 +826,152 @@ S3 → `rs485.setAutoMode(canal_seleccionado, modo)`.
 
 ---
 
+### 4.10.1 — Tabla exhaustiva de note numbers MCU (2026-06-10 19:09)
+
+Referencia canónica de todos los botones físicos MCU y sus note numbers. Fuente: `doc/MackieControl.md` del repositorio del protocolo.
+
+**Botones de canal (por canal 1–8):**
+
+| Nota | Función |
+|------|---------|
+| 0–7 | REC/RDY Ch.1–8 |
+| 8–15 | SOLO Ch.1–8 |
+| 16–23 | MUTE Ch.1–8 |
+| 24–31 | SELECT Ch.1–8 |
+| 32–39 | V-SELECT (pulsación encoder) Ch.1–8 |
+
+**Assignment (modo V-Pots):**
+
+| Nota | Función |
+|------|---------|
+| 40 | ASSIGNMENT: TRACK |
+| 41 | ASSIGNMENT: SEND |
+| 42 | ASSIGNMENT: PAN/SURROUND |
+| 43 | ASSIGNMENT: PLUG-IN |
+| 44 | ASSIGNMENT: EQ |
+| 45 | ASSIGNMENT: INSTRUMENT |
+
+**Fader Banks:**
+
+| Nota | Función |
+|------|---------|
+| 46 | FADER BANKS: BANK Left |
+| 47 | FADER BANKS: BANK Right |
+| 48 | FADER BANKS: CHANNEL Left |
+| 49 | FADER BANKS: CHANNEL Right |
+
+**Vista y display:**
+
+| Nota | Función |
+|------|---------|
+| 50 | FLIP |
+| 51 | GLOBAL VIEW |
+| 52 | NAME/VALUE |
+| 53 | SMPTE/BEATS |
+
+**Funciones F1–F8:**
+
+| Nota | Función |
+|------|---------|
+| 54–61 | F1–F8 |
+
+**Global View (submenú):**
+
+| Nota | Función |
+|------|---------|
+| 62 | GLOBAL VIEW: MIDI TRACKS |
+| 63 | GLOBAL VIEW: INPUTS |
+| 64 | GLOBAL VIEW: AUDIO TRACKS |
+| 65 | GLOBAL VIEW: AUDIO INSTRUMENT |
+| 66 | GLOBAL VIEW: AUX |
+| 67 | GLOBAL VIEW: BUSSES |
+| 68 | GLOBAL VIEW: OUTPUTS |
+| 69 | GLOBAL VIEW: USER |
+
+**Modificadores:**
+
+| Nota | Función |
+|------|---------|
+| 70 | SHIFT |
+| 71 | OPTION |
+| 72 | CONTROL |
+| 73 | CMD/ALT |
+
+**Automation:**
+
+| Nota | Función |
+|------|---------|
+| 74 | AUTOMATION: READ/OFF |
+| 75 | AUTOMATION: WRITE |
+| 76 | AUTOMATION: TRIM |
+| 77 | AUTOMATION: TOUCH |
+| 78 | AUTOMATION: LATCH |
+
+**Utilities:**
+
+| Nota | Función |
+|------|---------|
+| 79 | GROUP |
+| 80 | UTILITIES: SAVE |
+| 81 | UTILITIES: UNDO |
+| 82 | UTILITIES: CANCEL |
+| 83 | UTILITIES: ENTER |
+
+**Edición:**
+
+| Nota | Función |
+|------|---------|
+| 84 | MARKER |
+| 85 | NUDGE |
+| 86 | CYCLE |
+| 87 | DROP |
+| 88 | REPLACE |
+| 89 | CLICK |
+| 90 | SOLO (global) |
+
+**Transporte:**
+
+| Nota | Función |
+|------|---------|
+| 91 | REWIND |
+| 92 | FAST FWD |
+| 93 | STOP |
+| 94 | PLAY |
+| 95 | RECORD |
+
+**Cursor y Jog:**
+
+| Nota | Función |
+|------|---------|
+| 96 | CURSOR UP |
+| 97 | CURSOR DOWN |
+| 98 | CURSOR LEFT |
+| 99 | CURSOR RIGHT |
+| 100 | ZOOM |
+| 101 | SCRUB |
+| 102 | USER SWITCH A |
+| 103 | USER SWITCH B |
+
+**Fader Touch (detección táctil — solo salida superficie → DAW):**
+
+| Nota | Función |
+|------|---------|
+| 104–111 | FADER TOUCH Ch.1–8 |
+| 112 | FADER TOUCH MASTER |
+
+**LEDs de estado (solo salida DAW → superficie):**
+
+| Nota | Función |
+|------|---------|
+| 113 | SMPTE LED |
+| 114 | BEATS LED |
+| 115 | RUDE SOLO LIGHT |
+| 116 | RELAY CLICK |
+
+> **Sobre SHIFT:** el protocolo MCU no define un layer Shift a nivel de nota. La nota 70 (SHIFT) es un Note On/Off normal que Logic recibe y gestiona internamente. El firmware P4 puede gestionar Shift localmente (ver §9) sin enviar nota 70 a Logic, o puede reenviarlo y dejar que Logic maneje el doble función.
+
+---
+
 ### 4.11 Fader Touch Sense (SysEx 0x0A)
 
 ```
@@ -961,3 +1107,81 @@ rs485.setTrackName(t + 1, nameBufs[t]);
 - `docs/FADER.md` — Rango ADC S2, calibración, mapeo
 - `src/midi/MIDIProcessor.cpp` — Implementación completa
 - `src/config.h` — `DEVICE_FAMILY`, `DISCONNECT_THRESHOLD`, `CONNECT_GRACE_MS`
+
+---
+
+## 9. IMPLEMENTACIÓN P4 — PÁGINAS DE BOTONES (2026-06-10 19:09)
+
+El P4 organiza sus 32 botones físicos en páginas (PG1, PG2). Cada botón envía una nota MCU en modo normal; en modo Shift (botón 26), puede enviar una nota diferente gestionada localmente en firmware.
+
+### 9.1 Enfoque Shift — Local en firmware P4
+
+El Shift **no se envía a Logic** (nota 70 nunca sale al DAW). El firmware P4 intercepta el estado del botón 26 y reinterpreta las notas de los demás botones cuando Shift está activo. Esto permite funciones custom no limitadas por el protocolo MCU estándar.
+
+Botones que **no cambian con Shift:** navegación (BANK/CHAN), modificadores (CTRL/OPT/CMD), ENTER, controles de página (>>PG2, >>VU).
+
+### 9.2 PG1 — Normal y Shift
+
+| Key | Label Normal | Nota Normal | Label Shift | Nota Shift | Comentario |
+|-----|-------------|-------------|-------------|------------|------------|
+| 0 | TRACK | 0x28 (40) | MIDI TRK | 0x3E (62) | Global View: MIDI Tracks |
+| 1 | PAN | 0x2A (42) | INPUTS | 0x3F (63) | Global View: Inputs |
+| 2 | EQ | 0x2C (44) | AUDIO TR | 0x40 (64) | Global View: Audio Tracks |
+| 3 | SEND | 0x29 (41) | AUD INS | 0x41 (65) | Global View: Audio Instrument |
+| 4 | PLUG | 0x2B (43) | AUX | 0x42 (66) | Global View: Aux |
+| 5 | INST | 0x2D (45) | BUSSES | 0x43 (67) | Global View: Busses |
+| 6 | FLIP | 0x32 (50) | OUTPUTS | 0x44 (68) | Global View: Outputs |
+| 7 | GLOB | 0x33 (51) | USER | 0x45 (69) | Global View: User |
+| 8 | READ | 0x4A (74) | GROUP | 0x4F (79) | Utilities: Group |
+| 9 | WRIT | 0x4B (75) | CANCEL | 0x52 (82) | Utilities: Cancel |
+| 10 | TCH | 0x4D (77) | DROP | 0x57 (87) | Drop |
+| 11 | LTCH | 0x4E (78) | REPLACE | 0x58 (88) | Replace |
+| 12 | TRIM | 0x4C (76) | CLICK | 0x59 (89) | Metrónomo |
+| 13 | OFF | 0x4F (79) | CYCLE | 0x56 (86) | Cycle/Loop |
+| 14 | SOLO0 | 0x57 (87) | SCRUB | 0x65 (101) | Scrub |
+| 15 | SMPT | 0x35 (53) | NAME/VAL | 0x34 (52) | Name/Value toggle |
+| 16 | ZOOM | 0x64 (100) | ZOOM | 0x64 (100) | Sin cambio |
+| 17 | SCRUB | 0x65 (101) | SCRUB | 0x65 (101) | Sin cambio |
+| 18 | NUDGE | 0x55 (85) | NUDGE | 0x55 (85) | Sin cambio |
+| 19 | MARK | 0x54 (84) | MARK | 0x54 (84) | Sin cambio |
+| 20 | CHAN< | 0x30 (48) | CHAN< | 0x30 (48) | Navegación — sin cambio |
+| 21 | CHAN> | 0x31 (49) | CHAN> | 0x31 (49) | Navegación — sin cambio |
+| 22 | BANK< | 0x2E (46) | BANK< | 0x2E (46) | Navegación — sin cambio |
+| 23 | BANK> | 0x2F (47) | BANK> | 0x2F (47) | Navegación — sin cambio |
+| 24 | UNDO | 0x51 (81) | REDO | 0x00 | Sin nota MCU para REDO — acción local o vacío |
+| 25 | SAVE | 0x50 (80) | SAVE AS | 0x00 | Sin nota MCU estándar — pendiente decidir |
+| 26 | SHIFT | — | — | — | Modificador puro — no envía nota |
+| 27 | CTRL | 0x48 (72) | CTRL | 0x48 (72) | Modificador — igual |
+| 28 | OPT | 0x47 (71) | OPT | 0x47 (71) | Modificador — igual |
+| 29 | CMD | 0x49 (73) | CMD | 0x49 (73) | Modificador — igual |
+| 30 | ENTER | 0x53 (83) | ENTER | 0x53 (83) | Igual |
+| 31 | >>PG2 | — | — | — | Control de página — no envía nota |
+
+### 9.3 PG2 — Normal y Shift
+
+| Key | Label Normal | Nota Normal | Label Shift | Nota Shift | Comentario |
+|-----|-------------|-------------|-------------|------------|------------|
+| 0–7 | F1–F8 | 0x36–0x3D | F1–F8 | igual | Sin cambio |
+| 8–15 | F9–F16 | 0x3E–0x45 | F9–F16 | igual | Sin cambio |
+| 16 | ZOOM | 0x64 | ZOOM | 0x64 | Sin cambio |
+| 17 | SCRUB | 0x65 | SCRUB | 0x65 | Sin cambio |
+| 18 | NUDGE | 0x55 | NUDGE | 0x55 | Sin cambio |
+| 19 | MARK | 0x54 | MARK | 0x54 | Sin cambio |
+| 20 | CHAN< | 0x30 | CHAN< | 0x30 | Sin cambio |
+| 21 | CHAN> | 0x31 | CHAN> | 0x31 | Sin cambio |
+| 22 | BANK< | 0x2E | BANK< | 0x2E | Sin cambio |
+| 23 | BANK> | 0x2F | BANK> | 0x2F | Sin cambio |
+| 24 | TRIM | 0x4C | GROUP | 0x4F | Reasignado en Shift |
+| 25 | SAVE | 0x50 | CANCEL | 0x52 | Reasignado en Shift |
+| 26 | SHIFT | — | — | — | Modificador puro |
+| 27 | CTRL | 0x48 | CTRL | 0x48 | Igual |
+| 28 | OPT | 0x47 | OPT | 0x47 | Igual |
+| 29 | CMD | 0x49 | CMD | 0x49 | Igual |
+| 30 | ENTER | 0x52 | ENTER | 0x52 | Igual |
+| 31 | >>VU | — | — | — | Control de página |
+
+### 9.4 Pendientes de decisión
+
+- **UNDO shift (PG1 key 24):** MCU no tiene nota para REDO. Opciones: `0x00` (sin acción), o reutilizar una F-key libre. Decisión pendiente.
+- **SAVE shift (PG1 key 25):** Sin nota MCU estándar para "Save As". Misma decisión.
+- **F9–F16 (PG2 keys 8–15):** Las notas 0x3E–0x45 solapan con el submenú Global View. En PG2 se usan como F-keys; en PG1 shift se usan como Global View. El firmware debe distinguir según la página activa.
