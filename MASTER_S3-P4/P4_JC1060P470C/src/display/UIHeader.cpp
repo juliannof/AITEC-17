@@ -52,7 +52,7 @@ lv_obj_t* mode_txt = lv_label_create(s_mode_lbl);
 lv_label_set_text(mode_txt,
                   (currentTimecodeMode == MODE_BEATS) ? "BEAT" : "SMPT");
 lv_obj_set_style_text_color(mode_txt, lv_color_hex(0x00FFFF), 0);
-lv_obj_set_style_text_font(mode_txt, &lv_font_montserrat_24, 0);
+lv_obj_set_style_text_font(mode_txt, &lv_font_montserrat_20, 0);
 lv_obj_center(mode_txt);
 
     // ── Timecode ghost + real ─────────────────────────────────────
