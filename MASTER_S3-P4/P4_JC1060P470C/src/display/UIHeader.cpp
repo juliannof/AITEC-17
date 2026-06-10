@@ -58,11 +58,19 @@ lv_obj_center(mode_txt);
 lv_obj_add_event_cb(s_mode_lbl, [](lv_event_t* e) {
     currentTimecodeMode = (currentTimecodeMode == MODE_BEATS)
                           ? MODE_SMPTE : MODE_BEATS;
+    bool isBeats = (currentTimecodeMode == MODE_BEATS);
+
     lv_obj_t* btn = (lv_obj_t*)lv_event_get_target(e);
     lv_obj_t* lbl = lv_obj_get_child(btn, 0);
-    lv_label_set_text(lbl,
-                      (currentTimecodeMode == MODE_BEATS) ? "BEAT" : "SMPT");
-    needsTimecodeRedraw = true;
+    lv_label_set_text(lbl, isBeats ? "BEAT" : "SMPT");
+
+    // actualizar ghost y timecode inmediatamente, sin pasar por throttle/hasDigit
+    if (s_tc_ghost)
+        lv_label_set_text(s_tc_ghost, isBeats ? "0. 0. 0.  000" : "00:00:00: 00");
+    if (s_timecode) {
+        String txt = isBeats ? formatBeatString() : formatTimecodeString();
+        lv_label_set_text(s_timecode, txt.c_str());
+    }
 }, LV_EVENT_CLICKED, NULL);
 
     // ── Timecode ghost + real ─────────────────────────────────────

@@ -173,9 +173,12 @@ void taskCore1(void* pvParameters) {
             else                         uiPage3Update();
         }
 
-        lv_tick_inc(10);
+        static uint32_t lastTick = 0;
+        uint32_t nowMs = (uint32_t)(esp_timer_get_time() / 1000);
+        lv_tick_inc(lastTick ? nowMs - lastTick : 10);
+        lastTick = nowMs;
         lv_task_handler();
-        vTaskDelay(pdMS_TO_TICKS(10));
+        vTaskDelay(pdMS_TO_TICKS(5));
     }
     static unsigned long lastStatusLog = 0;
     // Log de estado cada 2 segundos
