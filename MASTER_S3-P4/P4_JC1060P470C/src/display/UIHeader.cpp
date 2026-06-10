@@ -38,10 +38,10 @@ void uiHeaderCreate(lv_obj_t* parent) {
 
     // ── Indicador BEAT/SMPT — read-only, controlado por Logic vía note 113/114 ──
 s_mode_lbl = lv_obj_create(parent);
-lv_obj_set_pos(s_mode_lbl, 12, (HEADER_H - 44) / 2);
-lv_obj_set_size(s_mode_lbl, 90, 44);
+lv_obj_set_pos(s_mode_lbl, 12, (HEADER_H - 30) / 2);
+lv_obj_set_size(s_mode_lbl, 68, 30);
 lv_obj_set_style_bg_opa(s_mode_lbl, LV_OPA_TRANSP, 0);
-lv_obj_set_style_border_width(s_mode_lbl, 2, 0);
+lv_obj_set_style_border_width(s_mode_lbl, 1, 0);
 lv_obj_set_style_border_color(s_mode_lbl, lv_color_hex(0x00FFFF), 0);
 lv_obj_set_style_radius(s_mode_lbl, 4, 0);
 lv_obj_set_style_pad_all(s_mode_lbl, 0, 0);
