@@ -237,22 +237,40 @@ String formatTimecodeString() {
 }
 
 String formatBeatString() {
-    char formatted[14];
-    int pos = 0;
+    // Mackie MCU BEATS: posiciones fijas en buffer de 10 chars
+    // [0-3]=barras(4) [4]=beat(1) [5]=subdiv(1) [6-8]=ticks(3)
+    // Resultado: 12 chars "0000.0.0.000", right-align por bloque
+
+    bool anyDigit = false;
     for (int i = 0; i < 10; i++) {
-        byte b = beatsChars_clean[i];
-        char c = b & 0x7F;
-        if (c == 0 || c < 32) c = '.';
-        if (c == ';') c = '.';
-        formatted[pos++] = c;
-        if (b & 0x80) formatted[pos++] = '.';
+        char c = beatsChars_clean[i] & 0x7F;
+        if (c >= '0' && c <= '9') { anyDigit = true; break; }
     }
-    formatted[pos] = '\0';
-    String result = String(formatted);
-    result.trim();
-    if (result.length() == 0) return "  1.  1.  1.  1";
-    while ((int)result.length() < 13) result += " ";
-    return result;
+    if (!anyDigit) return "   1. 1. 1.  1";
+
+    const int starts[4] = {0, 4, 5, 6};
+    const int counts[4] = {4, 1, 1, 3};
+    const int widths[4] = {4, 1, 1, 3};
+
+    char result[16] = {};
+    int  pos        = 0;
+
+    for (int b = 0; b < 4; b++) {
+        char tmp[8] = {};
+        int  len    = 0;
+        for (int i = starts[b]; i < starts[b] + counts[b]; i++) {
+            char c = (char)(beatsChars_clean[i] & 0x7F);
+            if (c < 32) c = ' ';
+            tmp[len++] = c;
+        }
+        char* src = tmp;
+        while (len > 0 && *src == ' ') { src++; len--; }
+        for (int p = 0; p < widths[b] - len; p++) result[pos++] = ' ';
+        for (int p = 0; p < len;             p++) result[pos++] = src[p];
+        if (b < 3) result[pos++] = '.';
+    }
+    result[pos] = '\0';
+    return String(result);
 }
 
 void processChannelPressure(byte channel, byte value) {
