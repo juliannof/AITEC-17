@@ -36,9 +36,8 @@ void uiHeaderCreate(lv_obj_t* parent) {
     lv_obj_set_style_shadow_offset_x(s_strip, 0, 0);
     lv_obj_set_style_shadow_offset_y(s_strip, 10, 0);   // sombra hacia abajo
 
-    // ── Indicador BEAT/SMPT — botón ──────────────────────────────────
+    // ── Indicador BEAT/SMPT — read-only, controlado por Logic vía note 113/114 ──
 s_mode_lbl = lv_obj_create(parent);
-// a la izquierda de la franja superior, sin rotación (2026-06-09)
 lv_obj_set_pos(s_mode_lbl, 12, (HEADER_H - 44) / 2);
 lv_obj_set_size(s_mode_lbl, 90, 44);
 lv_obj_set_style_bg_color(s_mode_lbl, lv_color_hex(0x003333), 0);
@@ -46,7 +45,7 @@ lv_obj_set_style_border_width(s_mode_lbl, 0, 0);
 lv_obj_set_style_radius(s_mode_lbl, 4, 0);
 lv_obj_set_style_pad_all(s_mode_lbl, 0, 0);
 lv_obj_clear_flag(s_mode_lbl, LV_OBJ_FLAG_SCROLLABLE);
-lv_obj_add_flag(s_mode_lbl, LV_OBJ_FLAG_CLICKABLE);
+lv_obj_clear_flag(s_mode_lbl, LV_OBJ_FLAG_CLICKABLE);
 
 lv_obj_t* mode_txt = lv_label_create(s_mode_lbl);
 lv_label_set_text(mode_txt,
@@ -54,24 +53,6 @@ lv_label_set_text(mode_txt,
 lv_obj_set_style_text_color(mode_txt, lv_color_hex(0x006666), 0);
 lv_obj_set_style_text_font(mode_txt, &lv_font_montserrat_12, 0);
 lv_obj_center(mode_txt);
-
-lv_obj_add_event_cb(s_mode_lbl, [](lv_event_t* e) {
-    currentTimecodeMode = (currentTimecodeMode == MODE_BEATS)
-                          ? MODE_SMPTE : MODE_BEATS;
-    bool isBeats = (currentTimecodeMode == MODE_BEATS);
-
-    lv_obj_t* btn = (lv_obj_t*)lv_event_get_target(e);
-    lv_obj_t* lbl = lv_obj_get_child(btn, 0);
-    lv_label_set_text(lbl, isBeats ? "BEAT" : "SMPT");
-
-    // actualizar ghost y timecode inmediatamente, sin pasar por throttle/hasDigit
-    if (s_tc_ghost)
-        lv_label_set_text(s_tc_ghost, isBeats ? "0. 0. 0.  000" : "00:00:00: 00");
-    if (s_timecode) {
-        String txt = isBeats ? formatBeatString() : formatTimecodeString();
-        lv_label_set_text(s_timecode, txt.c_str());
-    }
-}, LV_EVENT_CLICKED, NULL);
 
     // ── Timecode ghost + real ─────────────────────────────────────
     const char* init_text = (currentTimecodeMode == MODE_BEATS)
@@ -108,16 +89,20 @@ void uiHeaderUpdate() {
     lastRedraw = now;
     needsTimecodeRedraw = false;
     if (!s_timecode || !s_tc_ghost) return;
+
+    bool isBeats = (currentTimecodeMode == MODE_BEATS);
+
+    // actualizar indicador de modo
+    if (s_mode_lbl) {
+        lv_obj_t* lbl = lv_obj_get_child(s_mode_lbl, 0);
+        if (lbl) lv_label_set_text(lbl, isBeats ? "BEAT" : "SMPT");
+    }
+
     if (!hasDigit(timeCodeChars_clean)) return;
 
-    String displayText = (currentTimecodeMode == MODE_BEATS)
-                         ? formatBeatString()
-                         : formatTimecodeString();
+    String displayText = isBeats ? formatBeatString() : formatTimecodeString();
     lv_label_set_text(s_timecode, displayText.c_str());
-    lv_label_set_text(s_tc_ghost,
-                      (currentTimecodeMode == MODE_BEATS)
-                      ? "0. 0. 0.  000"
-                      : "00:00:00: 00");
+    lv_label_set_text(s_tc_ghost, isBeats ? "0. 0. 0.  000" : "00:00:00: 00");
 }
 
 void uiHeaderDestroy() {
