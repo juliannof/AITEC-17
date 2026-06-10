@@ -13,6 +13,7 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 |-----------|-------|-------|
 | 🟢 Baja | **OTA WiFi S2** — ✅ validado hardware (2026-05-26) | OTA funcional en 4 faders. Flashear provisioning + firmware. Ver `docs/WIFI-OTA.md`. |
 | 🔴 **VALIDACIÓN HW** | **Fader S2→Logic + detección usuario** — auditado 2026-05-25, listo para flash | S3: mapeo calibrado, jerarquía master, sync guard. S2: detección dirección en MOVING_TO_TARGET. Commits `6f6ace6` + `d171b12`. Firmware verificado en código — pendiente flash y test en hardware. |
+| 🟡 Media | **P4: botón BOUNCE — PG2 key 8, nota 0x3E (62)** | Decisión tomada 2026-06-10. Pendiente: (1) actualizar `config.h` P4 label "BOUNCE"; (2) configurar Logic Pro Key Commands → MIDI Learn nota 62 → "Bounce Project or Mix…". Ver CHANGELOG 2026-06-10 19:09 y `docs/MIDI.md` §9.3. |
 | 🟢 Baja | Añadir partición `coredump` (64K) en tablas de particiones S2/S3 | `E (112) esp_core_dump_flash: No core dump partition found!` al boot — solo estético, no bloquea operación |
 | 🟢 Baja | Optimización tráfico MIDI PitchBend (`DEADBAND=150`) | Reducir mensajes redundantes S2→Logic |
 | 🟡 Media | **Protocolo de cierre Logic — GoOffline limpio en P4 y S3** | Observado en captura 2026-05-24: handshake de arranque tiene 3 reintentos en S3 (~3s). El cierre de Logic (GoOffline + desconexión USB) no está validado ni documentado. Implementar secuencia `0x0F` → reset de estados → faders a 0 → LED off, limpia en ambos MCU. Ver `docs/MIDI.md` sección 3.4. |
@@ -24,6 +25,42 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 | 🔴 Alta | **ADS1115 no lineal — ADC=225 en posición física media (esperado ~13500) (2026-05-30)** | Con `GAIN_ONE` + pot lineal 3.3V, mid-travel debería dar ~13200 ADC counts. En test real: bottom=27, mid=225, top=22795. La respuesta es casi logarítmica (bottom 0.87% del rango total en mid-travel). Causa posible: (1) potenciómetro logarítmico (audio taper) en lugar de lineal — hardware no modificable; (2) carga resistiva externa; (3) wiring inusual. **Impacto:** en AUTO_READ, Logic envía target=X que S3 mapea linealmente al rango calibrado, pero el fader físico en esa posición ADC no corresponde visualmente. Motores pueden buscar posiciones que parecen incorrectas al ojo. **Fix pendiente:** diagnóstico físico (medir resistencia pot en mid-travel) o compensación logarítmica en el mapeo S3→ADC si la no-linealidad es reproducible. |
 | 🟡 Media | **Calibración mismatch — calibratedMin=168 vs ADC físico min=27 (2026-05-30)** | S3 guardó calibratedMin=168 en la sesión de test (motor paró antes del tope físico durante GOING_TO_MIN). El fader físico llega hasta ADC=27. En AUTO_READ con Logic en fondo: S3 manda target=168, motor busca 168, fader en 27 → motor buzzea contra tope. **Fix:** forzar recalibración limpia con slave correcto (ID1/ID2) conectado. Puede ser síntoma del bug de nonlinealidad + motor que no llega al tope físico real. |
 | 🟡 Media | **P4: `_calibPendingFrom` no se resetea en GoOffline (2026-05-27)** | `MIDIProcessor.cpp case 0x0F`: reset de estado no incluye `_calibPendingFrom`. Si Logic desconecta durante calibración (ej. slave 4/9 en progreso), al reconectar `tickCalibracion()` retoma desde el slave 4, salteando 1-3. La calibración del 0x21 pone `_calibPendingFrom=1` y mezcla ambas secuencias. **Fix:** añadir `_calibPendingFrom = 0;` en `case 0x0F`, `MIDIProcessor.cpp`. |
+
+---
+
+### SESIÓN 2026-06-10 — BEATS display fix + documentación botones P4 (19:09)
+
+**Fix BEATS — mapeo buffer → bloques incorrecto:**
+
+Logic Pro envía beats timecode en CC 64-73 con este layout real en `beatsChars_clean[0..9]`:
+
+```
+[0-2] = bar (3 dígitos)   [3] = separador (vacío → '0')
+[4]   = subdivisión        [5] = separador (vacío → '0')
+[6]   = beat               [7-9] = ticks (3 dígitos)
+```
+
+El código asumía `starts={0,4,5,6}` / `counts={4,1,1,3}` — incorrecto en todos los campos:
+- Bar leía 4 dígitos incluyendo separador vacío → `"0010"` en vez de `"0001"`
+- Beat leía índice 4 (subdivisión) → campo incorrecto
+- Sub leía índice 5 (separador, siempre `'0'`) → siempre mostraba cero
+- Ticks leían `[6-8]` → perdían el dígito ones en `[9]`
+
+**Fix aplicado:** `starts={0,6,4,7}` / `counts={3,1,1,3}` en `UIHeader.cpp` y `MIDIProcessor.cpp::formatBeatString()`. Verificado con dos ejemplos reales:
+- `1.1.1.1` → `0001 1 1 001` ✓
+- `1.2.3.159` → `0001 2 3 159` ✓
+
+**Documentación protocolo MCU — `docs/MIDI.md`:**
+- §4.10.1: tabla exhaustiva de los 116 note numbers MCU (todos los botones físicos de una superficie Mackie Control Universal)
+- §9: mapping P4 botones PG1/PG2 con normal y Shift local en firmware — 32 botones × 2 páginas × 2 estados
+
+**Decisión de diseño — botón BOUNCE:**
+- PG2 key 8 renombrado de `F9` a `BOUNCE` (nota `0x3E` = 62)
+- En Logic Pro: Key Commands → MIDI Learn → asignar nota 62 al comando "Bounce Project or Mix…"
+- Botón directo (sin Shift), página PG2
+- Pendiente: actualizar `config.h` P4 con el label y nota, y configurar Logic
+
+**MCU afectadas:** P4 únicamente. S2/S3 sin cambios.
 
 ---
 
