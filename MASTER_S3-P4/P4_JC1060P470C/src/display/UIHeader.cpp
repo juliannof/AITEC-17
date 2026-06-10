@@ -86,9 +86,9 @@ lv_obj_center(mode_txt);
     lv_obj_clear_flag(s_solo_lbl, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_clear_flag(s_solo_lbl, LV_OBJ_FLAG_CLICKABLE);
     { lv_obj_t* t = lv_label_create(s_solo_lbl);
-      lv_label_set_text(t, "SOLO");
+      lv_label_set_text(t, "S");
       lv_obj_set_style_text_color(t, lv_color_hex(0x006666), 0);
-      lv_obj_set_style_text_font(t, &lv_font_montserrat_14, 0);
+      lv_obj_set_style_text_font(t, &lv_font_montserrat_28, 0);
       lv_obj_center(t); }
 
     // ── Timecode ghost + real ─────────────────────────────────────
