@@ -154,9 +154,9 @@ void uiHeaderUpdate() {
     if (s_solo_lbl) {
         lv_obj_t* lbl = lv_obj_get_child(s_solo_lbl, 0);
         if (rudeSoloActive) {
-            lv_obj_set_style_bg_color(s_solo_lbl, lv_color_hex(COL_SOLO_ON), 0);
+            lv_obj_set_style_bg_color(s_solo_lbl, lv_color_hex(0x00FFFF), 0);
             lv_obj_set_style_bg_opa(s_solo_lbl, LV_OPA_COVER, 0);
-            lv_obj_set_style_border_color(s_solo_lbl, lv_color_hex(COL_SOLO_ON), 0);
+            lv_obj_set_style_border_color(s_solo_lbl, lv_color_hex(0x00FFFF), 0);
             if (lbl) lv_obj_set_style_text_color(lbl, lv_color_black(), 0);
         } else {
             lv_obj_set_style_bg_opa(s_solo_lbl, LV_OPA_TRANSP, 0);
