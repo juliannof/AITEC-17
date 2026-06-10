@@ -106,14 +106,11 @@ lv_obj_center(mode_txt);
     lv_obj_set_style_text_font(s_timecode, &lv_font_dseg7_44, 0);
 
     lv_obj_update_layout(parent);
-    int tw    = lv_obj_get_width(s_timecode);
     int th    = lv_obj_get_height(s_timecode);
-    // centrado horizontal en la franja superior, sin rotación (2026-06-09)
-    int pos_x = (P4_W - tw) / 2;
     int pos_y = (HEADER_H - th) / 2;
 
-    lv_obj_set_pos(s_tc_ghost, pos_x, pos_y);
-    lv_obj_set_pos(s_timecode, pos_x, pos_y);
+    lv_obj_align(s_tc_ghost, LV_ALIGN_TOP_MID, 0, pos_y);
+    lv_obj_align(s_timecode, LV_ALIGN_TOP_MID, 0, pos_y);
 
     uiMenuInit(parent);
 }
