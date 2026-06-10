@@ -125,6 +125,8 @@ extern bool btnStatePG1[32];
 extern bool btnStatePG2[32];
 extern bool btnFlashPG1[32];
 extern bool btnFlashPG2[32];
+extern bool rudeSoloActive;
+extern bool cycleActive;
 extern char timeCodeChars_clean[13];
 extern char beatsChars_clean[13];
 extern DisplayMode currentTimecodeMode;

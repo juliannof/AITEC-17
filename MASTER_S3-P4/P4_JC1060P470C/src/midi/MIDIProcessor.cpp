@@ -357,6 +357,8 @@ void processMackieSysEx(byte* payload, int len) {
             memset(btnFlashPG2,  0, sizeof(bool) * 32);
             memset(g_channelAutoMode, 0, sizeof(g_channelAutoMode));
             g_selectedChannel = -1;
+            rudeSoloActive = false;
+            cycleActive    = false;
             for (int i = 0; i < 9; i++) trackNames[i] = "";
             for (uint8_t i = 1; i <= NUM_SLAVES; i++) rs485.setFlags(i, 0);
             log_i("[MCU] GoOffline recibido");
@@ -514,6 +516,8 @@ void processNote(byte status, byte note, byte velocity) {
 
     if (note == 113) { if (is_on) { currentTimecodeMode = MODE_SMPTE; needsHeaderRedraw = true; needsTimecodeRedraw = true; } return; }
     if (note == 114) { if (is_on) { currentTimecodeMode = MODE_BEATS; needsHeaderRedraw = true; needsTimecodeRedraw = true; } return; }
+    if (note == 0x73) { rudeSoloActive = is_on; needsTimecodeRedraw = true; return; }
+    if (note == 0x56) { cycleActive    = is_on; needsTimecodeRedraw = true; return; }
 
     if (note <= 31) {
         int group     = note / 8;

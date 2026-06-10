@@ -40,6 +40,8 @@ bool needsButtonsRedraw  = true;
 bool needsVUMetersRedraw = true;String assignmentString  = "--";
 bool btnStatePG1[32] = {}, btnStatePG2[32] = {};
 bool btnFlashPG1[32] = {}, btnFlashPG2[32] = {};
+bool rudeSoloActive = false;
+bool cycleActive    = false;
 char timeCodeChars_clean[13] = {};
 char beatsChars_clean[13]    = {};
 DisplayMode currentTimecodeMode = MODE_BEATS;
