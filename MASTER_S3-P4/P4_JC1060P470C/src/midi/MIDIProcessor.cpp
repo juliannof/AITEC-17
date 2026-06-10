@@ -248,9 +248,9 @@ String formatBeatString() {
     }
     if (!anyDigit) return "   1. 1. 1.  1";
 
-    const int starts[4] = {0, 4, 5, 6};
-    const int counts[4] = {4, 1, 1, 3};
-    const int widths[4] = {4, 1, 1, 3};
+    const int starts[4] = {0, 6, 4, 7};
+    const int counts[4] = {3, 1, 1, 3};
+    const int widths[4] = {3, 1, 1, 3};
 
     char result[16] = {};
     int  pos        = 0;

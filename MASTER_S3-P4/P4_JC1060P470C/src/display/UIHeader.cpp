@@ -256,8 +256,8 @@ void uiHeaderUpdate() {
     if (!hasDigit(timeCodeChars_clean)) return;
 
     if (isBeats) {
-        static const int starts[4] = {0, 4, 5, 6};
-        static const int counts[4] = {4, 1, 1, 3};
+        static const int starts[4] = {0, 6, 4, 7};
+        static const int counts[4] = {3, 1, 1, 3};
         for (int b = 0; b < 4; b++) {
             if (!s_beat_real[b]) continue;
             char display[8] = {};
