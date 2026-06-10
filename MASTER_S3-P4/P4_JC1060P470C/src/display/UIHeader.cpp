@@ -40,8 +40,9 @@ void uiHeaderCreate(lv_obj_t* parent) {
 s_mode_lbl = lv_obj_create(parent);
 lv_obj_set_pos(s_mode_lbl, 12, (HEADER_H - 44) / 2);
 lv_obj_set_size(s_mode_lbl, 90, 44);
-lv_obj_set_style_bg_color(s_mode_lbl, lv_color_hex(0x003333), 0);
-lv_obj_set_style_border_width(s_mode_lbl, 0, 0);
+lv_obj_set_style_bg_opa(s_mode_lbl, LV_OPA_TRANSP, 0);
+lv_obj_set_style_border_width(s_mode_lbl, 2, 0);
+lv_obj_set_style_border_color(s_mode_lbl, lv_color_hex(0x00FFFF), 0);
 lv_obj_set_style_radius(s_mode_lbl, 4, 0);
 lv_obj_set_style_pad_all(s_mode_lbl, 0, 0);
 lv_obj_clear_flag(s_mode_lbl, LV_OBJ_FLAG_SCROLLABLE);
@@ -50,8 +51,8 @@ lv_obj_clear_flag(s_mode_lbl, LV_OBJ_FLAG_CLICKABLE);
 lv_obj_t* mode_txt = lv_label_create(s_mode_lbl);
 lv_label_set_text(mode_txt,
                   (currentTimecodeMode == MODE_BEATS) ? "BEAT" : "SMPT");
-lv_obj_set_style_text_color(mode_txt, lv_color_hex(0x006666), 0);
-lv_obj_set_style_text_font(mode_txt, &lv_font_montserrat_12, 0);
+lv_obj_set_style_text_color(mode_txt, lv_color_hex(0x00FFFF), 0);
+lv_obj_set_style_text_font(mode_txt, &lv_font_montserrat_28, 0);
 lv_obj_center(mode_txt);
 
     // ── Timecode ghost + real ─────────────────────────────────────
