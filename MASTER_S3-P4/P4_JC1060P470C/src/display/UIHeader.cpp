@@ -59,8 +59,8 @@ lv_obj_center(mode_txt);
 
     // ── Indicador LOOP/CICLO — note 0x56 — x=88 (tras SMPT) ─────
     s_cycle_lbl = lv_obj_create(parent);
-    lv_obj_set_pos(s_cycle_lbl, 88, (HEADER_H - 30) / 2);
-    lv_obj_set_size(s_cycle_lbl, 68, 30);
+    lv_obj_set_pos(s_cycle_lbl, 88, (HEADER_H - 34) / 2);
+    lv_obj_set_size(s_cycle_lbl, 44, 34);
     lv_obj_set_style_bg_opa(s_cycle_lbl, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(s_cycle_lbl, 1, 0);
     lv_obj_set_style_border_color(s_cycle_lbl, lv_color_hex(0x003333), 0);
@@ -76,8 +76,8 @@ lv_obj_center(mode_txt);
 
     // ── Indicador RUDE SOLO — note 0x73 — x=164 ─────────────────
     s_solo_lbl = lv_obj_create(parent);
-    lv_obj_set_pos(s_solo_lbl, 164, (HEADER_H - 30) / 2);
-    lv_obj_set_size(s_solo_lbl, 68, 30);
+    lv_obj_set_pos(s_solo_lbl, 140, (HEADER_H - 34) / 2);
+    lv_obj_set_size(s_solo_lbl, 44, 34);
     lv_obj_set_style_bg_opa(s_solo_lbl, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(s_solo_lbl, 1, 0);
     lv_obj_set_style_border_color(s_solo_lbl, lv_color_hex(0x003333), 0);
