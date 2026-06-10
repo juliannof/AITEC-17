@@ -215,8 +215,8 @@ void processControlChange(byte channel, byte controller, byte value) {
     beatsChars_clean[digit_index]    = char_to_store;
     timeCodeChars_clean[digit_index] = char_to_store;
 
-    needsHeaderRedraw = true;
-    if (controller == 64) needsTimecodeRedraw = true;
+    needsHeaderRedraw   = true;
+    needsTimecodeRedraw = true;
 }
 
 String formatTimecodeString() {

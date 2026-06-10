@@ -27,6 +27,18 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 ---
 
+### SESIÓN 2026-06-10 — Fluidez refresco timecode P4 (14:06)
+
+**Problema:** display beats/SMPTE no era fluido — `needsTimecodeRedraw` solo se activaba al llegar el último CC de timecode (controller 64). Si Logic no enviaba ese dígito en un frame dado, el display no se actualizaba.
+
+**Fix P4:**
+- `MIDIProcessor.cpp:218` — `needsTimecodeRedraw = true` en cualquier CC de timecode (64–73), no solo en controller 64
+- `UIHeader.cpp:96` — throttle 16ms en `uiHeaderUpdate()` para evitar redraws en ráfaga cuando llegan los 10 CCs consecutivos
+
+**MCU afectadas:** P4 únicamente. S2/S3 sin cambios.
+
+---
+
 ### SESIÓN 2026-05-30 — Debugging RS485 timeouts + fixes (10:30)
 
 **Contexto:** Tras flashear AutoMode, S3 mostraba `TIMEOUT slave 1 (#1 consecuciones)` repetido. Diagnóstico y correcciones aplicadas.

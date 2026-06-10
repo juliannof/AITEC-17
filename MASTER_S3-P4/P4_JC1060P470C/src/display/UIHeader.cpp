@@ -94,6 +94,10 @@ lv_obj_add_event_cb(s_mode_lbl, [](lv_event_t* e) {
 
 void uiHeaderUpdate() {
     if (!needsTimecodeRedraw) return;
+    static uint32_t lastRedraw = 0;
+    uint32_t now = millis();
+    if (now - lastRedraw < 16) return;
+    lastRedraw = now;
     needsTimecodeRedraw = false;
     if (!s_timecode || !s_tc_ghost) return;
     if (!hasDigit(timeCodeChars_clean)) return;
