@@ -310,7 +310,8 @@ void processChannelPressure(byte channel, byte value) {
     if (targetChannel != -1) {
         int dispCh = targetChannel + P4_CH_OFFSET;
         bool stateChanged = false;
-        vuLastUpdateTime[dispCh] = millis();
+        if (normalizedLevel >= vuLevels[dispCh] || normalizedLevel == 0.0f)
+            vuLastUpdateTime[dispCh] = millis();
         if (clearClip) {
             if (vuClipState[dispCh]) { vuClipState[dispCh] = false; stateChanged = true; }
         } else if (newClipState) {
@@ -322,6 +323,9 @@ void processChannelPressure(byte channel, byte value) {
                 vuPeakLevels[dispCh] = normalizedLevel;
                 vuPeakLastUpdateTime[dispCh] = millis();
             }
+            stateChanged = true;
+        } else if (normalizedLevel == 0.0f && vuLevels[dispCh] != 0.0f) {
+            vuLevels[dispCh] = 0.0f;
             stateChanged = true;
         }
         if (stateChanged) needsVUMetersRedraw = true;
@@ -540,7 +544,6 @@ void processNote(byte status, byte note, byte velocity) {
     if (note == 114) { if (is_on) { currentTimecodeMode = MODE_BEATS; needsHeaderRedraw = true; needsTimecodeRedraw = true; } return; }
     if (note == 0x73) { rudeSoloActive = is_on; needsTimecodeRedraw = true; return; }
     if (note == 0x56) { cycleActive    = is_on; needsTimecodeRedraw = true; return; }
-    if (note == 0x5E) { g_isPlaying   = is_on; return; }
 
     if (note <= 31) {
         int group     = note / 8;
