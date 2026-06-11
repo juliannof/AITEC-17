@@ -234,7 +234,7 @@ static uint32_t blendHex(uint32_t a, uint32_t b, uint8_t alpha) {
 static void vu_draw_cb(lv_event_t* e) {
     int i = (int)(intptr_t)lv_event_get_user_data(e);
     lv_layer_t* layer = lv_event_get_layer(e);
-    lv_obj_t*   obj   = lv_event_get_target(e);
+    lv_obj_t*   obj   = (lv_obj_t*)lv_event_get_target(e);
 
     const int seg_w = CH_W - 8;
     const int seg_h = (VU_H - 22) / 12;
