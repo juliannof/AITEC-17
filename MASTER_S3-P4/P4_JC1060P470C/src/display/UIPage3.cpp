@@ -200,12 +200,16 @@ void uiPage3Update() {
                               : lv_color_hex(COL_SOLO_OFF), 0);
             lv_label_set_text(s_trackname[i], trackNames[i].c_str());
             int pos = (int)(vpotValues[i] & 0x0F);
-            int pan = ((pos - 6) * 100) / 6;
+            int pan = (pos < 6) ? -(6 - pos) * 20 : (pos - 6) * 20;
             lv_arc_set_value(s_arc[i], pan);
+            // tabla pos 0-11 → valor Logic (-64..+63)
+            static const int8_t PAN_VAL[12] = {
+                0, -64, -51, -38, -26, -13, 0, 13, 25, 38, 51, 63
+            };
             char pan_txt[5];
-            if (pos == 6)      snprintf(pan_txt, sizeof(pan_txt), "C");
-            else if (pos > 6)  snprintf(pan_txt, sizeof(pan_txt), "R%d", pos - 6);
-            else               snprintf(pan_txt, sizeof(pan_txt), "L%d", 6 - pos);
+            if (pos == 0 || pos == 6) snprintf(pan_txt, sizeof(pan_txt), "C");
+            else if (pos < 6)         snprintf(pan_txt, sizeof(pan_txt), "%d",  PAN_VAL[pos]);
+            else                      snprintf(pan_txt, sizeof(pan_txt), "+%d", PAN_VAL[pos]);
             lv_label_set_text(s_arc_lbl[i], pan_txt);
         }
         needsButtonsRedraw = false;
