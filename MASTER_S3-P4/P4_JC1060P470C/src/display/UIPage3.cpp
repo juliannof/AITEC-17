@@ -285,7 +285,7 @@ static void vu_draw_cb(lv_event_t* e) {
 // Lógica de decaimiento — portada de S2 (hold 1s + fade 100ms)
 // ****************************************************************************
 void handleVUMeterDecay() {
-    const unsigned long DECAY_INTERVAL_MS = 100;
+    const unsigned long DECAY_INTERVAL_MS = 300;
     const unsigned long PEAK_HOLD_TIME_MS = 1000;
     const unsigned long PEAK_FADE_STEP_MS = 25;
     const float         DECAY_AMOUNT      = 1.0f / 12.0f;
