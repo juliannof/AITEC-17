@@ -13,7 +13,7 @@
 #define SEL_H        52
 #define MUTE_TOP     (SEL_TOP + SEL_H + 2)    // 58
 #define MUTE_H       52
-#define PAN_TOP      (MUTE_TOP + MUTE_H + 11) // 123
+#define PAN_TOP      (MUTE_TOP + MUTE_H + 13) // 125
 #define PAN_SZ       44                        // arco de panorama (cuadrado)
 #define NAME_TOP     (PAN_TOP + PAN_SZ + 6)   // 178
 #define NAME_H       28
