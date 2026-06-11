@@ -310,8 +310,7 @@ void processChannelPressure(byte channel, byte value) {
     if (targetChannel != -1) {
         int dispCh = targetChannel + P4_CH_OFFSET;
         bool stateChanged = false;
-        if (normalizedLevel >= vuLevels[dispCh] || normalizedLevel == 0.0f)
-            vuLastUpdateTime[dispCh] = millis();
+        vuLastUpdateTime[dispCh] = millis();
         if (clearClip) {
             if (vuClipState[dispCh]) { vuClipState[dispCh] = false; stateChanged = true; }
         } else if (newClipState) {
