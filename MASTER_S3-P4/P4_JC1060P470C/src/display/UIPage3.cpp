@@ -130,8 +130,8 @@ void uiPage3Create(lv_obj_t* parent) {
 
         // SELECT (S)
         s_select[i] = lv_obj_create(s_page_root);
-        lv_obj_set_pos(s_select[i], x + 8, SEL_TOP);
-        lv_obj_set_size(s_select[i], CH_W - 16, SEL_H);
+        lv_obj_set_pos(s_select[i], x + 4, SEL_TOP);
+        lv_obj_set_size(s_select[i], CH_W - 8, SEL_H);
         lv_obj_set_style_bg_color(s_select[i], lv_color_hex(COL_SOLO_OFF), 0);
         lv_obj_set_style_border_width(s_select[i], 0, 0);
         lv_obj_set_style_radius(s_select[i], 6, 0);
@@ -150,8 +150,8 @@ void uiPage3Create(lv_obj_t* parent) {
 
         // MUTE (M)
         s_mute[i] = lv_obj_create(s_page_root);
-        lv_obj_set_pos(s_mute[i], x + 8, MUTE_TOP);
-        lv_obj_set_size(s_mute[i], CH_W - 16, MUTE_H);
+        lv_obj_set_pos(s_mute[i], x + 4, MUTE_TOP);
+        lv_obj_set_size(s_mute[i], CH_W - 8, MUTE_H);
         lv_obj_set_style_bg_color(s_mute[i], lv_color_hex(COL_MUTE_OFF), 0);
         lv_obj_set_style_border_width(s_mute[i], 0, 0);
         lv_obj_set_style_radius(s_mute[i], 6, 0);
