@@ -371,6 +371,8 @@ void processMackieSysEx(byte* payload, int len) {
             memset(vuLevels,     0, sizeof(vuLevels));
             memset(vuClipState,  0, sizeof(vuClipState));
             memset(vuPeakLevels, 0, sizeof(vuPeakLevels));
+            memset(vuPeakFadeTime, 0, sizeof(vuPeakFadeTime));
+            memset(vuPeakAlpha, 255, sizeof(vuPeakAlpha));
             memset(faderPositions, 0, sizeof(faderPositions));
             memset(btnStatePG1,  0, sizeof(bool) * 32);
             memset(btnStatePG2,  0, sizeof(bool) * 32);

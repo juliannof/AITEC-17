@@ -217,22 +217,28 @@ void uiPage3Update() {
 
     if (needsVUMetersRedraw) {
         for (int i = 0; i < NUM_CH; i++) {
-            int activeSegments = (int)round(vuLevels[i] * 12.0f);
-            int peakSeg = (int)round(vuPeakLevels[i] * 12.0f) - 1;
+            int active = (int)round(vuLevels[i] * 12.0f);
+            int peak   = (int)round(vuPeakLevels[i] * 12.0f);
+            if (peak > 0) peak--;
+            bool showPeak = (vuPeakLevels[i] > vuLevels[i] + 0.001f) && vuPeakAlpha[i] > 0;
+            if (!showPeak) peak = -1;
+
             for (int s = 0; s < 12; s++) {
-                lv_color_t color;
-                if (s == peakSeg && vuPeakLevels[i] > vuLevels[i] + 0.001f)
-                    color = lv_color_hex(0xB4B4B4);
-                else if (s < activeSegments) {
-                    if      (s < 8)  color = lv_color_hex(0x00E600);
-                    else if (s < 10) color = lv_color_hex(0xFFFF00);
-                    else             color = lv_color_hex(0xFF0000);
+                uint32_t onCol  = (s < 8) ? 0x00E600 : (s < 10) ? 0xFFFF00 : 0xFF0000;
+                uint32_t offCol = (s < 8) ? 0x003300 : (s < 10) ? 0x333300 : 0x330000;
+                uint32_t hex;
+
+                if (s == 11 && vuClipState[i]) {
+                    hex = 0xFF0000;
+                } else if (s < active) {
+                    hex = onCol;
+                } else if (s == peak) {
+                    hex = (vuPeakAlpha[i] == 255) ? onCol
+                                                  : blendHex(onCol, offCol, vuPeakAlpha[i]);
                 } else {
-                    if      (s < 8)  color = lv_color_hex(0x003300);
-                    else if (s < 10) color = lv_color_hex(0x333300);
-                    else             color = lv_color_hex(0x330000);
+                    hex = offCol;
                 }
-                lv_obj_set_style_bg_color(s_vu_seg[i][s], color, 0);
+                lv_obj_set_style_bg_color(s_vu_seg[i][s], lv_color_hex(hex), 0);
             }
         }
         needsVUMetersRedraw = false;
@@ -240,39 +246,74 @@ void uiPage3Update() {
 }
 
 // ****************************************************************************
-// Lógica de decaimiento de los vúmetros y retención de picos
+// Blend helper: mezcla dos colores 0xRRGGBB según alpha 0-255
+// ****************************************************************************
+static uint32_t blendHex(uint32_t a, uint32_t b, uint8_t alpha) {
+    uint8_t ra = (a >> 16) & 0xFF, ga = (a >> 8) & 0xFF, ba = a & 0xFF;
+    uint8_t rb = (b >> 16) & 0xFF, gb = (b >> 8) & 0xFF, bb = b & 0xFF;
+    return ((uint32_t)((ra * alpha + rb * (255 - alpha)) >> 8) << 16) |
+           ((uint32_t)((ga * alpha + gb * (255 - alpha)) >> 8) <<  8) |
+            (uint32_t)((ba * alpha + bb * (255 - alpha)) >> 8);
+}
+
+// ****************************************************************************
+// Lógica de decaimiento — portada de S2 (hold 1s + fade 100ms)
 // ****************************************************************************
 void handleVUMeterDecay() {
     const unsigned long DECAY_INTERVAL_MS = 100;
-    const unsigned long PEAK_HOLD_TIME_MS = 2000;
+    const unsigned long PEAK_HOLD_TIME_MS = 1000;
+    const unsigned long PEAK_FADE_STEP_MS = 25;
     const float         DECAY_AMOUNT      = 1.0f / 12.0f;
+    const uint8_t       FADE_STEP         = 64;
 
-    unsigned long currentTime    = millis();
-    bool          anyVUMeterChanged = false;
+    unsigned long now = millis();
+    bool changed = false;
 
     for (int i = 0; i < NUM_CH; i++) {
-        if (vuLevels[i] > 0 && currentTime - vuLastUpdateTime[i] > DECAY_INTERVAL_MS) {
+        // 1. Decaimiento nivel
+        if (vuLevels[i] > 0 && now - vuLastUpdateTime[i] > DECAY_INTERVAL_MS) {
             vuLevels[i] -= DECAY_AMOUNT;
             if (vuLevels[i] < 0.01f) vuLevels[i] = 0.0f;
-            vuLastUpdateTime[i] = currentTime;
-            anyVUMeterChanged = true;
+            vuLastUpdateTime[i] = now;
+            changed = true;
         }
 
-        if (vuPeakLevels[i] > 0 &&
-            currentTime - vuPeakLastUpdateTime[i] > PEAK_HOLD_TIME_MS &&
-            vuPeakLevels[i] > vuLevels[i]) {
-            vuPeakLevels[i] = vuLevels[i];
-            anyVUMeterChanged = true;
+        // 2. Peak — hold 1s + fade 4 pasos × 25ms
+        if (vuPeakLevels[i] > 0) {
+            bool detached = vuPeakLevels[i] > vuLevels[i] + 0.001f;
+            if (!detached) {
+                vuPeakAlpha[i]    = 255;
+                vuPeakFadeTime[i] = 0;
+            } else if (now - vuPeakLastUpdateTime[i] > PEAK_HOLD_TIME_MS) {
+                if (vuPeakFadeTime[i] == 0) {
+                    vuPeakFadeTime[i] = now;
+                } else if (now - vuPeakFadeTime[i] >= PEAK_FADE_STEP_MS) {
+                    vuPeakFadeTime[i] = now;
+                    if (vuPeakAlpha[i] > FADE_STEP) {
+                        vuPeakAlpha[i] -= FADE_STEP;
+                    } else {
+                        vuPeakAlpha[i]  = 0;
+                        vuPeakLevels[i] = 0.0f;
+                    }
+                    changed = true;
+                }
+            }
+        } else {
+            vuPeakAlpha[i]    = 255;
+            vuPeakFadeTime[i] = 0;
         }
 
+        // 3. Peak nunca < nivel actual
         if (vuPeakLevels[i] < vuLevels[i]) {
             vuPeakLevels[i]         = vuLevels[i];
-            vuPeakLastUpdateTime[i] = currentTime;
-            anyVUMeterChanged       = true;
+            vuPeakLastUpdateTime[i] = now;
+            vuPeakAlpha[i]          = 255;
+            vuPeakFadeTime[i]       = 0;
+            changed = true;
         }
     }
 
-    if (anyVUMeterChanged) needsVUMetersRedraw = true;
+    if (changed) needsVUMetersRedraw = true;
 }
 
 void uiPage3Destroy() {

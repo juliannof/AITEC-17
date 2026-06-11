@@ -123,6 +123,8 @@ extern bool vuClipState[16];
 extern unsigned long vuLastUpdateTime[16];
 extern float vuPeakLevels[16];
 extern unsigned long vuPeakLastUpdateTime[16];
+extern uint8_t vuPeakAlpha[16];
+extern uint32_t vuPeakFadeTime[16];
 extern float faderPositions[16];
 extern bool needsTOTALRedraw;
 extern bool needsMainAreaRedraw;
