@@ -45,6 +45,8 @@ extern void sendMIDIBytes(const byte* data, size_t len);
 
 static lv_obj_t* s_arc_lbl[NUM_CH] = {};
 
+static uint32_t blendHex(uint32_t a, uint32_t b, uint8_t alpha);
+
 
 
 void uiPage3Create(lv_obj_t* parent) {

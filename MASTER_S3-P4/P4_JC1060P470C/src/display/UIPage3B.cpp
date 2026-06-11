@@ -18,25 +18,25 @@
 #define MUTE_TOP     (AUTO_TOP + AUTO_H + 6)      // 376
 #define MUTE_H       52
 
-#define NUM_CH       8
+static constexpr int P3B_CH = 8;  // UIPage3B siempre muestra 8 canales
 
 // Colores desde config.h (COL_*)
 
 // ── Widgets ───────────────────────────────────────────────
 static lv_obj_t* s_page_root = NULL;
-static lv_obj_t* s_track_bg[NUM_CH] = {};
-static lv_obj_t* s_fader[NUM_CH]    = {};
-static lv_obj_t* s_automode[NUM_CH] = {};
-static lv_obj_t* s_automode_lbl[NUM_CH] = {};
-static lv_obj_t* s_mute[NUM_CH]     = {};
-static lv_obj_t* s_trackname[NUM_CH]= {};
-static lv_obj_t* s_arc[NUM_CH]      = {};
-static lv_obj_t* s_arc_lbl[NUM_CH]  = {};
+static lv_obj_t* s_track_bg[P3B_CH] = {};
+static lv_obj_t* s_fader[P3B_CH]    = {};
+static lv_obj_t* s_automode[P3B_CH] = {};
+static lv_obj_t* s_automode_lbl[P3B_CH] = {};
+static lv_obj_t* s_mute[P3B_CH]     = {};
+static lv_obj_t* s_trackname[P3B_CH]= {};
+static lv_obj_t* s_arc[P3B_CH]      = {};
+static lv_obj_t* s_arc_lbl[P3B_CH]  = {};
 
 static bool s_page3b_ready = false;
 
 // Automode state per channel — 0=READ 1=TOUCH 2=LATCH 3=WRITE
-static uint8_t s_automode_state[NUM_CH] = {};
+static uint8_t s_automode_state[P3B_CH] = {};
 
 // Mackie automode values:
 // 0=READ 1=WRITE 2=TRIM 3=TOUCH 4=LATCH 5=OFF
@@ -77,7 +77,7 @@ void uiPage3BCreate(lv_obj_t* parent) {
     lv_obj_set_style_border_width(s_page_root, 0, 0);
     lv_obj_clear_flag(s_page_root, LV_OBJ_FLAG_SCROLLABLE);
 
-    for (int i = 0; i < NUM_CH; i++) {
+    for (int i = 0; i < P3B_CH; i++) {
         int x = i * CH_W;   // columna del canal (landscape)
 
         s_track_bg[i] = lv_obj_create(s_page_root);
@@ -198,7 +198,7 @@ void uiPage3BUpdate() {
     // needsTimecodeRedraw eliminado — lo gestiona uiHeaderUpdate()
 
     if (needsButtonsRedraw) {
-        for (int i = 0; i < NUM_CH; i++) {
+        for (int i = 0; i < P3B_CH; i++) {
             lv_obj_set_style_bg_color(s_track_bg[i],
                 selectStates[i] ? lv_color_hex(COL_TRACK_SEL)
                                 : lv_color_hex(COL_TRACK_BG), 0);
