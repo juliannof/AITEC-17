@@ -315,10 +315,9 @@
 - Investigar regresión: no muestra datos en Display tras conectarse (posible issue en transición CONNECTED)
 
 #### Detalles técnicos
-- ST7701S MIPI-DSI 2-lane, 480×800 portrait
-- LVGL v9
-- Solo inicializa en portrait — landscape por rotación software
-- Rotación widgets: `lv_obj_set_style_transform_rotation(obj, 900, 0)`, coordenadas X/Y intercambiadas mentalmente
+- **Placa activa JC1060P470C:** JD9165 MIPI-DSI 1024×600 landscape nativo (LVGL v9)
+- ~~ST7701S MIPI-DSI 2-lane, 480×800 portrait~~ ← legacy JC4880P433C, ver `MASTER_S3-P4/P4_JC4880P433C/`
+- Landscape nativo — no requiere rotación software
 
 ---
 
@@ -338,20 +337,14 @@
 
 ---
 
-### **NEOTRELLS**
-**Estado:** sin implementar
+### **NEOTRELLS** ⚠️ LEGACY
+**Estado:** ⚠️ No existe en placa activa JC1060P470C
 
-#### Bugs
-(ninguno)
-
-#### Pendientes
-- Implementar control NeoTrellis (Adafruit seesaw, dos tiles 4×4)
-- Atención a pines I2C nuevos (SDA=GPIO33, SCL=GPIO31)
-
-#### Detalles técnicos
-- Adafruit seesaw, dos tiles 4×4 en I2C_NUM_0
-- Direcciones: 0x2F (izquierda) y 0x2E (derecha) → matriz 4×8
-- Pines: SDA=GPIO33, SCL=GPIO31
+#### Notas
+- NeoTrellis existía únicamente en la placa antigua JC4880P433C (legacy)
+- La placa activa JC1060P470C **no** tiene NeoTrellis — hardware eliminado en migración
+- Código legacy: `MASTER_S3-P4/P4_JC4880P433C/`
+- Documentación: `docs/NEOTRELLLIS.md` (marcado LEGACY)
 
 ---
 
@@ -381,7 +374,7 @@
 (ninguno)
 
 #### Detalles técnicos
-- Chip: ESP32-P4 (placa GUITION JC4880P433C)
+- Chip: ESP32-P4 (placa activa: GUITION JC1060P470C — display JD9165 1024×600)
 - Familia Mackie: 0x14 (9 slaves)
 - DEVICE_P4_MASTER flag en platformio.ini
 - LVGL v9 (portrait orientation por defecto)

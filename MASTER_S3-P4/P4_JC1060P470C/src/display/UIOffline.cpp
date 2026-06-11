@@ -27,7 +27,7 @@ void uiOfflineCreate(lv_obj_t* parent) {
     s_root = lv_obj_create(parent);
     lv_obj_set_pos(s_root, 0, 0);
     lv_obj_set_size(s_root, P4_W, P4_H);  // pantalla completa landscape 1024×600 (2026-06-09)
-    lv_obj_set_style_bg_color(s_root, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_color(s_root, lv_color_hex(COL_BG), 0);
     lv_obj_set_style_bg_opa(s_root, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(s_root, 0, 0);
     lv_obj_set_style_border_width(s_root, 0, 0);   // sin marco del tema (2026-05-30 11:50)

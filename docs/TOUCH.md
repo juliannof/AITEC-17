@@ -1,6 +1,11 @@
 # TOUCH — GT911 Capacitivo (iMakie P4)
 
-Documentación del subsistema de touch P4. Panel capacitivo GT911 para navegación LVGL en display 480×800.
+> ℹ️ **El chip GT911 es el mismo en ambas placas.** Las dimensiones y pines varían:
+> - **JC4880P433C (legacy):** 480×800, INT=GPIO9, RST=GPIO10
+> - **JC1060P470C (activa):** 1024×600, INT=-1 (NC), RST=-1 (NC), SDA=GPIO7, SCL=GPIO8
+> Ver `MASTER_S3-P4/P4_JC1060P470C/src/config.h` para pines actuales.
+
+Documentación del subsistema de touch P4. Panel capacitivo GT911 para navegación LVGL.
 
 **Responsable:** iMakie Development Team  
 **Última actualización:** 2026-05-16  

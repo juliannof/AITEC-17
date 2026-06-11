@@ -70,16 +70,19 @@
 #define HEADER_X  410
 #define HEADER_W  (P4_W - HEADER_X)   // 70px
 
-// ── Colores UI — usar con lv_color_hex() en archivos LVGL ────────
-#define COL_BG         0x000000
-#define COL_HEADER     0x000050
-#define COL_MUTE_ON    0xFF0000
-#define COL_MUTE_OFF   0x400000
-#define COL_SOLO_ON    0xFFAA00
-#define COL_SOLO_OFF   0x333333
-#define COL_TRACK_BG   0x0F1218
-#define COL_TRACK_SEL  0x2A3040
-#define COL_TRACK_SEP  0x111111
+// ── Colores UI — paleta Logic Pro (2026-06-11) ───────────────────
+#define COL_BG         0x1A1A1A   // fondo general
+#define COL_HEADER     0x000050   // header — no cambiar
+#define COL_MUTE_ON    0xFF0000   // botón M activo
+#define COL_MUTE_OFF   0x3A3A3A   // botón M inactivo
+#define COL_SOLO_ON    0xFFAA00   // botón S activo
+#define COL_SOLO_OFF   0x3A3A3A   // botón S inactivo
+#define COL_TRACK_BG   0x1E1E1E   // celda canal
+#define COL_TRACK_SEL  0x2A2A2A   // canal seleccionado
+#define COL_TRACK_SEP  0x333333   // separadores
+#define COL_TEXT_DIM   0x999999   // texto secundario
+#define COL_FADER_TRACK 0x555555  // ranura fader
+#define COL_FADER_THUMB 0x8C8C8C  // cabeza fader
 
 // -- Automode
 #define COL_AUTO_READ   0x006600

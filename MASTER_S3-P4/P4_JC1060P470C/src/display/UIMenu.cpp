@@ -35,21 +35,18 @@ static void btn_cb(lv_event_t* e) {
         prefs.begin("uimenu", false);
         prefs.putUChar("lastPage", 1);
         prefs.end();
-        g_currentPage   = 1;
         g_switchToPage1 = true;
         uiMenuClose();
     } else if (strcmp(txt, "VUMetros") == 0) {
         prefs.begin("uimenu", false);
         prefs.putUChar("lastPage", 0);
         prefs.end();
-        g_currentPage    = 0;
         g_switchToPage3A = true;
         uiMenuClose();
     } else if (strcmp(txt, "Faders") == 0) {
         prefs.begin("uimenu", false);
         prefs.putUChar("lastPage", 2);
         prefs.end();
-        g_currentPage    = 2;
         g_switchToPage3B = true;
         uiMenuClose();
     } else if (strcmp(txt, "Reiniciar") == 0) {
@@ -134,7 +131,7 @@ void uiMenuInit(lv_obj_t* parent) {
     s_panel = lv_obj_create(parent);
     lv_obj_set_pos(s_panel, 0, CONTENT_Y);
     lv_obj_set_size(s_panel, P4_W, CONTENT_H);
-    lv_obj_set_style_bg_color(s_panel, lv_color_hex(0x1A1A2E), 0);
+    lv_obj_set_style_bg_color(s_panel, lv_color_hex(0x232323), 0);
     lv_obj_set_style_bg_opa(s_panel, 241, 0);
     lv_obj_set_style_border_width(s_panel, 0, 0);
     lv_obj_set_style_radius(s_panel, 0, 0);
@@ -157,7 +154,7 @@ void uiMenuInit(lv_obj_t* parent) {
     lv_obj_t* sep = lv_obj_create(s_panel);
     lv_obj_set_pos(sep, 0, 48);
     lv_obj_set_size(sep, P4_W, 1);
-    lv_obj_set_style_bg_color(sep, lv_color_hex(0x444466), 0);
+    lv_obj_set_style_bg_color(sep, lv_color_hex(COL_TRACK_SEP), 0);
     lv_obj_set_style_border_width(sep, 0, 0);
     lv_obj_set_style_radius(sep, 0, 0);
     lv_obj_clear_flag(sep, LV_OBJ_FLAG_CLICKABLE);
@@ -167,15 +164,15 @@ void uiMenuInit(lv_obj_t* parent) {
     int32_t bh = 220;
     int32_t by = 70;
 
-    make_btn(s_panel, 10 + 0 * bw, by, bw - 10, bh, "Botones",  0x252540, 0xFFFFFF);
-    make_btn(s_panel, 10 + 1 * bw, by, bw - 10, bh, "VUMetros", 0x252540, 0xFFFFFF);
-    make_btn(s_panel, 10 + 2 * bw, by, bw - 10, bh, "Faders",   0x252540, 0xFFFFFF);
+    make_btn(s_panel, 10 + 0 * bw, by, bw - 10, bh, "Botones",  COL_TRACK_SEL, 0xFFFFFF);
+    make_btn(s_panel, 10 + 1 * bw, by, bw - 10, bh, "VUMetros", COL_TRACK_SEL, 0xFFFFFF);
+    make_btn(s_panel, 10 + 2 * bw, by, bw - 10, bh, "Faders",   COL_TRACK_SEL, 0xFFFFFF);
     make_btn(s_panel, 10 + 3 * bw, by, bw - 10, bh, "Reiniciar",0x3A1010, 0xFF4444);
 
     // ── Slider brillo ─────────────────────────────────────
     s_slider_lbl = lv_label_create(s_panel);
     lv_label_set_text_fmt(s_slider_lbl, "%d%%", s_brightness);
-    lv_obj_set_style_text_color(s_slider_lbl, lv_color_hex(0xCCCCFF), 0);
+    lv_obj_set_style_text_color(s_slider_lbl, lv_color_hex(COL_TEXT_DIM), 0);
     lv_obj_set_style_text_font(s_slider_lbl, &lv_font_montserrat_12, 0);
     lv_obj_set_pos(s_slider_lbl, P4_W / 2 - 16, CONTENT_H - 56);
 
@@ -184,9 +181,9 @@ void uiMenuInit(lv_obj_t* parent) {
     lv_obj_set_size(s_slider, P4_W - 120, 22);
     lv_slider_set_range(s_slider, 2, 100);
     lv_slider_set_value(s_slider, s_brightness, LV_ANIM_OFF);
-    lv_obj_set_style_bg_color(s_slider, lv_color_hex(0x444466), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(s_slider, lv_color_hex(0x6666AA), LV_PART_INDICATOR);
-    lv_obj_set_style_bg_color(s_slider, lv_color_hex(0xCCCCFF), LV_PART_KNOB);
+    lv_obj_set_style_bg_color(s_slider, lv_color_hex(COL_FADER_TRACK), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_slider, lv_color_hex(COL_FADER_THUMB), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(s_slider, lv_color_hex(COL_FADER_THUMB), LV_PART_KNOB);
     lv_obj_add_event_cb(s_slider, slider_cb, LV_EVENT_VALUE_CHANGED, NULL);
 }
 

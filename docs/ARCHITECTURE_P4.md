@@ -1,5 +1,8 @@
 # ARCHITECTURE P4 — Dual-Core Tareas (ESP32-P4)
 
+> ℹ️ **Arquitectura de tareas válida para JC1060P470C (placa activa).**
+> Las referencias a NeoTrellis son de la placa antigua JC4880P433C (legacy). Ver `MASTER_S3-P4/P4_JC4880P433C/`.
+
 Documentación de arquitectura de tareas P4. Sistema multi-core con FreeRTOS en ESP32-P4 dual-core.
 
 **Responsable:** iMakie Development Team  

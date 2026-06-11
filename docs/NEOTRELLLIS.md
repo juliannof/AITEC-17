@@ -1,10 +1,15 @@
-# NEOTRELLLIS — Matriz 4×8 RGB (iMakie P4)
+# NEOTRELLLIS — Matriz 4×8 RGB (iMakie P4) ⚠️ LEGACY
 
-Documentación del subsistema NeoTrellis P4. Matriz tactil RGB 4×8 para control y feedback visual de track faders.
+> ⚠️ **[LEGACY — JC4880P433C]**
+> NeoTrellis **no existe en la placa activa JC1060P470C**.
+> Este documento describe el hardware de la placa antigua. Código fuente: `MASTER_S3-P4/P4_JC4880P433C/`
+> Marcado como legacy (2026-06-11).
+
+Documentación del subsistema NeoTrellis P4 **[LEGADO]**. Matriz táctil RGB 4×8 — placa GUITION JC4880P433C.
 
 **Responsable:** iMakie Development Team  
 **Última actualización:** 2026-05-16  
-**Estado:** En producción (2× Adafruit seesaw 4×4)
+**Estado:** ⚠️ LEGACY — Solo aplicable a P4_JC4880P433C
 
 ---
 

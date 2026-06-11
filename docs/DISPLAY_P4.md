@@ -1,6 +1,11 @@
-# DISPLAY P4 — ST7701S MIPI-DSI (ESP32-P4)
+# DISPLAY P4 — ST7701S MIPI-DSI (ESP32-P4) ⚠️ LEGACY
 
-Documentación del subsistema de display P4. Display grande 480×800 con LVGL v9 para interfaz master MCU.
+> ⚠️ **[LEGACY — JC4880P433C]**
+> Este documento describe la placa **antigua** (ST7701S, 480×800 portrait, NeoTrellis).
+> La placa activa es **JC1060P470C** (JD9165, 1024×600, landscape nativo, sin NeoTrellis).
+> Código fuente legado: `MASTER_S3-P4/P4_JC4880P433C/` — Marcado como legacy (2026-06-11).
+
+Documentación del subsistema de display P4 **[LEGADO]**. Display 480×800 con LVGL v9 — placa GUITION JC4880P433C.
 
 **Responsable:** iMakie Development Team
 **Última actualización:** 2026-05-30 11:30

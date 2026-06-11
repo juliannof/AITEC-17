@@ -20,20 +20,7 @@
 
 #define NUM_CH       8
 
-// ── Colores ───────────────────────────────────────────────
-#define COLOR_BG         lv_color_hex(0x000000)
-#define COLOR_HEADER     lv_color_hex(0x000050)
-#define COLOR_MUTE_ON    lv_color_hex(0xFF0000)
-#define COLOR_MUTE_OFF   lv_color_hex(0x400000)
-#define COLOR_TRACK_BG   lv_color_hex(0x0F1218)
-#define COLOR_TRACK_SEL  lv_color_hex(0x2A3040)
-
-// Automode colors
-#define COLOR_AUTO_READ  lv_color_hex(0x006600)
-#define COLOR_AUTO_TOUCH lv_color_hex(0x0000AA)
-#define COLOR_AUTO_LATCH lv_color_hex(0xAA6600)
-#define COLOR_AUTO_WRITE lv_color_hex(0xAA0000)
-#define COLOR_AUTO_OFF   lv_color_hex(0x333333)
+// Colores desde config.h (COL_*)
 
 // ── Widgets ───────────────────────────────────────────────
 static lv_obj_t* s_page_root = NULL;
@@ -60,7 +47,7 @@ static const lv_color_t AUTOMODE_COLORS[] = {
     lv_color_hex(0x006600),  // TRIM — verde claro
     lv_color_hex(0x0000AA),  // TOUCH — azul
     lv_color_hex(0xAA6600),  // LATCH — naranja
-    lv_color_hex(0x333333),  // OFF — gris
+    lv_color_hex(COL_AUTO_OFF),  // OFF — gris
 };
 static const uint8_t AUTOMODE_NOTES[] = { 0x4A, 0x4D, 0x4E, 0x4B }; // READ TOUCH LATCH WRITE
 
@@ -72,11 +59,11 @@ extern uint8_t g_channelAutoMode[8];
 
 static lv_color_t automode_color(uint8_t state) {
     switch (state) {
-        case 0: return COLOR_AUTO_READ;
-        case 1: return COLOR_AUTO_TOUCH;
-        case 2: return COLOR_AUTO_LATCH;
-        case 3: return COLOR_AUTO_WRITE;
-        default: return COLOR_AUTO_OFF;
+        case 0: return lv_color_hex(COL_AUTO_READ);
+        case 1: return lv_color_hex(COL_AUTO_TOUCH);
+        case 2: return lv_color_hex(COL_AUTO_LATCH);
+        case 3: return lv_color_hex(COL_AUTO_WRITE);
+        default: return lv_color_hex(COL_AUTO_OFF);
     }
 }
 
@@ -107,9 +94,9 @@ void uiPage3BCreate(lv_obj_t* parent) {
         lv_obj_set_size(s_fader[i], FADER_WIDTH, FADER_H);
         lv_slider_set_range(s_fader[i], 0, 16383);
         lv_slider_set_value(s_fader[i], 0, LV_ANIM_OFF);
-        lv_obj_set_style_bg_color(s_fader[i], lv_color_hex(0x222222), LV_PART_MAIN);
-        lv_obj_set_style_bg_color(s_fader[i], lv_color_hex(0x00AA00), LV_PART_INDICATOR);
-        lv_obj_set_style_bg_color(s_fader[i], lv_color_hex(0xCCCCCC), LV_PART_KNOB);
+        lv_obj_set_style_bg_color(s_fader[i], lv_color_hex(COL_FADER_TRACK), LV_PART_MAIN);
+        lv_obj_set_style_bg_color(s_fader[i], lv_color_hex(COL_FADER_THUMB), LV_PART_INDICATOR);
+        lv_obj_set_style_bg_color(s_fader[i], lv_color_hex(COL_FADER_THUMB), LV_PART_KNOB);
 
         lv_obj_add_event_cb(s_fader[i], [](lv_event_t* e) {
             int ch = (int)(intptr_t)lv_event_get_user_data(e);
@@ -149,7 +136,7 @@ void uiPage3BCreate(lv_obj_t* parent) {
         lv_arc_set_bg_angles(s_arc[i], 135, 405);
         lv_arc_set_mode(s_arc[i], LV_ARC_MODE_SYMMETRICAL);
         lv_obj_set_style_arc_color(s_arc[i], lv_color_hex(0x00FF00), LV_PART_INDICATOR);
-        lv_obj_set_style_arc_color(s_arc[i], lv_color_hex(0x333333), LV_PART_MAIN);
+        lv_obj_set_style_arc_color(s_arc[i], lv_color_hex(0x444444), LV_PART_MAIN);
         lv_obj_set_style_arc_width(s_arc[i], 4, LV_PART_MAIN);
         lv_obj_set_style_arc_width(s_arc[i], 4, LV_PART_INDICATOR);
         lv_obj_set_style_opa(s_arc[i], LV_OPA_TRANSP, LV_PART_KNOB);

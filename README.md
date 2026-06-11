@@ -59,7 +59,7 @@ Each slave controls one channel strip, independently managing its motorized fade
 |-------------------|---------------------------------------------|
 | USB MIDI          | Native USB via TinyUSB, Mackie Control HID  |
 | RS485 Bus A       | UART + half-duplex, 500 kbaud (9 slaves)   |
-| Display           | ST7701S MIPI-DSI 480×800 (LVGL 9)           |
+| Display           | JD9165 MIPI-DSI 1024×600 landscape (LVGL 9) — placa activa JC1060P470C |
 | DAW Integration   | Logic Pro (tested), compatible with any DAW supporting Mackie Control |
 
 ### Extender Unit — ESP32-S3

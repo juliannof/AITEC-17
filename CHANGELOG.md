@@ -28,6 +28,62 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 ---
 
+### SESIÓN 2026-06-11 — Bug menú header + VU layout + paleta Logic Pro + legacy marking (03:04)
+
+**Bug menú header — `uiMenuInit()` llamada doble con parent incorrecto:**
+
+- `UIPage3.cpp` tenía una segunda llamada a `uiMenuInit(s_page_root)` (línea ~186) que sobreescribía los punteros estáticos de `UIMenu` con un parent erróneo. Al destruir la página, esos punteros quedaban dangling → menú roto en vistas subsiguientes.
+- **Fix:** eliminada la llamada extra en `UIPage3.cpp`. `uiMenuInit()` solo se llama una vez desde `s_root` en `UIMenu.cpp`.
+- **Fix secundario:** `UIMenu.cpp::btn_cb` asignaba `g_currentPage = X` prematuramente antes de que la tarea Core 1 pudiera destruir la página antigua → objetos LVGL zombie. Eliminadas las asignaciones prematuras.
+
+**VU layout reordenado — `UIPage3.cpp`:**
+
+Orden nuevo de arriba a abajo por canal:
+```
+SEL  (y=4,   h=52)
+MUTE (y=60,  h=52)
+PAN  (y=120, sz=52)
+NAME (y=178, h=28)
+VU   (y=212, h=296)
+```
+`#define` actualizados en UIPage3.cpp.
+
+**Paleta de colores — estilo Logic Pro (`config.h` + todos los archivos UI):**
+
+| Define | Antes | Después |
+|--------|-------|---------|
+| COL_BG | 0x000000 | 0x1A1A1A |
+| COL_MUTE_OFF | 0x400000 | 0x3A3A3A |
+| COL_SOLO_OFF | 0x333333 | 0x3A3A3A |
+| COL_TRACK_BG | 0x0F1218 | 0x1E1E1E |
+| COL_TRACK_SEL | 0x2A3040 | 0x2A2A2A |
+| COL_TRACK_SEP | 0x111111 | 0x333333 |
+| COL_TEXT_DIM | — | 0x999999 (NUEVO) |
+| COL_FADER_TRACK | — | 0x555555 (NUEVO) |
+| COL_FADER_THUMB | — | 0x8C8C8C (NUEVO) |
+
+- `UIMenu.cpp`: panel bg, separador, nav buttons, slider thumb y label actualizados a nuevos COL_*.
+- `UIPage3B.cpp`: fader track/thumb, arc bg, COLOR_AUTO_OFF → COL_AUTO_OFF desde config.h.
+- `UIOffline.cpp`: fondo 0x000000 → COL_BG.
+
+**Legacy marking — placa JC4880P433C:**
+
+Archivos de documentación marcados como LEGACY (placa antigua ST7701S 480×800):
+- `docs/DISPLAY_P4.md` — banner LEGACY añadido al inicio
+- `docs/NEOTRELLLIS.md` — banner LEGACY añadido (NeoTrellis no existe en JC1060P470C)
+- `docs/TOUCH.md` — nota comparativa ambas placas (GT911 en ambas, pines distintos)
+- `docs/ARCHITECTURE_P4.md` — nota NeoTrellis = legacy JC4880P433C
+- `README.md` — Display P4: ST7701S 480×800 → JD9165 1024×600 landscape
+- `STATUS.md` — Display P4: actualizado a JD9165; NeoTrellis marcado LEGACY; placa JC4880P433C → JC1060P470C en Build
+
+**Arquitectura 16 pistas documentada — `docs/16TRACKS.md` (NUEVO):**
+
+Propuesta via IAC Bus (macOS MIDI): S3 re-emite MIDI a P4 por MIDI UART. P4 mostraría las 16 pistas en pantalla 1024×600. Fase implementación: arrays[16], funciones con bank offset, canal MIDI diferenciado.
+
+**MCU afectadas:** P4 únicamente. S2/S3 sin cambios de firmware.
+
+---
+
 ### SESIÓN 2026-06-10 — BEATS display fix + documentación botones P4 (19:09)
 
 **Fix BEATS — mapeo buffer → bloques incorrecto:**

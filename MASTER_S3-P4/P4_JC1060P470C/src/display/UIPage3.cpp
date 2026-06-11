@@ -8,29 +8,19 @@
 
 
 // Layout landscape: cada canal es una COLUMNA (CH_W × CONTENT_H), zonas apiladas
-// verticalmente de arriba a abajo (2026-06-09)
-#define VU_TOP       4
-#define VU_H         220                     // zona VU (12 segmentos verticales)
-#define NAME_TOP     (VU_TOP + VU_H + 6)     // 230
-#define NAME_H       28
-#define PAN_TOP      (NAME_TOP + NAME_H + 6) // 264
-#define PAN_SZ       52                      // arco de panorama (cuadrado)
-#define SEL_TOP      (PAN_TOP + PAN_SZ + 8)  // 324
+// verticalmente de arriba a abajo — orden: botones → paneo → nombre → VU (2026-06-11)
+#define SEL_TOP      4
 #define SEL_H        52
-#define MUTE_TOP     (SEL_TOP + SEL_H + 6)   // 382
+#define MUTE_TOP     (SEL_TOP + SEL_H + 4)    // 60
 #define MUTE_H       52
+#define PAN_TOP      (MUTE_TOP + MUTE_H + 8)  // 120
+#define PAN_SZ       52                        // arco de panorama (cuadrado)
+#define NAME_TOP     (PAN_TOP + PAN_SZ + 6)   // 178
+#define NAME_H       28
+#define VU_TOP       (NAME_TOP + NAME_H + 6)  // 212
+#define VU_H         (CONTENT_H - VU_TOP - 4) // 296 — VU ocupa el resto
 
-// ── Colores ───────────────────────────────────────────────
-#define COLOR_BG        lv_color_hex(0x000000)
-#define COLOR_HEADER    lv_color_hex(0x000050)
-#define COLOR_MUTE_ON   lv_color_hex(0xFF0000)
-#define COLOR_MUTE_OFF  lv_color_hex(0x400000)
-#define COLOR_SOLO_ON   lv_color_hex(0xFFAA00)
-#define COLOR_SOLO_OFF  lv_color_hex(0x333333) 
-
-#define COLOR_TRACK_BG       lv_color_hex(0x0F1218)
-#define COLOR_TRACK_SEL      lv_color_hex(0x2A3040)
-#define COLOR_TRACK_SEP      lv_color_hex(0x111111)
+// Colores desde config.h (COL_*)
 
 // ── Widgets ───────────────────────────────────────────────
 
@@ -125,7 +115,7 @@ void uiPage3Create(lv_obj_t* parent) {
         lv_arc_set_bg_angles(s_arc[i], 135, 405);
         lv_arc_set_mode(s_arc[i], LV_ARC_MODE_SYMMETRICAL);
         lv_obj_set_style_arc_color(s_arc[i], lv_color_hex(0x00FF00), LV_PART_INDICATOR);
-        lv_obj_set_style_arc_color(s_arc[i], lv_color_hex(0x333333), LV_PART_MAIN);
+        lv_obj_set_style_arc_color(s_arc[i], lv_color_hex(0x444444), LV_PART_MAIN);
         lv_obj_set_style_arc_width(s_arc[i], 4, LV_PART_MAIN);
         lv_obj_set_style_arc_width(s_arc[i], 4, LV_PART_INDICATOR);
         lv_obj_set_style_opa(s_arc[i], LV_OPA_TRANSP, LV_PART_KNOB);
@@ -182,9 +172,6 @@ void uiPage3Create(lv_obj_t* parent) {
 
     needsTimecodeRedraw = true;
     needsButtonsRedraw  = true;
-
-    uiMenuInit(s_page_root);
-
 
     s_page3_ready = true;
 
