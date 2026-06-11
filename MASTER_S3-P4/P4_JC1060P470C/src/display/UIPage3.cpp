@@ -14,7 +14,7 @@
 #define MUTE_TOP     (SEL_TOP + SEL_H + 4)    // 60
 #define MUTE_H       52
 #define PAN_TOP      (MUTE_TOP + MUTE_H + 8)  // 120
-#define PAN_SZ       52                        // arco de panorama (cuadrado)
+#define PAN_SZ       44                        // arco de panorama (cuadrado)
 #define NAME_TOP     (PAN_TOP + PAN_SZ + 6)   // 178
 #define NAME_H       28
 #define VU_TOP       (NAME_TOP + NAME_H + 6)  // 212
@@ -243,7 +243,7 @@ void handleVUMeterDecay() {
     unsigned long currentTime    = millis();
     bool          anyVUMeterChanged = false;
 
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < NUM_CH; i++) {
         if (vuLevels[i] > 0 && currentTime - vuLastUpdateTime[i] > DECAY_INTERVAL_MS) {
             vuLevels[i] -= DECAY_AMOUNT;
             if (vuLevels[i] < 0.01f) vuLevels[i] = 0.0f;

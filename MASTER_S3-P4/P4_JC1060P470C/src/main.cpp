@@ -21,17 +21,17 @@ USBMIDI MIDI;
 
 volatile ConnectionState logicConnectionState = ConnectionState::DISCONNECTED;
 uint8_t g_logicConnected = 0;
-uint8_t vpotValues[8] = {};
+uint8_t vpotValues[16] = {};
 
-String trackNames[9];
-bool recStates[8]    = {}, soloStates[8] = {};
-bool muteStates[8]   = {}, selectStates[8] = {};
-float vuLevels[9]    = {};
-bool vuClipState[9]  = {};
-unsigned long vuLastUpdateTime[9]     = {};
-float vuPeakLevels[9]                 = {};
-unsigned long vuPeakLastUpdateTime[9] = {};
-float faderPositions[9]               = {};
+String trackNames[16];
+bool recStates[16]    = {}, soloStates[16] = {};
+bool muteStates[16]   = {}, selectStates[16] = {};
+float vuLevels[16]    = {};
+bool vuClipState[16]  = {};
+unsigned long vuLastUpdateTime[16]     = {};
+float vuPeakLevels[16]                 = {};
+unsigned long vuPeakLastUpdateTime[16] = {};
+float faderPositions[16]               = {};
 bool needsTOTALRedraw    = false;
 bool needsMainAreaRedraw = false;
 bool needsHeaderRedraw   = false;

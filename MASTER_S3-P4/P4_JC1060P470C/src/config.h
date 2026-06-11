@@ -54,15 +54,14 @@
 // ── Dimensiones display (JD9165 1024×600 landscape nativo) (2026-06-09) ──
 #define P4_W    1024
 #define P4_H    600
-#define NUM_CH  8
-// TODO landscape: geometría calculada sobre portrait 480×800 — rediseñar en paso 5
-#define CH_H    (P4_H / NUM_CH)   // 100px
+#define NUM_CH  16
+#define CH_H    (P4_H / NUM_CH)
 
-// ── Layout landscape nativo 1024×600 (header arriba + 8 canales en columnas) (2026-06-09) ──
+// ── Layout landscape nativo 1024×600 (header arriba + 16 canales en columnas) ──
 #define HEADER_H    88                  // franja superior: timecode + modo BEAT/SMPT
 #define CONTENT_Y   HEADER_H            // inicio del área de canales (y)
 #define CONTENT_H   (P4_H - HEADER_H)   // 512px alto del área de canales
-#define CH_W        (P4_W / NUM_CH)     // 128px ancho por canal (columna)
+#define CH_W        (P4_W / NUM_CH)     // 64px ancho por canal (columna)
 
 // ── Header strip (LEGADO portrait — se elimina cuando todas las páginas migren) ──
 // TODO landscape: HEADER_X/HEADER_W/CH_H asumían portrait 480×800
@@ -115,15 +114,15 @@ extern volatile ConnectionState logicConnectionState;
 extern uint8_t g_logicConnected;
 
 // --- Variables de display ---
-extern String trackNames[9];
-extern bool recStates[8], soloStates[8], muteStates[8], selectStates[8];
-extern uint8_t vpotValues[8];
-extern float vuLevels[9];
-extern bool vuClipState[9];
-extern unsigned long vuLastUpdateTime[9];
-extern float vuPeakLevels[9];
-extern unsigned long vuPeakLastUpdateTime[9];
-extern float faderPositions[9];
+extern String trackNames[16];
+extern bool recStates[16], soloStates[16], muteStates[16], selectStates[16];
+extern uint8_t vpotValues[16];
+extern float vuLevels[16];
+extern bool vuClipState[16];
+extern unsigned long vuLastUpdateTime[16];
+extern float vuPeakLevels[16];
+extern unsigned long vuPeakLastUpdateTime[16];
+extern float faderPositions[16];
 extern bool needsTOTALRedraw;
 extern bool needsMainAreaRedraw;
 extern bool needsTimecodeRedraw;
