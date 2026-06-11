@@ -258,7 +258,8 @@ void setup() {
     // 8. RS485
     log_i("7. RS485.begin(%d)...", NUM_SLAVES);
     rs485.begin(NUM_SLAVES);
-    log_i("   RS485 OK — TX:%d RX:%d EN:%d", 
+    rs485.startTask();
+    log_i("   RS485 OK — TX:%d RX:%d EN:%d",
           RS485_TX_PIN, RS485_RX_PIN, RS485_ENABLE_PIN);
 
     // 9. Crear tareas
