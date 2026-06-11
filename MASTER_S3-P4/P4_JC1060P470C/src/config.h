@@ -71,19 +71,25 @@
 #define HEADER_X  410
 #define HEADER_W  (P4_W - HEADER_X)   // 70px
 
-// ── Colores UI — paleta Logic Pro (2026-06-11) ───────────────────
-#define COL_BG         0x1A1A1A   // fondo general
-#define COL_HEADER     0x000050   // header — no cambiar
-#define COL_MUTE_ON    0xFF0000   // botón M activo
-#define COL_MUTE_OFF   0x3A3A3A   // botón M inactivo
-#define COL_SOLO_ON    0xFFAA00   // botón S activo
-#define COL_SOLO_OFF   0x3A3A3A   // botón S inactivo
-#define COL_TRACK_BG   0x1E1E1E   // celda canal
-#define COL_TRACK_SEL  0x2A2A2A   // canal seleccionado
-#define COL_TRACK_SEP  0x333333   // separadores
-#define COL_TEXT_DIM   0x999999   // texto secundario
-#define COL_FADER_TRACK 0x555555  // ranura fader
-#define COL_FADER_THUMB 0x8C8C8C  // cabeza fader
+// ── Colores UI P4 (LVGL lv_color_hex) — referencia Logic Pro (2026-06-11) ──
+// Extraídos de captura Logic Pro con pantalla calibrada (junio 2026)
+#define COL_BG            0x2B2B2B   // fondo general arrange
+#define COL_BG_PANEL      0x2E2E2E   // panel inspector lateral
+#define COL_BG_CELL       0x404040   // celda vacía / track inactiva
+#define COL_TRACK_BG      0x3C3C3C   // cabecera canal (lista tracks)
+#define COL_TRACK_SEL     0x3A3020   // track seleccionada (tono cálido)
+#define COL_TRACK_SEP     0x505050   // separador horizontal entre tracks
+#define COL_BTN_INACTIVE  0x4A4A4A   // botones M/S/R/I off
+#define COL_TEXT_DIM      0x999999   // texto secundario / etiquetas
+#define COL_FADER_TRACK   0x606060   // ranura del fader
+#define COL_FADER_THUMB   0x707070   // cabeza (thumb) del fader
+
+// Colores funcionales
+#define COL_HEADER     0x000050   // strip header azul — no cambiar
+#define COL_MUTE_ON    0xFF0000
+#define COL_MUTE_OFF   0x400000
+#define COL_SOLO_ON    0xFFAA00
+#define COL_SOLO_OFF   0x333333
 
 // -- Automode
 #define COL_AUTO_READ   0x006600
