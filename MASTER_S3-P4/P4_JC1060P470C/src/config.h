@@ -77,7 +77,7 @@
 #define COL_BG_PANEL      0x1E1E1E   // panel inspector lateral
 #define COL_BG_CELL       0x2A2A2A   // celda vacía / track inactiva
 #define COL_TRACK_BG      0x222222   // cabecera canal (lista tracks)
-#define COL_TRACK_SEL     0x2B2B2B   // track seleccionada (resaltado)
+#define COL_TRACK_SEL     0x3D3D3D   // track seleccionada (resaltado)
 #define COL_TRACK_SEP     0x505050   // separador horizontal entre tracks
 #define COL_BTN_INACTIVE  0x4A4A4A   // botones M/S/R/I off
 #define COL_TEXT_DIM      0x999999   // texto secundario / etiquetas
