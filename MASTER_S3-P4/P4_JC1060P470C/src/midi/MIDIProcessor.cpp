@@ -544,6 +544,7 @@ void processNote(byte status, byte note, byte velocity) {
     if (note == 114) { if (is_on) { currentTimecodeMode = MODE_BEATS; needsHeaderRedraw = true; needsTimecodeRedraw = true; } return; }
     if (note == 0x73) { rudeSoloActive = is_on; needsTimecodeRedraw = true; return; }
     if (note == 0x56) { cycleActive    = is_on; needsTimecodeRedraw = true; return; }
+    if (note == 0x5E) { g_isPlaying   = is_on; return; }
 
     if (note <= 31) {
         int group     = note / 8;

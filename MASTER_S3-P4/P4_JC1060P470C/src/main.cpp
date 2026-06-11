@@ -44,6 +44,7 @@ bool btnStatePG1[32] = {}, btnStatePG2[32] = {};
 bool btnFlashPG1[32] = {}, btnFlashPG2[32] = {};
 bool rudeSoloActive = false;
 bool cycleActive    = false;
+bool g_isPlaying    = false;
 char timeCodeChars_clean[13] = {};
 char beatsChars_clean[13]    = {};
 DisplayMode currentTimecodeMode = MODE_BEATS;
