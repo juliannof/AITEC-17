@@ -71,9 +71,9 @@ void uiPage3Create(lv_obj_t* parent) {
 
         // VU — 12 segmentos apilados verticalmente (segmento 0 abajo)
         int seg_w = CH_W - 8;
-        int seg_h = (VU_H - 11) / 12;
+        int seg_h = (VU_H - 22) / 12;
         for (int s = 0; s < 12; s++) {
-            int seg_y = VU_TOP + (11 - s) * (seg_h + 1);
+            int seg_y = VU_TOP + (11 - s) * (seg_h + 2);
             s_vu_seg[i][s] = lv_obj_create(s_page_root);
             lv_obj_set_pos(s_vu_seg[i][s], x + 4, seg_y);
             lv_obj_set_size(s_vu_seg[i][s], seg_w, seg_h);
