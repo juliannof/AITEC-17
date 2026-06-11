@@ -405,8 +405,7 @@ ESP32-S3  ←→  RS485 bus B  ←→  8× ESP32-S2 (PTxx Track)
 │   ├── DISPLAY_P4.md                 ← ST7701S MIPI-DSI 480×800, LVGL v9 (2026-05-16)
 │   ├── TOUCH.md                      ← GT911 capacitivo I2C, calibración (2026-05-16)
 │   ├── NEOTRELLLIS.md                ← 2× seesaw 4×4 RGB, I2C (2026-05-16)
-│   ├── RS485_P4.md                   ← Bus A GPIO50-52, 9 slaves (2026-05-16)
-│   └── ARCHITECTURE_P4.md            ← Dual-core FreeRTOS, race conditions (2026-05-16)
+│   └── RS485_P4.md                   ← Bus A pines pendientes confirmar, 9 slaves (2026-06-11)
 ├── CHANGELOG.md                       ← Historial de cambios
 ├── README.md                          ← Intro repo
 └── platformio.ini                     ← Índice de subproyectos
@@ -434,8 +433,7 @@ ESP32-S3  ←→  RS485 bus B  ←→  8× ESP32-S2 (PTxx Track)
 - **DISPLAY_P4.md** — ST7701S MIPI-DSI 480×800, LVGL v9, portrait/landscape
 - **TOUCH.md** — GT911 capacitivo I2C, calibración, LVGL integration
 - **NEOTRELLLIS.md** — 2× seesaw 4×4 RGB, I2C control
-- **RS485_P4.md** — Bus A (GPIO50-52), 9 slaves, vs Bus B timing
-- **ARCHITECTURE_P4.md** — Dual-core FreeRTOS, race conditions, sincronización
+- **RS485_P4.md** — Bus A pines (pendientes confirmar esquemático), timing vs Bus B
 
 **Directivas:**
 - **CLAUDE.md** — Directivas vinculantes únicamente (no duplicar técnica)
@@ -615,7 +613,6 @@ loop() {
 - **Touch:** [docs/TOUCH.md](docs/TOUCH.md)
 - **NeoTrellis:** [docs/NEOTRELLLIS.md](docs/NEOTRELLLIS.md)
 - **RS485 P4:** [docs/RS485_P4.md](docs/RS485_P4.md)
-- **Arquitectura Tareas:** [docs/ARCHITECTURE_P4.md](docs/ARCHITECTURE_P4.md)
 
 ---
 
