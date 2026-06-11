@@ -126,7 +126,8 @@ void uiPage3Create(lv_obj_t* parent) {
         lv_obj_set_pos(s_select[i], x + 4, SEL_TOP);
         lv_obj_set_size(s_select[i], CH_W - 8, SEL_H);
         lv_obj_set_style_bg_color(s_select[i], lv_color_hex(COL_SOLO_OFF), 0);
-        lv_obj_set_style_border_width(s_select[i], 0, 0);
+        lv_obj_set_style_border_width(s_select[i], 1, 0);
+        lv_obj_set_style_border_color(s_select[i], lv_color_black(), 0);
         lv_obj_set_style_radius(s_select[i], 6, 0);
         lv_obj_clear_flag(s_select[i], LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_add_flag(s_select[i], LV_OBJ_FLAG_CLICKABLE);
@@ -146,7 +147,8 @@ void uiPage3Create(lv_obj_t* parent) {
         lv_obj_set_pos(s_mute[i], x + 4, MUTE_TOP);
         lv_obj_set_size(s_mute[i], CH_W - 8, MUTE_H);
         lv_obj_set_style_bg_color(s_mute[i], lv_color_hex(COL_MUTE_OFF), 0);
-        lv_obj_set_style_border_width(s_mute[i], 0, 0);
+        lv_obj_set_style_border_width(s_mute[i], 1, 0);
+        lv_obj_set_style_border_color(s_mute[i], lv_color_black(), 0);
         lv_obj_set_style_radius(s_mute[i], 6, 0);
         lv_obj_clear_flag(s_mute[i], LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_add_flag(s_mute[i], LV_OBJ_FLAG_CLICKABLE);
