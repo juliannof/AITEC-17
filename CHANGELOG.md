@@ -28,6 +28,44 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 ---
 
+### SESIÓN 2026-06-11 — VU P4: fixes clearClip + 0x72 + draw callback + header CLICK/LOOP (17:27)
+
+**VU optimization — UIPage3.cpp:**
+
+192 objetos LVGL individuales (`s_vu_seg[16][12]`) reemplazados por 16 objetos con `LV_EVENT_DRAW_MAIN` draw callback (`vu_draw_cb`). Los 12 segmentos se dibujan directamente en el render buffer con `lv_draw_rect()`. Ganancia: refresco fluido con 8+ VU metros activos.
+
+**Bug VU: clearClip sobreescribía vuLevels a 0 — commit `e206d9f`:**
+
+`processChannelPressure()` en el case `0x0F` (clearClip) leía `vuLevels[targetChannel]` sin aplicar `P4_CH_OFFSET=8`. Como `vuLevels[0..7]` siempre valen 0, `normalizedLevel=0` → `vuLevels[dispCh]=0` → barra caía a cero.
+
+**Por qué solo en subidas abruptas:** los transitorios rápidos clipan brevemente → Logic envía `0xE` seguido de `0xF` en milisegundos → clearClip mataba el nivel. Subidas lentas nunca generan clip+clearClip consecutivo.
+
+**Fix:** clearClip en rama propia — solo actualiza `vuClipState`, no toca `vuLevels`, `vuLastUpdateTime` ni peak. Misma arquitectura aplicada a `0x72`.
+
+**Bug VU: decodificación SysEx 0x72 incorrecta — commit `0e6ca2d`:**
+
+`case 0x72`: el código usaba `raw & 0x0F` como número de canal y `raw >> 4` como nivel. Todos los bytes con valor `0x04` producían `channel=4, dispCh=12, level=0`. Fix: canal = índice del bucle `i`, nivel = nibble bajo del byte. Misma lógica clearClip/newClip que Channel Pressure.
+
+**Análisis MIDI Monitor — cadencia Logic confirmada:**
+
+- Bursts de 8 mensajes (uno por strip activo) cada ~15-30ms
+- Strips silenciosos NO reciben `level=0` — Logic los omite del burst
+- Arquitectura timestamp-only-when->0 + decay 300ms es correcta para este comportamiento
+- `0x72` = volcado batch VU al conectar (no stream continuo durante playback)
+- `0x0E` = automodo por canal (Trim=3), NO datos VU
+
+**Header: indicador CLICK + LV_SYMBOL_LOOP — commits `48705f6` + `80c73d7`:**
+
+- Nota `0x59` (CLICK/metrónomo) procesada en `processNote()` → `g_clickActive`
+- Nuevo indicador `s_click_lbl` en header x=192, w=44 con `LV_SYMBOL_AUDIO`, morado activo
+- Ciclo `s_cycle_lbl`: `LV_SYMBOL_LEFT " " LV_SYMBOL_RIGHT` → `LV_SYMBOL_LOOP`
+- Reset de `g_clickActive` en GoOffline (`case 0x0F`)
+- Indicadores BEAT/LOOP/S no modificados
+
+**MCU afectadas:** P4 únicamente. S2/S3 sin cambios.
+
+---
+
 ### SESIÓN 2026-06-11 — Bug menú header + VU layout + paleta Logic Pro + legacy marking (03:04)
 
 **Bug menú header — `uiMenuInit()` llamada doble con parent incorrecto:**
