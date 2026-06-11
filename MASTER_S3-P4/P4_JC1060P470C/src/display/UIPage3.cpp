@@ -11,7 +11,7 @@
 // verticalmente de arriba a abajo — orden: botones → paneo → nombre → VU (2026-06-11)
 #define SEL_TOP      4
 #define SEL_H        52
-#define MUTE_TOP     (SEL_TOP + SEL_H + 4)    // 60
+#define MUTE_TOP     (SEL_TOP + SEL_H + 2)    // 58
 #define MUTE_H       52
 #define PAN_TOP      (MUTE_TOP + MUTE_H + 8)  // 120
 #define PAN_SZ       44                        // arco de panorama (cuadrado)
