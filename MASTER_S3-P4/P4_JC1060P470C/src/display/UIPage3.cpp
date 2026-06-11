@@ -9,7 +9,7 @@
 
 // Layout landscape: cada canal es una COLUMNA (CH_W × CONTENT_H), zonas apiladas
 // verticalmente de arriba a abajo — orden: botones → paneo → nombre → VU (2026-06-11)
-#define SEL_TOP      4
+#define SEL_TOP      6
 #define SEL_H        52
 #define MUTE_TOP     (SEL_TOP + SEL_H + 2)    // 58
 #define MUTE_H       52
