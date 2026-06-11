@@ -11,6 +11,7 @@ static lv_obj_t* s_tc_ghost   = NULL;
 static lv_obj_t* s_mode_lbl   = NULL;
 static lv_obj_t* s_solo_lbl   = NULL;
 static lv_obj_t* s_cycle_lbl  = NULL;
+static lv_obj_t* s_click_lbl  = NULL;
 
 // Beats: contenedor por bloque, ghost+real dentro al (0,0)
 static lv_obj_t* s_beat_cont[4]  = {};
@@ -96,6 +97,25 @@ void uiHeaderCreate(lv_obj_t* parent) {
         lv_label_set_text(t, "S");
         lv_obj_set_style_text_color(t, lv_color_hex(0x006666), 0);
         lv_obj_set_style_text_font(t, &lv_font_montserrat_28, 0);
+        lv_obj_center(t);
+    }
+
+    // ── Indicador CLICK ──────────────────────────────────────────
+    s_click_lbl = lv_obj_create(parent);
+    lv_obj_set_pos(s_click_lbl, 192, (HEADER_H - 34) / 2);
+    lv_obj_set_size(s_click_lbl, 44, 34);
+    lv_obj_set_style_bg_opa(s_click_lbl, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(s_click_lbl, 1, 0);
+    lv_obj_set_style_border_color(s_click_lbl, lv_color_hex(0x006666), 0);
+    lv_obj_set_style_radius(s_click_lbl, 4, 0);
+    lv_obj_set_style_pad_all(s_click_lbl, 0, 0);
+    lv_obj_clear_flag(s_click_lbl, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(s_click_lbl, LV_OBJ_FLAG_CLICKABLE);
+    {
+        lv_obj_t* t = lv_label_create(s_click_lbl);
+        lv_label_set_text(t, LV_SYMBOL_AUDIO);
+        lv_obj_set_style_text_color(t, lv_color_hex(0x006666), 0);
+        lv_obj_set_style_text_font(t, &lv_font_montserrat_14, 0);
         lv_obj_center(t);
     }
 
@@ -225,13 +245,28 @@ void uiHeaderUpdate() {
     if (s_solo_lbl) {
         lv_obj_t* lbl = lv_obj_get_child(s_solo_lbl, 0);
         if (rudeSoloActive) {
-            lv_obj_set_style_bg_color(s_solo_lbl, lv_color_hex(COL_AUTO_LATCH), 0);
+            lv_obj_set_style_bg_color(s_solo_lbl, lv_color_hex(0xAA00CC), 0);
             lv_obj_set_style_bg_opa(s_solo_lbl, LV_OPA_COVER, 0);
-            lv_obj_set_style_border_color(s_solo_lbl, lv_color_hex(COL_AUTO_LATCH), 0);
+            lv_obj_set_style_border_color(s_solo_lbl, lv_color_hex(0xAA00CC), 0);
             if (lbl) lv_obj_set_style_text_color(lbl, lv_color_white(), 0);
         } else {
             lv_obj_set_style_bg_opa(s_solo_lbl, LV_OPA_TRANSP, 0);
             lv_obj_set_style_border_color(s_solo_lbl, lv_color_hex(0x006666), 0);
+            if (lbl) lv_obj_set_style_text_color(lbl, lv_color_hex(0x006666), 0);
+        }
+    }
+
+    // Indicador CLICK
+    if (s_click_lbl) {
+        lv_obj_t* lbl = lv_obj_get_child(s_click_lbl, 0);
+        if (g_clickActive) {
+            lv_obj_set_style_bg_color(s_click_lbl, lv_color_hex(0xAA00CC), 0);
+            lv_obj_set_style_bg_opa(s_click_lbl, LV_OPA_COVER, 0);
+            lv_obj_set_style_border_color(s_click_lbl, lv_color_hex(0xAA00CC), 0);
+            if (lbl) lv_obj_set_style_text_color(lbl, lv_color_white(), 0);
+        } else {
+            lv_obj_set_style_bg_opa(s_click_lbl, LV_OPA_TRANSP, 0);
+            lv_obj_set_style_border_color(s_click_lbl, lv_color_hex(0x006666), 0);
             if (lbl) lv_obj_set_style_text_color(lbl, lv_color_hex(0x006666), 0);
         }
     }
@@ -287,6 +322,7 @@ void uiHeaderDestroy() {
     for (int i = 0; i < 3; i++) {
         if (s_beat_dot[i]) { lv_obj_delete(s_beat_dot[i]); s_beat_dot[i] = NULL; }
     }
+    if (s_click_lbl)  { lv_obj_delete(s_click_lbl);  s_click_lbl  = NULL; }
     if (s_cycle_lbl) { lv_obj_delete(s_cycle_lbl); s_cycle_lbl = NULL; }
     if (s_solo_lbl)  { lv_obj_delete(s_solo_lbl);  s_solo_lbl  = NULL; }
     if (s_mode_lbl)  { lv_obj_delete(s_mode_lbl);  s_mode_lbl  = NULL; }

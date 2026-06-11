@@ -381,6 +381,7 @@ void processMackieSysEx(byte* payload, int len) {
             g_selectedChannel = -1;
             rudeSoloActive = false;
             cycleActive    = false;
+            g_clickActive  = false;
             for (int i = 0; i < 8; i++) trackNames[P4_CH_OFFSET + i] = "";
             for (uint8_t i = 1; i <= NUM_SLAVES; i++) rs485.setFlags(i, 0);
             rs485.beginDisconnectSequence();
@@ -551,6 +552,7 @@ void processNote(byte status, byte note, byte velocity) {
     if (note == 114) { if (is_on) { currentTimecodeMode = MODE_BEATS; needsHeaderRedraw = true; needsTimecodeRedraw = true; } return; }
     if (note == 0x73) { rudeSoloActive = is_on; needsTimecodeRedraw = true; return; }
     if (note == 0x56) { cycleActive    = is_on; needsTimecodeRedraw = true; return; }
+    if (note == 0x59) { g_clickActive  = is_on; needsTimecodeRedraw = true; return; }
 
     if (note <= 31) {
         int group     = note / 8;
