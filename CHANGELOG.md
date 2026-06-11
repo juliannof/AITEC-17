@@ -123,6 +123,51 @@ Propuesta via IAC Bus (macOS MIDI): S3 re-emite MIDI a P4 por MIDI UART. P4 most
 
 ---
 
+### SESIÓN 2026-06-11 — UI P4: SOLO/MUTE paleta + filo + UIPage1 landscape + header interactivo + docs limpieza (22:34)
+
+**SOLO/MUTE off → gris 0x3A3A3A — commit `034ea9a`:**
+
+- `COL_MUTE_OFF` 0x400000 → 0x3A3A3A y `COL_SOLO_OFF` 0x333333 → 0x3A3A3A en `config.h`.
+- Coherente con paleta Logic Pro (botones off = gris neutro, no rojizo).
+
+**Filo negro 1px en botones SOLO/MUTE off — commit `2a37f67`:**
+
+- `UIPage3.cpp`: `border_width=1`, `border_color=0x000000` cuando el botón está inactivo.
+- Diferencia visual clara entre el botón y el fondo de celda en estado off.
+
+**Limpieza docs/ — commit `b79ae89`:**
+
+Cuatro archivos obsoletos eliminados:
+- `docs/ARCHITECTURE_P4.md` — datos de procesador incorrectos, tareas desactualizadas.
+- `docs/S3ToP4.md` — snapshot 2026-05-24 con rutas incorrectas; bugs relevantes ya en CHANGELOG.
+- `docs/16TRACKS.md` — plan migrado a tabla pendientes CHANGELOG.
+- `docs/ESTRUCTURA_REORGANIZACION.md` — histórico ya superado.
+
+`docs/RS485_P4.md` actualizado: advertencia pines pendientes confirmar, nota `NUM_SLAVES`, fecha 2026-06-11. `CLAUDE.md` limpiado de referencias a los docs borrados.
+
+**UIPage1 landscape + header interactivo — commit `aa50792`:**
+
+`UIPage1.cpp`:
+- Grid reescrito a **10 columnas × 5 filas** (`P1_COLS=10`, `P1_ROWS=5`), cada celda `(P4_W/10) × (CONTENT_H/5)` ≈ 102×102 px.
+- Slots sin nota MIDI (`MIDI_NOTES_PG1[i]==0x00`) se ocultan (`s_btns[i]=NULL`).
+- D-pad (índices 44-47): texto → `LV_SYMBOL_UP/DOWN/LEFT/RIGHT`.
+- Color de texto negro automático sobre fondos claros (`needsBlackText()`).
+
+`UIHeader.cpp` — botones táctiles en el strip:
+- `header_btn_cb`: `LV_EVENT_PRESSED` → nota ON (0x7F), `LV_EVENT_RELEASED` → nota OFF (0x00) via `sendMIDIBytes()`. Permite pulsar SOLO, CYCLE, CLICK y MODO directamente desde la pantalla.
+- `nav_btn_cb`: tres botones de navegación (Botones/VUMetros/Faders) en el header → `g_switchToPage1/3A/3B`.
+- `applyNavState()` / `applyModeState()`: resaltado activo/inactivo con `COL_HEADER_BRIGHT/DIM`.
+- `s_lastPage` tracking para actualizar el resaltado solo cuando cambia la página.
+
+`MIDIProcessor.cpp`:
+- `formatTimecode()`: recorte de grupos extra cuando hay más de 4 dos-puntos (evita timecode con 5 grupos).
+- Reset de `btnStatePG1` / `btnFlashPG1` en GoOffline.
+- AutoMode: notas 74-78 mapeadas a `AUTO_READ/WRITE/TRIM/TOUCH/LATCH` con guard `g_selectedChannel`.
+
+**MCU afectadas:** P4 únicamente. S2/S3 sin cambios.
+
+---
+
 ### SESIÓN 2026-06-10 — BEATS display fix + documentación botones P4 (19:09)
 
 **Fix BEATS — mapeo buffer → bloques incorrecto:**
