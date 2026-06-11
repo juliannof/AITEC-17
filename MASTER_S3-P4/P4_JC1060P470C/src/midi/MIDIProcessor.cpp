@@ -24,6 +24,8 @@ namespace {
     static const unsigned long MIDI_TIMEOUT_MS = 0;
     static const int DISCONNECT_THRESHOLD = 9;
     static const unsigned long DISCONNECT_WINDOW_MS = 150;
+    static const int16_t PITCHBEND_DEADBAND = 80;
+    static int16_t lastSentPitchBend[9] = {INT16_MIN, INT16_MIN, INT16_MIN, INT16_MIN, INT16_MIN, INT16_MIN, INT16_MIN, INT16_MIN, INT16_MIN};
 
     static int8_t  g_selectedChannel    = -1;
     static unsigned long connectedSinceTime  = 0;
@@ -379,7 +381,8 @@ void processMackieSysEx(byte* payload, int len) {
             cycleActive    = false;
             for (int i = 0; i < 9; i++) trackNames[i] = "";
             for (uint8_t i = 1; i <= NUM_SLAVES; i++) rs485.setFlags(i, 0);
-            log_i("[MCU] GoOffline recibido");
+            rs485.beginDisconnectSequence();
+            log_i("[MCU] GoOffline recibido — iniciando DISCONNECT SEQUENCE");
             break;
         }
 
@@ -414,7 +417,7 @@ void processMackieSysEx(byte* payload, int len) {
             sendMIDIBytes(echo, sizeof(echo));
             byte sub[]  = {0xF0, 0x00, 0x00, 0x66, DEVICE_FAMILY, 0x10, 0x00, 0xF7};
             sendMIDIBytes(sub, sizeof(sub));
-            log_i("[MCU] 0x0C echo + 0x10 suscripcion feedback");
+            log_v("[MCU] 0x0C echo + 0x10 suscripcion feedback");
             break;
         }
 
@@ -462,6 +465,7 @@ void processMackieSysEx(byte* payload, int len) {
             for (int t = 0; t < 8; t++) {
                 if (!nameChanged[t]) continue;
                 trimRight(nameBufs[t]);
+                if (nameBufs[t][0] == '\0') continue;
                 if (trackNames[t] == nameBufs[t]) continue;
                 trackNames[t] = String(nameBufs[t]);
                 needsMainAreaRedraw = true;
@@ -485,8 +489,9 @@ void processMackieSysEx(byte* payload, int len) {
         }
 
         case 0x61: {
-            g_logicConnected = 0;
-            log_i("[MCU] AllFaderstoMinimum — bloqueando fader targets");
+            for (uint8_t i = 1; i <= NUM_SLAVES; i++)
+                rs485.setFaderTarget(i, 0);
+            log_i("[MCU] AllFaderstoMinimum — faders a 0");
             break;
         }
 
@@ -641,9 +646,14 @@ void processPitchBend(byte channel, int bendValue) {
     }
 
     if (channel < 9) {
-        uint16_t fader14bit = (uint16_t)bendValue;
-        if (channel < 8) rs485.setFaderTarget(channel + 1, fader14bit);
-        float faderPositionNormalized = (float)fader14bit / 16383.0f;
+        int bendClamped = (bendValue < 0) ? 0 : bendValue;
+        if (channel < 8) {
+            if (abs(bendClamped - (int)lastSentPitchBend[channel]) > PITCHBEND_DEADBAND) {
+                rs485.setFaderTarget(channel + 1, (uint16_t)bendClamped);
+                lastSentPitchBend[channel] = (int16_t)bendClamped;
+            }
+        }
+        float faderPositionNormalized = (float)bendClamped / (float)LOGIC_PITCHBEND_MAX;
         if (abs(faderPositions[channel] - faderPositionNormalized) > 0.001f) {
             faderPositions[channel] = faderPositionNormalized;
             needsMainAreaRedraw = true;

@@ -48,6 +48,7 @@
 #define RS485_RESP_TIMEOUT_US 5000
 #define RS485_GAP_US          300
 #define POLL_CYCLE_MS         20
+#define LOGIC_PITCHBEND_MAX   14845
 
 
 // ── Dimensiones display (JD9165 1024×600 landscape nativo) (2026-06-09) ──

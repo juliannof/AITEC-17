@@ -231,6 +231,11 @@ void RS485Master::_handleResponse() {
         xSemaphoreGive(_mutex);
     }
 
+    if (_disconnecting && _currentId == _disconnectLastId) {
+        _disconnecting = false;
+        log_i("[RS485] DISCONNECT SEQUENCE completada — todos los slaves notificados");
+    }
+
     _rxCount++;
 }
 
@@ -239,6 +244,14 @@ void RS485Master::_handleResponse() {
 
 void RS485Master::_nextSlave() {
     _currentId++;
+    if (_disconnecting) {
+        if (_currentId > _disconnectLastId) {
+            _disconnecting = false;
+            _currentId     = 1;
+            log_i("[RS485] DISCONNECT SEQUENCE completada");
+        }
+        return;
+    }
     if (_currentId > _numSlaves) {
         _currentId = 1;
         uint32_t elapsed = millis() - _cycleStart;
@@ -320,4 +333,18 @@ void RS485Master::printStats() const {
 
 void RS485Master::resetStats() {
     _txCount = _rxCount = _timeouts = _crcErrors = 0;
+}
+
+void RS485Master::beginDisconnectSequence() {
+    _disconnecting       = true;
+    _disconnectLastId    = _numSlaves;
+    _disconnectStartTime = millis();
+    _currentId           = 1;
+    log_i("[RS485] DISCONNECT SEQUENCE iniciada para slaves 1..%d", _numSlaves);
+}
+
+bool RS485Master::isDisconnectComplete() const {
+    if (!_disconnecting) return true;
+    if (millis() - _disconnectStartTime > 5000) return true;
+    return _currentId > _disconnectLastId;
 }

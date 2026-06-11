@@ -64,6 +64,9 @@ public:
     const ChannelData& getChannel     (uint8_t id);
 
 
+    void beginDisconnectSequence();
+    bool isDisconnectComplete() const;
+
     void printStats() const;
     void resetStats();
 
@@ -86,6 +89,10 @@ private:
     uint32_t _rxCount   = 0;
     uint32_t _timeouts  = 0;
     uint32_t _crcErrors = 0;
+
+    bool     _disconnecting       = false;
+    uint8_t  _disconnectLastId    = 0;
+    uint32_t _disconnectStartTime = 0;
 
     void _sendPacket   (uint8_t id);
     bool _readResponse ();
