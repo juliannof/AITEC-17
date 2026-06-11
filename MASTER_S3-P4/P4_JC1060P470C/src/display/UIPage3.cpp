@@ -70,12 +70,12 @@ void uiPage3Create(lv_obj_t* parent) {
         lv_obj_clear_flag(s_track_bg[i], LV_OBJ_FLAG_SCROLLABLE);
 
         // VU — 12 segmentos apilados verticalmente (segmento 0 abajo)
-        int seg_w = CH_W - 12;
+        int seg_w = CH_W - 4;
         int seg_h = (VU_H - 11) / 12;
         for (int s = 0; s < 12; s++) {
             int seg_y = VU_TOP + (11 - s) * (seg_h + 1);
             s_vu_seg[i][s] = lv_obj_create(s_page_root);
-            lv_obj_set_pos(s_vu_seg[i][s], x + 6, seg_y);
+            lv_obj_set_pos(s_vu_seg[i][s], x + 2, seg_y);
             lv_obj_set_size(s_vu_seg[i][s], seg_w, seg_h);
             lv_obj_set_style_border_width(s_vu_seg[i][s], 0, 0);
             lv_obj_set_style_radius(s_vu_seg[i][s], 1, 0);
