@@ -6,8 +6,6 @@
 
 extern USBMIDI MIDI;
 extern void updateLeds();
-extern bool btnStatePG1[32];
-extern bool btnStatePG2[32];
 extern uint8_t g_logicConnected;
 
 namespace {
@@ -47,8 +45,6 @@ float masterPeakLevel = 0.0f;
 bool masterClip = false;
 unsigned long masterMeterDecayTimer = 0;
 
-extern bool btnFlashPG1[32];
-extern bool btnFlashPG2[32];
 uint8_t g_channelAutoMode[8] = {};
 
 void tickCalibracion() {
@@ -235,7 +231,15 @@ String formatTimecodeString() {
     formatted[pos] = '\0';
     String result = String(formatted);
     result.trim();
-    return (result.length() == 0) ? "--:--:--:--" : result;
+    if (result.length() == 0) return "--:--:--:--";
+    // Si hay más de 4 grupos (4+ colones), quitar el primer grupo
+    int colonCount = 0;
+    for (int j = 0; j < (int)result.length(); j++) if (result[j] == ':') colonCount++;
+    if (colonCount >= 4) {
+        int firstColon = result.indexOf(':');
+        if (firstColon >= 0) result = result.substring(firstColon + 1);
+    }
+    return result;
 }
 
 String formatBeatString() {
@@ -251,8 +255,8 @@ String formatBeatString() {
     if (!anyDigit) return "   1. 1. 1.  1";
 
     const int starts[4] = {0, 6, 4, 7};
-    const int counts[4] = {3, 1, 1, 3};
-    const int widths[4] = {3, 1, 1, 3};
+    const int counts[4] = {4, 1, 1, 3};
+    const int widths[4] = {4, 1, 1, 3};
 
     char result[16] = {};
     int  pos        = 0;
@@ -373,10 +377,8 @@ void processMackieSysEx(byte* payload, int len) {
             memset(vuPeakFadeTime, 0, sizeof(vuPeakFadeTime));
             memset(vuPeakAlpha, 255, sizeof(vuPeakAlpha));
             memset(faderPositions, 0, sizeof(faderPositions));
-            memset(btnStatePG1,  0, sizeof(bool) * 32);
-            memset(btnStatePG2,  0, sizeof(bool) * 32);
-            memset(btnFlashPG1,  0, sizeof(bool) * 32);
-            memset(btnFlashPG2,  0, sizeof(bool) * 32);
+            memset(btnStatePG1,  0, sizeof(bool) * BTN_PG1_COUNT);
+            memset(btnFlashPG1,  0, sizeof(bool) * BTN_PG1_COUNT);
             memset(g_channelAutoMode, 0, sizeof(g_channelAutoMode));
             g_selectedChannel = -1;
             rudeSoloActive = false;
@@ -583,14 +585,14 @@ void processNote(byte status, byte note, byte velocity) {
         return;
     }
 
-    if (note >= 74 && note <= 79 && is_on && g_selectedChannel >= 0) {
+    if (note >= 74 && note <= 78 && is_on && g_selectedChannel >= 0) {
         const AutoMode modeMap[] = {
-            AUTO_READ, AUTO_WRITE, AUTO_TRIM, AUTO_TOUCH, AUTO_LATCH, AUTO_OFF
+            AUTO_READ, AUTO_WRITE, AUTO_TRIM, AUTO_TOUCH, AUTO_LATCH
         };
         AutoMode mode = modeMap[note - 74];
         g_channelAutoMode[g_selectedChannel] = (uint8_t)mode;
         rs485.setAutoMode(g_selectedChannel + 1, mode);
-        for (int key = 0; key < 32; key++) {
+        for (int key = 0; key < BTN_PG1_COUNT; key++) {
             if (MIDI_NOTES_PG1[key] != 0x00 && MIDI_NOTES_PG1[key] == note) {
                 btnStatePG1[key]  = is_on;
                 btnFlashPG1[key]  = is_flashing;
@@ -602,18 +604,11 @@ void processNote(byte status, byte note, byte velocity) {
     }
 
     bool stateChanged = false;
-    for (int key = 0; key < 32; key++) {
+    for (int key = 0; key < BTN_PG1_COUNT; key++) {
         if (MIDI_NOTES_PG1[key] != 0x00 && MIDI_NOTES_PG1[key] == note) {
             if (btnStatePG1[key] != is_on || btnFlashPG1[key] != is_flashing) {
                 btnStatePG1[key]  = is_on;
                 btnFlashPG1[key]  = is_flashing;
-                stateChanged = true;
-            }
-        }
-        if (MIDI_NOTES_PG2[key] != 0x00 && MIDI_NOTES_PG2[key] == note) {
-            if (btnStatePG2[key] != is_on || btnFlashPG2[key] != is_flashing) {
-                btnStatePG2[key]  = is_on;
-                btnFlashPG2[key]  = is_flashing;
                 stateChanged = true;
             }
         }

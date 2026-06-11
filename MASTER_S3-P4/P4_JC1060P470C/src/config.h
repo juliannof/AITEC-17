@@ -49,6 +49,7 @@
 #define RS485_GAP_US          300
 #define POLL_CYCLE_MS         20
 #define LOGIC_PITCHBEND_MAX   14845
+#define BTN_PG1_COUNT         50
 
 
 // ── Dimensiones display (JD9165 1024×600 landscape nativo) (2026-06-09) ──
@@ -85,7 +86,11 @@
 #define COL_FADER_THUMB   0x707070   // cabeza (thumb) del fader
 
 // Colores funcionales
-#define COL_HEADER     0x000050   // strip header azul — no cambiar
+// ── Header — paleta aceptada: COL_HEADER* (azules) · COL_AUTO_LATCH (naranja) · COL_CLICK_ON (púrpura)
+#define COL_HEADER        0x000050   // fondo strip
+#define COL_HEADER_DIM    0x006666   // azul oscuro: indicadores inactivos, ghost timecode
+#define COL_HEADER_BRIGHT 0x00FFFF   // azul claro: timecode activo, indicadores activos, borde SMPT/BEAT
+#define COL_CLICK_ON      0xAA00CC   // púrpura: metrónomo activo
 #define COL_MUTE_ON    0xFF0000
 #define COL_MUTE_OFF   0x3A3A3A
 #define COL_SOLO_ON    0xFFAA00
@@ -133,10 +138,8 @@ extern bool needsButtonsRedraw;
 extern bool needsVUMetersRedraw;
 extern bool needsHeaderRedraw;
 extern String assignmentString;
-extern bool btnStatePG1[32];
-extern bool btnStatePG2[32];
-extern bool btnFlashPG1[32];
-extern bool btnFlashPG2[32];
+extern bool btnStatePG1[BTN_PG1_COUNT];
+extern bool btnFlashPG1[BTN_PG1_COUNT];
 extern bool rudeSoloActive;
 extern bool cycleActive;
 extern bool g_clickActive;
@@ -172,39 +175,28 @@ static const uint32_t PALETTE_HEX[9] = {
     0xDDDDDD,  // 7: blanco
     0xFF6600,  // 8: naranja
 };
-static const char* LABELS_PG1[32] = {
-    "TRACK","PAN",  "EQ",   "SEND", "PLUG", "INST", "FLIP", "GLOB",
-    "READ", "WRITE", "TOUCH",  "LATCH", "TRIM", "OFF",  "SOLO0","SMPT",
-    "CALIB","SCRUB","NUDGE","MARK", "CHAN<","CHAN>", "BANK<","BANK>",
-    "UNDO", "SAVE", "SHIFT","CTRL", "OPT",  "CMD",  "ENTER",">>PG2"
+static const char* LABELS_PG1[BTN_PG1_COUNT] = {
+    "TRACK","SEND", "PAN",  "PLUG", "EQ",   "INST", "BANK<","BANK>","CH<",  "CH>",
+    "F1",   "F2",   "F3",   "F4",   "F5",   "F6",   "F7",   "F8",   "FLIP", "GLOB",
+    "MTRK", "INP",  "ATRC", "AINST","AUX",  "BUS",  "OUT",  "USR",  "ZOOM", "SCRUB",
+    "READ", "WRITE","TRIM", "TOUCH","LATCH","GROUP", "SAVE", "UNDO", "CNCL", "ENTER",
+    "MARK", "NUDGE","DROP", "RPLC", "UP",   "DOWN", "LEFT", "RIGHT","NAME", ""
 };
 
-static const char* LABELS_PG1_SHIFT[32] = {
-    "GLOBAL","FINE",   "LOW",  "MID",   "HI",    "FREQ",  "___",   "___",
-    "OFF",   "TRIM",   "LTCH", "TCH",   "WRIT",  "READ",  "UNSOLO","UNMUTE",
-    "SHIFT", "ALT",    "OPT",  "CMD",   "CHAN<", "CHAN>", "ZOOM-", "ZOOM+",
-    "REDO",  "SAVE AS","OK",   "CNCL",  "MARK",  "NUDGE", "TAP",   ">>PG2"
+static const uint8_t BTN_COLOR_IDX[BTN_PG1_COUNT] = {
+    5, 5, 5, 5, 5, 5, 3, 3, 3, 3,
+    7, 7, 7, 7, 7, 7, 7, 7, 6, 6,
+    5, 5, 5, 5, 5, 5, 5, 5, 3, 3,
+    2, 6, 8, 3, 8, 5, 2, 6, 6, 2,
+    4, 4, 4, 4, 3, 3, 3, 3, 5, 0
 };
 
-static const uint8_t BTN_COLOR_IDX[32] = {
-    5, 5, 5, 5, 5, 5, 6, 6,
-    2, 6, 4, 8, 8, 2, 2, 2,
-    4, 4, 4, 4, 3, 3, 3, 3,
-    6, 2, 7, 7, 7, 7, 2, 1
-};
-
-// --- Notas MIDI ---
-static const byte MIDI_NOTES_PG1[32] = {
-    0x28,0x2A,0x2C,0x29,0x2B,0x2D,0x32,0x33,
-    0x4A,0x4B,0x4D,0x4E,0x4C,0x4F,0x57,0x35,
-    0x00,0x65,0x66,0x54,0x30,0x31,0x2E,0x2F,
-    0x51,0x50,0x46,0x47,0x48,0x49,0x53,0x00
-};
-
-static const byte MIDI_NOTES_PG2[32] = {
-    0x36,0x37,0x38,0x39,0x3A,0x3B,0x3C,0x3D,
-    0x3E,0x3F,0x40,0x41,0x42,0x43,0x44,0x45,
-    0x64,0x65,0x66,0x54,0x30,0x31,0x2E,0x2F,
-    0x4C,0x50,0x46,0x47,0x48,0x49,0x52,0x00
+// --- Notas MIDI (página única 10×5) ---
+static const byte MIDI_NOTES_PG1[BTN_PG1_COUNT] = {
+    0x28,0x29,0x2A,0x2B,0x2C,0x2D,0x2E,0x2F,0x30,0x31,  // row 0: assignment + bank/ch
+    0x36,0x37,0x38,0x39,0x3A,0x3B,0x3C,0x3D,0x32,0x33,  // row 1: F1-F8 + flip/glob
+    0x3E,0x3F,0x40,0x41,0x42,0x43,0x44,0x45,0x64,0x65,  // row 2: global view + zoom/scrub
+    0x4A,0x4B,0x4C,0x4D,0x4E,0x4F,0x50,0x51,0x52,0x53,  // row 3: automation + utilities
+    0x54,0x55,0x57,0x58,0x60,0x61,0x62,0x63,0x34,0x00   // row 4: edit + nav + name
 };
 

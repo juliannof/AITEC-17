@@ -5,9 +5,9 @@
 
 extern void sendMIDIBytes(const uint8_t* data, size_t len);
 
-#define P1_COLS        8
-#define P1_ROWS        4
-#define P1_BTN_COUNT   32
+#define P1_COLS        10
+#define P1_ROWS        5
+#define P1_BTN_COUNT   BTN_PG1_COUNT
 #define P1_BTN_MARGIN  4
 #define P1_RADIUS      6
 
@@ -18,7 +18,6 @@ static lv_obj_t*  s_btns[P1_BTN_COUNT] = {};
 static lv_obj_t*  s_lbls[P1_BTN_COUNT] = {};
 static lv_color_t s_colActive[P1_BTN_COUNT];
 static lv_color_t s_colInactive[P1_BTN_COUNT];
-static bool       s_shiftActive        = false;
 
 static lv_color_t dimHex(uint32_t hex) {
     return lv_color_make(
@@ -41,16 +40,10 @@ static void applyButtonState(int i, bool active) {
     lv_color_t bg = active ? s_colActive[i] : s_colInactive[i];
     lv_obj_set_style_bg_color(s_btns[i], bg, LV_PART_MAIN);
 
-    lv_color_t txtColor;
-    if (active && needsBlackText(BTN_COLOR_IDX[i]))
-        txtColor = lv_color_black();
-    else if (s_shiftActive)
-        txtColor = lv_color_hex(0xFFFF00);
-    else
-        txtColor = lv_color_white();
-
+    lv_color_t txtColor = (active && needsBlackText(BTN_COLOR_IDX[i]))
+        ? lv_color_black()
+        : lv_color_white();
     lv_obj_set_style_text_color(s_lbls[i], txtColor, LV_PART_MAIN);
-
 }
 
 static void btn_event_cb(lv_event_t* e) {
@@ -58,16 +51,11 @@ static void btn_event_cb(lv_event_t* e) {
     int idx = (int)(intptr_t)lv_event_get_user_data(e);
 
     if (code == LV_EVENT_PRESSED) {
-        if (idx == 31) {
-            // TODO: cambio a PG2 cuando esté implementada
-            return;
-        }
         if (MIDI_NOTES_PG1[idx] != 0x00) {
             uint8_t msg[3] = { 0x90, MIDI_NOTES_PG1[idx], 0x7F };
             sendMIDIBytes(msg, 3);
         }
     } else if (code == LV_EVENT_RELEASED) {
-        if (idx == 31) return;
         if (MIDI_NOTES_PG1[idx] != 0x00) {
             uint8_t msg[3] = { 0x90, MIDI_NOTES_PG1[idx], 0x00 };
             sendMIDIBytes(msg, 3);
@@ -91,25 +79,32 @@ void uiPage1Create(lv_obj_t* parent) {
     lv_obj_clear_flag(s_page, LV_OBJ_FLAG_SCROLL_CHAIN_VER);
     lv_obj_add_flag(s_page, LV_OBJ_FLAG_CLICKABLE);
 
-    // Landscape: 8 columnas × 4 filas
-    int32_t cell_w = P4_W      / P1_COLS;   // 128px
-    int32_t cell_h = CONTENT_H / P1_ROWS;   // 128px
+    // 10 columnas × 5 filas → 102×102px por celda
+    int32_t cell_w = P4_W      / P1_COLS;
+    int32_t cell_h = CONTENT_H / P1_ROWS;
     int32_t btn_w  = cell_w - P1_BTN_MARGIN * 2;
     int32_t btn_h  = cell_h - P1_BTN_MARGIN * 2;
 
     for (int i = 0; i < P1_BTN_COUNT; i++) {
-        int col = i % P1_COLS;   // 0-7
-        int row = i / P1_COLS;   // 0-3
+        // Ocultar slots sin nota MIDI
+        if (MIDI_NOTES_PG1[i] == 0x00) {
+            s_btns[i] = NULL;
+            s_lbls[i] = NULL;
+            continue;
+        }
+
+        int col = i % P1_COLS;
+        int row = i / P1_COLS;
 
         uint8_t ci = BTN_COLOR_IDX[i];
         s_colActive[i]   = lv_color_hex(PALETTE_HEX[ci]);
         s_colInactive[i] = dimHex(PALETTE_HEX[ci]);
 
         lv_obj_t* btn = lv_obj_create(s_page);
-        lv_obj_set_pos(btn,
-               col * cell_w + P1_BTN_MARGIN,
-               row * cell_h + P1_BTN_MARGIN);
+        lv_obj_set_pos(btn, col * cell_w + P1_BTN_MARGIN,
+                            row * cell_h + P1_BTN_MARGIN);
         lv_obj_set_size(btn, btn_w, btn_h);
+
         lv_obj_set_style_radius(btn, P1_RADIUS, 0);
         lv_obj_set_style_border_width(btn, 1, 0);
         lv_obj_set_style_border_color(btn, lv_color_hex(0x555555), 0);
@@ -119,7 +114,12 @@ void uiPage1Create(lv_obj_t* parent) {
         lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
 
         lv_obj_t* lbl = lv_label_create(btn);
-        lv_label_set_text(lbl, LABELS_PG1[i]);
+        // D-pad: símbolos LVGL en vez de texto
+        if      (i == 44) lv_label_set_text(lbl, LV_SYMBOL_UP);
+        else if (i == 45) lv_label_set_text(lbl, LV_SYMBOL_DOWN);
+        else if (i == 46) lv_label_set_text(lbl, LV_SYMBOL_LEFT);
+        else if (i == 47) lv_label_set_text(lbl, LV_SYMBOL_RIGHT);
+        else              lv_label_set_text(lbl, LABELS_PG1[i]);
         lv_label_set_long_mode(lbl, LV_LABEL_LONG_CLIP);
         lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
         lv_obj_center(lbl);
@@ -134,13 +134,12 @@ void uiPage1Create(lv_obj_t* parent) {
     }
 
     log_i("[UIPage1] Creada: cell_w=%d cell_h=%d btn=%dx%d",
-          (int)cell_w, (int)cell_h, (int)btn_w, (int)btn_h);
+          (int)cell_w, (int)cell_h, (int)btn_w);
 }
 
 void uiPage1UpdateButton(int index, bool active) {
     if (index < 0 || index >= P1_BTN_COUNT) return;
     applyButtonState(index, active);
-    if (index == 26) uiPage1SetShift(active);
 }
 
 void uiPage1Update() {
@@ -154,18 +153,8 @@ void uiPage1Update() {
 void uiPage1UpdateAllButtons() {
     for (int i = 0; i < P1_BTN_COUNT; i++)
         applyButtonState(i, btnStatePG1[i]);
-    s_shiftActive = btnStatePG1[26];
 }
 
-void uiPage1SetShift(bool shiftActive) {
-    if (s_shiftActive == shiftActive) return;
-    s_shiftActive = shiftActive;
-    const char** labels = shiftActive ? LABELS_PG1_SHIFT : LABELS_PG1;
-    for (int i = 0; i < P1_BTN_COUNT; i++) {
-        if (s_lbls[i]) lv_label_set_text(s_lbls[i], labels[i]);
-        applyButtonState(i, btnStatePG1[i]);
-    }
-}
 
 void uiPage1SetVisible(bool visible) {
     if (!s_page) return;
@@ -181,7 +170,6 @@ void uiPage1Destroy() {
             s_btns[i] = NULL;
             s_lbls[i] = NULL;
         }
-        s_shiftActive = false;
         log_i("[UIPage1] Destruida");
     }
 }
