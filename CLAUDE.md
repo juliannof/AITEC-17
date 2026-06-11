@@ -70,7 +70,7 @@
   - `S2/S2_V1/src/config.h` — configuración S2
   - `MASTER_S3-P4/S3/iMakie-ESP32_S3_EXTENDER/src/config.h` — configuración S3
   - `MASTER_S3-P4/P4_JC1060P470C/src/config.h` — configuración P4 (placa JC1060P470C, activa)
-  - `MASTER_S3-P4/P4_JC4880P433C/src/config.h` — configuración P4 (placa JC4880P433C, legado)
+  - `MASTER_S3-P4/P4_JC4880P433C/src/config.h` — configuración P4 (placa JC4880P433C, proyecto futuro independiente — NO modificar)
 - **NUNCA asumir valores** — verificar config.h ANTES de hacer cambios
 - **NUM_SLAVES y pines GPIO están SIEMPRE en config.h**, no en memoria u otro lado
 - **Ejemplo actual (2026-05-16):**
@@ -581,11 +581,31 @@ loop() {
 
 ---
 
+## Hardware activo — P4 (2026-06-11 03:10)
+
+**Subproyecto activo:** `MASTER_S3-P4/P4_JC1060P470C/`
+
+| Parámetro | Valor |
+|-----------|-------|
+| Placa | GUITION JC1060P470C-I-W-Y |
+| Display | 7", 1024×600 landscape nativo, driver JD9165 MIPI-DSI |
+| Touch | GT911, I2C SDA=GPIO7 / SCL=GPIO8 |
+| RS485 | TX=GPIO43, RX=GPIO44, DE=GPIO42 |
+| Backlight | GPIO23 |
+| LCD_RST | GPIO27 |
+| USB flash | USB-OTG (`/dev/cu.usbmodem`) |
+
+**Subproyecto ELIMINADO del desarrollo activo: `P4_JC4880P433C/`**
+- **NO tocar. NO referenciar.** Será una nueva interfaz independiente con NeoTrellis y pantalla 480×800 ST7701S portrait.
+- Cualquier cambio P4 va en `P4_JC1060P470C/` únicamente.
+
+---
+
 ## Hardware P4 (master) — 📌 Ver MASTER_S3-P4/P4_JC1060P470C/README.md
 
 **Migración de placa (2026-06-09):** JC4880P433C → JC1060P470C.
 - `P4_JC1060P470C/` — placa activa (display JD9165 1024×600, touch GT911, sin NeoTrellis)
-- `P4_JC4880P433C/` — legado, se traslada a proyecto propio
+- `P4_JC4880P433C/` — proyecto separado futuro (NeoTrellis + pantalla propia, no modificar)
 
 **Documentación exhaustiva:**
 → **[MASTER_S3-P4/P4_JC1060P470C/README.md](MASTER_S3-P4/P4_JC1060P470C/README.md)** (pinout, subsistemas diferenciados)
