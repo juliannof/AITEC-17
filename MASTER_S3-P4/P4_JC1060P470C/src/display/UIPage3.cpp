@@ -204,7 +204,7 @@ void uiPage3Update() {
             lv_arc_set_value(s_arc[i], pan);
             // tabla pos 0-11 → valor Logic (-64..+63)
             static const int8_t PAN_VAL[12] = {
-                0, -64, -51, -38, -26, -13, 0, 13, 25, 38, 51, 63
+                0, -64, -48, -36, -24, -12, 0, 10, 20, 30, 40, 63
             };
             char pan_txt[5];
             if (pos == 0 || pos == 6) snprintf(pan_txt, sizeof(pan_txt), "C");
