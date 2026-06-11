@@ -75,7 +75,7 @@ void uiHeaderCreate(lv_obj_t* parent) {
     lv_obj_clear_flag(s_cycle_lbl, LV_OBJ_FLAG_CLICKABLE);
     {
         lv_obj_t* t = lv_label_create(s_cycle_lbl);
-        lv_label_set_text(t, LV_SYMBOL_LEFT " " LV_SYMBOL_RIGHT);
+        lv_label_set_text(t, LV_SYMBOL_LOOP);
         lv_obj_set_style_text_color(t, lv_color_hex(0x006666), 0);
         lv_obj_set_style_text_font(t, &lv_font_montserrat_14, 0);
         lv_obj_center(t);
