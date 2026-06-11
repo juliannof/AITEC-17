@@ -31,8 +31,8 @@ static lv_obj_t* s_select[NUM_CH]    = {};
 static lv_obj_t* s_trackname[NUM_CH] = {};
 static lv_obj_t* s_arc[NUM_CH]       = {};
 static lv_obj_t* s_vu[NUM_CH]        = {};
-// VU — 12 segmentos
-static lv_obj_t* s_vu_seg[NUM_CH][12] = {};
+
+static void vu_draw_cb(lv_event_t* e);
 
 static lv_obj_t* s_slider_panel      = NULL;
 static lv_obj_t* s_slider            = NULL;
@@ -71,30 +71,21 @@ void uiPage3Create(lv_obj_t* parent) {
         lv_obj_set_style_radius(s_track_bg[i], 0, 0);
         lv_obj_clear_flag(s_track_bg[i], LV_OBJ_FLAG_SCROLLABLE);
 
-        // VU — 12 segmentos apilados verticalmente (segmento 0 abajo)
-        int seg_w = CH_W - 8;
-        int seg_h = (VU_H - 22) / 12;
-        for (int s = 0; s < 12; s++) {
-            int seg_y = VU_TOP + (11 - s) * (seg_h + 2);
-            s_vu_seg[i][s] = lv_obj_create(s_page_root);
-            lv_obj_set_pos(s_vu_seg[i][s], x + 4, seg_y);
-            lv_obj_set_size(s_vu_seg[i][s], seg_w, seg_h);
-            lv_obj_set_style_border_width(s_vu_seg[i][s], 0, 0);
-            lv_obj_set_style_radius(s_vu_seg[i][s], 1, 0);
-            lv_obj_clear_flag(s_vu_seg[i][s], LV_OBJ_FLAG_SCROLLABLE);
-            lv_color_t off_color;
-            if      (s < 8)  off_color = lv_color_hex(0x003300);
-            else if (s < 10) off_color = lv_color_hex(0x333300);
-            else             off_color = lv_color_hex(0x330000);
-            lv_obj_set_style_bg_color(s_vu_seg[i][s], off_color, 0);
-            lv_obj_add_flag(s_vu_seg[i][s], LV_OBJ_FLAG_CLICKABLE);
-            lv_obj_add_event_cb(s_vu_seg[i][s], [](lv_event_t* e) {
-                int col = (int)(intptr_t)lv_event_get_user_data(e);
-                int midiCh = (col >= P4_CH_OFFSET) ? col - P4_CH_OFFSET : col;
-                byte msg[3] = { 0x90, (uint8_t)(0x18 + midiCh), 127 };
-                sendMIDIBytes(msg, 3);
-            }, LV_EVENT_CLICKED, (void*)(intptr_t)i);
-        }
+        // VU — objeto único con draw callback (16 obj vs 192 segmentos)
+        s_vu[i] = lv_obj_create(s_page_root);
+        lv_obj_set_pos(s_vu[i], x + 4, VU_TOP);
+        lv_obj_set_size(s_vu[i], CH_W - 8, VU_H);
+        lv_obj_set_style_bg_opa(s_vu[i], LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(s_vu[i], 0, 0);
+        lv_obj_clear_flag(s_vu[i], LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_flag(s_vu[i], LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(s_vu[i], vu_draw_cb, LV_EVENT_DRAW_MAIN, (void*)(intptr_t)i);
+        lv_obj_add_event_cb(s_vu[i], [](lv_event_t* e) {
+            int col = (int)(intptr_t)lv_event_get_user_data(e);
+            int midiCh = (col >= P4_CH_OFFSET) ? col - P4_CH_OFFSET : col;
+            byte msg[3] = { 0x90, (uint8_t)(0x18 + midiCh), 127 };
+            sendMIDIBytes(msg, 3);
+        }, LV_EVENT_CLICKED, (void*)(intptr_t)i);
 
         // nombre de pista
         lv_obj_t* tn_cont = lv_obj_create(s_page_root);
@@ -219,29 +210,7 @@ void uiPage3Update() {
 
     if (needsVUMetersRedraw) {
         for (int i = 0; i < NUM_CH; i++) {
-            int active = (int)round(vuLevels[i] * 12.0f);
-            int peak   = (int)round(vuPeakLevels[i] * 12.0f);
-            if (peak > 0) peak--;
-            bool showPeak = (vuPeakLevels[i] > vuLevels[i] + 0.001f) && vuPeakAlpha[i] > 0;
-            if (!showPeak) peak = -1;
-
-            for (int s = 0; s < 12; s++) {
-                uint32_t onCol  = (s < 8) ? 0x00E600 : (s < 10) ? 0xFFFF00 : 0xFF0000;
-                uint32_t offCol = (s < 8) ? 0x003300 : (s < 10) ? 0x333300 : 0x330000;
-                uint32_t hex;
-
-                if (s == 11 && vuClipState[i]) {
-                    hex = 0xFF0000;
-                } else if (s < active) {
-                    hex = onCol;
-                } else if (s == peak) {
-                    hex = (vuPeakAlpha[i] == 255) ? onCol
-                                                  : blendHex(onCol, offCol, vuPeakAlpha[i]);
-                } else {
-                    hex = offCol;
-                }
-                lv_obj_set_style_bg_color(s_vu_seg[i][s], lv_color_hex(hex), 0);
-            }
+            lv_obj_invalidate(s_vu[i]);
         }
         needsVUMetersRedraw = false;
     }
@@ -256,6 +225,60 @@ static uint32_t blendHex(uint32_t a, uint32_t b, uint8_t alpha) {
     return ((uint32_t)((ra * alpha + rb * (255 - alpha)) >> 8) << 16) |
            ((uint32_t)((ga * alpha + gb * (255 - alpha)) >> 8) <<  8) |
             (uint32_t)((ba * alpha + bb * (255 - alpha)) >> 8);
+}
+
+// ****************************************************************************
+// Draw callback VU — dibuja 12 segmentos directamente en el render buffer
+// Sustituye 192 objetos LVGL individuales → 16 objetos con draw callback
+// ****************************************************************************
+static void vu_draw_cb(lv_event_t* e) {
+    int i = (int)(intptr_t)lv_event_get_user_data(e);
+    lv_layer_t* layer = lv_event_get_layer(e);
+    lv_obj_t*   obj   = lv_event_get_target(e);
+
+    const int seg_w = CH_W - 8;
+    const int seg_h = (VU_H - 22) / 12;
+    const int gap   = 2;
+
+    int active = (int)round(vuLevels[i] * 12.0f);
+    int peak   = (int)round(vuPeakLevels[i] * 12.0f);
+    if (peak > 0) peak--;
+    bool showPeak = (vuPeakLevels[i] > vuLevels[i] + 0.001f) && vuPeakAlpha[i] > 0;
+    if (!showPeak) peak = -1;
+
+    lv_area_t obj_coords;
+    lv_obj_get_coords(obj, &obj_coords);
+
+    lv_draw_rect_dsc_t dsc;
+    lv_draw_rect_dsc_init(&dsc);
+    dsc.radius       = 1;
+    dsc.border_width = 0;
+    dsc.bg_opa       = LV_OPA_COVER;
+
+    for (int s = 0; s < 12; s++) {
+        uint32_t onCol  = (s < 8) ? 0x00E600 : (s < 10) ? 0xFFFF00 : 0xFF0000;
+        uint32_t offCol = (s < 8) ? 0x003300 : (s < 10) ? 0x333300 : 0x330000;
+        uint32_t hex;
+
+        if (s == 11 && vuClipState[i]) {
+            hex = 0xFF0000;
+        } else if (s < active) {
+            hex = onCol;
+        } else if (s == peak) {
+            hex = (vuPeakAlpha[i] == 255) ? onCol : blendHex(onCol, offCol, vuPeakAlpha[i]);
+        } else {
+            hex = offCol;
+        }
+
+        dsc.bg_color = lv_color_hex(hex);
+        lv_area_t seg_area = {
+            obj_coords.x1,
+            obj_coords.y1 + (int32_t)((11 - s) * (seg_h + gap)),
+            obj_coords.x1 + (int32_t)(seg_w - 1),
+            obj_coords.y1 + (int32_t)((11 - s) * (seg_h + gap) + seg_h - 1)
+        };
+        lv_draw_rect(layer, &dsc, &seg_area);
+    }
 }
 
 // ****************************************************************************
