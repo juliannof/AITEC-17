@@ -199,7 +199,7 @@ void processControlChange(byte channel, byte controller, byte value) {
     if (controller >= 48 && controller <= 55) {
         uint8_t strip = controller - 48;
         rs485.setVPotValue(strip + 1, value);
-        vpotValues[strip] = value;
+        vpotValues[strip + P4_CH_OFFSET] = value;
         needsButtonsRedraw = true;
         log_v("[VPot] strip=%u raw=0x%02X mode=%u pos=%u center=%u",
               strip, value, (value >> 4) & 0x03, value & 0x0F, (value >> 6) & 0x01);
@@ -308,23 +308,24 @@ void processChannelPressure(byte channel, byte value) {
     }
 
     if (targetChannel != -1) {
+        int dispCh = targetChannel + P4_CH_OFFSET;
         bool stateChanged = false;
-        if (normalizedLevel >= vuLevels[targetChannel] || normalizedLevel == 0.0f)
-            vuLastUpdateTime[targetChannel] = millis();
+        if (normalizedLevel >= vuLevels[dispCh] || normalizedLevel == 0.0f)
+            vuLastUpdateTime[dispCh] = millis();
         if (clearClip) {
-            if (vuClipState[targetChannel]) { vuClipState[targetChannel] = false; stateChanged = true; }
+            if (vuClipState[dispCh]) { vuClipState[dispCh] = false; stateChanged = true; }
         } else if (newClipState) {
-            if (!vuClipState[targetChannel]) { vuClipState[targetChannel] = true; stateChanged = true; }
+            if (!vuClipState[dispCh]) { vuClipState[dispCh] = true; stateChanged = true; }
         }
-        if (normalizedLevel > vuLevels[targetChannel]) {
-            vuLevels[targetChannel] = normalizedLevel;
-            if (normalizedLevel > vuPeakLevels[targetChannel]) {
-                vuPeakLevels[targetChannel] = normalizedLevel;
-                vuPeakLastUpdateTime[targetChannel] = millis();
+        if (normalizedLevel > vuLevels[dispCh]) {
+            vuLevels[dispCh] = normalizedLevel;
+            if (normalizedLevel > vuPeakLevels[dispCh]) {
+                vuPeakLevels[dispCh] = normalizedLevel;
+                vuPeakLastUpdateTime[dispCh] = millis();
             }
             stateChanged = true;
-        } else if (normalizedLevel == 0.0f && vuLevels[targetChannel] != 0.0f) {
-            vuLevels[targetChannel] = 0.0f;
+        } else if (normalizedLevel == 0.0f && vuLevels[dispCh] != 0.0f) {
+            vuLevels[dispCh] = 0.0f;
             stateChanged = true;
         }
         if (stateChanged) needsVUMetersRedraw = true;
@@ -379,7 +380,7 @@ void processMackieSysEx(byte* payload, int len) {
             g_selectedChannel = -1;
             rudeSoloActive = false;
             cycleActive    = false;
-            for (int i = 0; i < 9; i++) trackNames[i] = "";
+            for (int i = 0; i < 8; i++) trackNames[P4_CH_OFFSET + i] = "";
             for (uint8_t i = 1; i <= NUM_SLAVES; i++) rs485.setFlags(i, 0);
             rs485.beginDisconnectSequence();
             log_i("[MCU] GoOffline recibido — iniciando DISCONNECT SEQUENCE");
@@ -397,10 +398,10 @@ void processMackieSysEx(byte* payload, int len) {
                 needsTOTALRedraw     = true;
                 fadersAtMinMask      = 0;
                 for (uint8_t i = 0; i < 8; i++) {
-                    if (selectStates[i]) {
+                    if (selectStates[P4_CH_OFFSET + i]) {
                         byte offMsg[3] = { 0x80, (uint8_t)(24 + i), 0x00 };
                         sendMIDIBytes(offMsg, 3);
-                        selectStates[i] = false;
+                        selectStates[P4_CH_OFFSET + i] = false;
                     }
                 }
                 _calibPendingFrom = 1;
@@ -451,7 +452,7 @@ void processMackieSysEx(byte* payload, int len) {
             bool nameChanged[8] = {};
 
             for (int t = 0; t < 8; t++) {
-                strncpy(nameBufs[t], trackNames[t].c_str(), 7);
+                strncpy(nameBufs[t], trackNames[P4_CH_OFFSET + t].c_str(), 7);
                 nameBufs[t][7] = '\0';
             }
 
@@ -466,8 +467,8 @@ void processMackieSysEx(byte* payload, int len) {
                 if (!nameChanged[t]) continue;
                 trimRight(nameBufs[t]);
                 if (nameBufs[t][0] == '\0') continue;
-                if (trackNames[t] == nameBufs[t]) continue;
-                trackNames[t] = String(nameBufs[t]);
+                if (trackNames[P4_CH_OFFSET + t] == nameBufs[t]) continue;
+                trackNames[P4_CH_OFFSET + t] = String(nameBufs[t]);
                 needsMainAreaRedraw = true;
                 needsButtonsRedraw  = true;
                 rs485.setTrackName(t + 1, nameBufs[t]);
@@ -505,9 +506,9 @@ void processMackieSysEx(byte* payload, int len) {
                 bool clip    = (raw == 0x0F);
                 if (channel < 8) {
                     float normalized = level / 7.0f;
-                    if (vuLevels[channel] != normalized) {
-                        vuLevels[channel]    = normalized;
-                        vuClipState[channel] = clip;
+                    if (vuLevels[channel + P4_CH_OFFSET] != normalized) {
+                        vuLevels[channel + P4_CH_OFFSET]    = normalized;
+                        vuClipState[channel + P4_CH_OFFSET] = clip;
                         needsVUMetersRedraw  = true;
                     }
                     rs485.setVuLevel(channel + 1, (uint8_t)(normalized * 127.0f));
@@ -547,11 +548,11 @@ void processNote(byte status, byte note, byte velocity) {
         int track_idx = note % 8;
         bool stateChanged = false;
         switch (group) {
-            case 0: if (recStates[track_idx]    != is_on) { recStates[track_idx]    = is_on; stateChanged = true; } break;
-            case 1: if (soloStates[track_idx]   != is_on) { soloStates[track_idx]   = is_on; stateChanged = true; } break;
-            case 2: if (muteStates[track_idx]   != is_on) { muteStates[track_idx]   = is_on; stateChanged = true; } break;
+            case 0: if (recStates[track_idx + P4_CH_OFFSET]    != is_on) { recStates[track_idx + P4_CH_OFFSET]    = is_on; stateChanged = true; } break;
+            case 1: if (soloStates[track_idx + P4_CH_OFFSET]   != is_on) { soloStates[track_idx + P4_CH_OFFSET]   = is_on; stateChanged = true; } break;
+            case 2: if (muteStates[track_idx + P4_CH_OFFSET]   != is_on) { muteStates[track_idx + P4_CH_OFFSET]   = is_on; stateChanged = true; } break;
             case 3:
-                if (selectStates[track_idx] != is_on) { selectStates[track_idx] = is_on; stateChanged = true; }
+                if (selectStates[track_idx + P4_CH_OFFSET] != is_on) { selectStates[track_idx + P4_CH_OFFSET] = is_on; stateChanged = true; }
                 if (is_on) g_selectedChannel = track_idx;
                 else if (g_selectedChannel == track_idx) g_selectedChannel = -1;
                 break;
@@ -561,10 +562,10 @@ void processNote(byte status, byte note, byte velocity) {
             needsButtonsRedraw  = true;
             uint8_t slaveId = track_idx + 1;
             uint8_t flags = 0;
-            if (recStates[track_idx])    flags |= FLAG_REC;
-            if (soloStates[track_idx])   flags |= FLAG_SOLO;
-            if (muteStates[track_idx])   flags |= FLAG_MUTE;
-            if (selectStates[track_idx]) flags |= FLAG_SELECT;
+            if (recStates[track_idx + P4_CH_OFFSET])    flags |= FLAG_REC;
+            if (soloStates[track_idx + P4_CH_OFFSET])   flags |= FLAG_SOLO;
+            if (muteStates[track_idx + P4_CH_OFFSET])   flags |= FLAG_MUTE;
+            if (selectStates[track_idx + P4_CH_OFFSET]) flags |= FLAG_SELECT;
             flags = setAutoMode(flags, (AutoMode)g_channelAutoMode[track_idx]);
             rs485.setFlags(slaveId, flags);
         }
@@ -653,10 +654,12 @@ void processPitchBend(byte channel, int bendValue) {
                 lastSentPitchBend[channel] = (int16_t)bendClamped;
             }
         }
-        float faderPositionNormalized = (float)bendClamped / (float)LOGIC_PITCHBEND_MAX;
-        if (abs(faderPositions[channel] - faderPositionNormalized) > 0.001f) {
-            faderPositions[channel] = faderPositionNormalized;
-            needsMainAreaRedraw = true;
+        if (channel < 8) {
+            float faderPositionNormalized = (float)bendClamped / (float)LOGIC_PITCHBEND_MAX;
+            if (abs(faderPositions[channel + P4_CH_OFFSET] - faderPositionNormalized) > 0.001f) {
+                faderPositions[channel + P4_CH_OFFSET] = faderPositionNormalized;
+                needsMainAreaRedraw = true;
+            }
         }
     }
 }

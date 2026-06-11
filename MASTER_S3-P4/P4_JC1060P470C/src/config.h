@@ -62,6 +62,7 @@
 #define CONTENT_Y   HEADER_H            // inicio del área de canales (y)
 #define CONTENT_H   (P4_H - HEADER_H)   // 512px alto del área de canales
 #define CH_W        (P4_W / NUM_CH)     // 64px ancho por canal (columna)
+#define P4_CH_OFFSET 8                  // slots 0-7=S3 (izq), 8-15=P4 nativo (der)
 
 // ── Header strip (LEGADO portrait — se elimina cuando todas las páginas migren) ──
 // TODO landscape: HEADER_X/HEADER_W/CH_H asumían portrait 480×800

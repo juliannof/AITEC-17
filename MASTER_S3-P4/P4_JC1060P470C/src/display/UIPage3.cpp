@@ -70,12 +70,12 @@ void uiPage3Create(lv_obj_t* parent) {
         lv_obj_clear_flag(s_track_bg[i], LV_OBJ_FLAG_SCROLLABLE);
 
         // VU — 12 segmentos apilados verticalmente (segmento 0 abajo)
-        int seg_w = CH_W - 16;
+        int seg_w = CH_W - 12;
         int seg_h = (VU_H - 11) / 12;
         for (int s = 0; s < 12; s++) {
             int seg_y = VU_TOP + (11 - s) * (seg_h + 1);
             s_vu_seg[i][s] = lv_obj_create(s_page_root);
-            lv_obj_set_pos(s_vu_seg[i][s], x + 8, seg_y);
+            lv_obj_set_pos(s_vu_seg[i][s], x + 6, seg_y);
             lv_obj_set_size(s_vu_seg[i][s], seg_w, seg_h);
             lv_obj_set_style_border_width(s_vu_seg[i][s], 0, 0);
             lv_obj_set_style_radius(s_vu_seg[i][s], 1, 0);
@@ -87,8 +87,9 @@ void uiPage3Create(lv_obj_t* parent) {
             lv_obj_set_style_bg_color(s_vu_seg[i][s], off_color, 0);
             lv_obj_add_flag(s_vu_seg[i][s], LV_OBJ_FLAG_CLICKABLE);
             lv_obj_add_event_cb(s_vu_seg[i][s], [](lv_event_t* e) {
-                int ch = (int)(intptr_t)lv_event_get_user_data(e);
-                byte msg[3] = { 0x90, (uint8_t)(0x18 + ch), 127 };
+                int col = (int)(intptr_t)lv_event_get_user_data(e);
+                int midiCh = (col >= P4_CH_OFFSET) ? col - P4_CH_OFFSET : col;
+                byte msg[3] = { 0x90, (uint8_t)(0x18 + midiCh), 127 };
                 sendMIDIBytes(msg, 3);
             }, LV_EVENT_CLICKED, (void*)(intptr_t)i);
         }
@@ -141,8 +142,9 @@ void uiPage3Create(lv_obj_t* parent) {
         lv_obj_set_style_text_color(sel_lbl, lv_color_hex(0xFFFFFF), 0);
         lv_obj_center(sel_lbl);
         lv_obj_add_event_cb(s_select[i], [](lv_event_t* e) {
-            int ch = (int)(intptr_t)lv_event_get_user_data(e);
-            byte msg[3] = { 0x90, (uint8_t)(0x08 + ch), 127 };
+            int col = (int)(intptr_t)lv_event_get_user_data(e);
+            int midiCh = (col >= P4_CH_OFFSET) ? col - P4_CH_OFFSET : col;
+            byte msg[3] = { 0x90, (uint8_t)(0x08 + midiCh), 127 };
             sendMIDIBytes(msg, 3);
         }, LV_EVENT_CLICKED, (void*)(intptr_t)i);
 
@@ -160,8 +162,9 @@ void uiPage3Create(lv_obj_t* parent) {
         lv_obj_set_style_text_color(mute_lbl, lv_color_hex(0xFFFFFF), 0);
         lv_obj_center(mute_lbl);
         lv_obj_add_event_cb(s_mute[i], [](lv_event_t* e) {
-            int ch = (int)(intptr_t)lv_event_get_user_data(e);
-            byte msg[3] = { 0x90, (uint8_t)(0x10 + ch), 127 };
+            int col = (int)(intptr_t)lv_event_get_user_data(e);
+            int midiCh = (col >= P4_CH_OFFSET) ? col - P4_CH_OFFSET : col;
+            byte msg[3] = { 0x90, (uint8_t)(0x10 + midiCh), 127 };
             sendMIDIBytes(msg, 3);
         }, LV_EVENT_CLICKED, (void*)(intptr_t)i);
     }
