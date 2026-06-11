@@ -501,19 +501,27 @@ void processMackieSysEx(byte* payload, int len) {
             if (len < 13) break;
             lastMidiActivityTime = millis();
             for (int i = 0; i < 8; i++) {
-                byte raw     = payload[5 + i];
-                byte channel = raw & 0x0F;
-                byte level   = (raw >> 4);
-                bool clip    = (raw == 0x0F);
-                if (channel < 8) {
-                    float normalized = level / 7.0f;
-                    if (vuLevels[channel + P4_CH_OFFSET] != normalized) {
-                        vuLevels[channel + P4_CH_OFFSET]    = normalized;
-                        vuClipState[channel + P4_CH_OFFSET] = clip;
-                        needsVUMetersRedraw  = true;
+                byte mcu_level = payload[5 + i] & 0x0F;
+                int  dispCh    = i + P4_CH_OFFSET;
+                bool stateChanged = false;
+                bool clearClip = (mcu_level == 0x0F);
+                bool newClip   = (mcu_level == 0x0E);
+                if (clearClip) {
+                    if (vuClipState[dispCh]) { vuClipState[dispCh] = false; stateChanged = true; }
+                } else {
+                    float normalized = (newClip || mcu_level >= 0x0C) ? 1.0f
+                                     : (mcu_level <= 11) ? (float)mcu_level / 11.0f : 0.0f;
+                    if (normalized > 0.0f) vuLastUpdateTime[dispCh] = millis();
+                    if (newClip && !vuClipState[dispCh]) { vuClipState[dispCh] = true; stateChanged = true; }
+                    if (normalized != vuLevels[dispCh]) { vuLevels[dispCh] = normalized; stateChanged = true; }
+                    if (normalized > vuPeakLevels[dispCh]) {
+                        vuPeakLevels[dispCh] = normalized;
+                        vuPeakLastUpdateTime[dispCh] = millis();
+                        stateChanged = true;
                     }
-                    rs485.setVuLevel(channel + 1, (uint8_t)(normalized * 127.0f));
+                    rs485.setVuLevel(i + 1, (uint8_t)(normalized * 127.0f));
                 }
+                if (stateChanged) needsVUMetersRedraw = true;
             }
             break;
         }
