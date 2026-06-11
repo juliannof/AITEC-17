@@ -24,6 +24,22 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 ---
 
+### SESIÓN 2026-06-12 — P4 Header: VPot assignment strip + marco timecode (00:02)
+
+**Assignment display — VPot names en pie del header:**
+
+`MIDIProcessor.cpp` `case 0x12`: el bucle que antes hacía `break` en offset 56 ahora captura offsets 56–111 (8 × 7 chars = nombres de VPot que Logic envía al pulsar PAN/SEND/etc.). Resultado en `vpotAssignNames[8]`, trigger `needsHeaderRedraw`.
+
+`UIHeader.cpp`: header extendido de 88px a 110px (`ASSIGN_STRIP_H=22`). Añadidos 8 labels `s_vpot_lbl[0..7]` en `y=HEADER_H`, ancho `CH_W=64px`, alineados con columnas P4 (x=512..960). Color `COL_HEADER_BRIGHT`. Se actualizan en `uiHeaderUpdate()` cuando `needsHeaderRedraw`.
+
+`config.h`: `#define ASSIGN_STRIP_H 22`, `CONTENT_Y` → `HEADER_H + ASSIGN_STRIP_H` (y=110), `CONTENT_H` → 490px. Añadido `extern String vpotAssignNames[8]`.
+
+**Marco timecode fijo 1px:**
+
+`UIHeader.cpp`: `s_tc_frame` — rectángulo decorativo alrededor del timecode SMPTE/BEAT. Creado tras segundo `lv_obj_update_layout()` para medir posición y ancho reales del label. Border 1px `COL_HEADER_BRIGHT`, radius 8 (esquinas redondeadas), fondo transparente. Tamaño: +100px ancho (+50 cada lado), +10px alto (+5 cada lado). Fijo, siempre visible.
+
+---
+
 ### SESIÓN 2026-06-11 — VU P4: fixes clearClip + 0x72 + draw callback + header CLICK/LOOP (17:27)
 
 **VU optimization — UIPage3.cpp:**

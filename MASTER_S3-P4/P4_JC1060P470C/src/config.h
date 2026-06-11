@@ -59,9 +59,10 @@
 #define CH_H    (P4_H / NUM_CH)
 
 // ── Layout landscape nativo 1024×600 (header arriba + 16 canales en columnas) ──
-#define HEADER_H    88                  // franja superior: timecode + modo BEAT/SMPT
-#define CONTENT_Y   HEADER_H            // inicio del área de canales (y)
-#define CONTENT_H   (P4_H - HEADER_H)   // 512px alto del área de canales
+#define HEADER_H        88              // franja superior: timecode + modo BEAT/SMPT
+#define ASSIGN_STRIP_H  22              // franja VPot assignment names (pie del header)
+#define CONTENT_Y       (HEADER_H + ASSIGN_STRIP_H)  // inicio canales y=110
+#define CONTENT_H       (P4_H - CONTENT_Y)           // alto canales 490px
 #define CH_W        (P4_W / NUM_CH)     // 64px ancho por canal (columna)
 #define P4_CH_OFFSET 8                  // slots 0-7=S3 (izq), 8-15=P4 nativo (der)
 
@@ -116,6 +117,7 @@ extern uint8_t g_logicConnected;
 
 // --- Variables de display ---
 extern String trackNames[16];
+extern String vpotAssignNames[8];
 extern bool recStates[16], soloStates[16], muteStates[16], selectStates[16];
 extern uint8_t vpotValues[16];
 extern float vuLevels[16];

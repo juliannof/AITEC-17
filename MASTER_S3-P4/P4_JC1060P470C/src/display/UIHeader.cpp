@@ -47,6 +47,7 @@ static lv_obj_t* s_fa_lbl     = NULL;
 static lv_obj_t* s_bo_hit     = NULL;
 static lv_obj_t* s_vu_hit     = NULL;
 static lv_obj_t* s_fa_hit     = NULL;
+static lv_obj_t* s_vpot_lbl[8] = {};
 static uint8_t   s_lastPage   = 255;
 
 // Beats: contenedor por bloque, ghost+real dentro al (0,0)
@@ -54,6 +55,7 @@ static lv_obj_t* s_beat_cont[4]  = {};
 static lv_obj_t* s_beat_ghost[4] = {};
 static lv_obj_t* s_beat_real[4]  = {};
 static lv_obj_t* s_beat_dot[3]   = {};
+static lv_obj_t* s_tc_frame      = NULL;
 
 extern String formatTimecodeString();
 extern char timeCodeChars_clean[13];
@@ -100,7 +102,7 @@ void uiHeaderCreate(lv_obj_t* parent) {
     // ── Strip azul ────────────────────────────────────────────────
     s_strip = lv_obj_create(parent);
     lv_obj_set_pos(s_strip, 0, 0);
-    lv_obj_set_size(s_strip, P4_W, HEADER_H);
+    lv_obj_set_size(s_strip, P4_W, HEADER_H + ASSIGN_STRIP_H);
     lv_obj_set_style_bg_color(s_strip, lv_color_hex(COL_HEADER), 0);
     lv_obj_set_style_border_width(s_strip, 0, 0);
     lv_obj_set_style_radius(s_strip, 0, 0);
@@ -242,6 +244,22 @@ void uiHeaderCreate(lv_obj_t* parent) {
     lv_obj_align(s_tc_ghost, LV_ALIGN_TOP_MID, 0, pos_y);
     lv_obj_align(s_timecode, LV_ALIGN_TOP_MID, 0, pos_y);
 
+    lv_obj_update_layout(parent);
+    {
+        int tw = lv_obj_get_width(s_timecode);
+        int tx = lv_obj_get_x(s_timecode);
+        s_tc_frame = lv_obj_create(parent);
+        lv_obj_set_pos(s_tc_frame, tx - 56, pos_y - 9);
+        lv_obj_set_size(s_tc_frame, tw + 112, th + 18);
+        lv_obj_set_style_bg_opa(s_tc_frame, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(s_tc_frame, 1, 0);
+        lv_obj_set_style_border_color(s_tc_frame, lv_color_hex(COL_HEADER_BRIGHT), 0);
+        lv_obj_set_style_radius(s_tc_frame, 8, 0);
+        lv_obj_set_style_pad_all(s_tc_frame, 0, 0);
+        lv_obj_clear_flag(s_tc_frame, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_clear_flag(s_tc_frame, LV_OBJ_FLAG_CLICKABLE);
+    }
+
     // ── BEATS: 4 bloques + 3 puntos separadores ──────────────────
     {
         const int dw          = 40;
@@ -349,11 +367,38 @@ void uiHeaderCreate(lv_obj_t* parent) {
     }
     updateNavButtons();
 
+    // ── VPot assignment strip (pie del header, alineado con columnas P4) ──
+    for (int i = 0; i < 8; i++) {
+        int col_x = (P4_CH_OFFSET + i) * CH_W;
+        s_vpot_lbl[i] = lv_label_create(parent);
+        lv_obj_set_pos(s_vpot_lbl[i], col_x, HEADER_H);
+        lv_obj_set_size(s_vpot_lbl[i], CH_W, ASSIGN_STRIP_H);
+        lv_obj_set_style_text_color(s_vpot_lbl[i], lv_color_hex(COL_HEADER_BRIGHT), 0);
+        lv_obj_set_style_text_font(s_vpot_lbl[i], &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_align(s_vpot_lbl[i], LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_bg_opa(s_vpot_lbl[i], LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(s_vpot_lbl[i], 0, 0);
+        lv_obj_set_style_pad_all(s_vpot_lbl[i], 0, 0);
+        lv_label_set_long_mode(s_vpot_lbl[i], LV_LABEL_LONG_CLIP);
+        lv_obj_clear_flag(s_vpot_lbl[i], LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_clear_flag(s_vpot_lbl[i], LV_OBJ_FLAG_CLICKABLE);
+        lv_label_set_text(s_vpot_lbl[i], "");
+    }
+
     uiMenuInit(parent);
 }
 
 void uiHeaderUpdate() {
     if (g_currentPage != s_lastPage) updateNavButtons();
+
+    if (needsHeaderRedraw) {
+        needsHeaderRedraw = false;
+        for (int i = 0; i < 8; i++) {
+            if (s_vpot_lbl[i])
+                lv_label_set_text(s_vpot_lbl[i], vpotAssignNames[i].c_str());
+        }
+    }
+
     if (!needsTimecodeRedraw) return;
     static uint32_t lastRedraw = 0;
     uint32_t now = millis();
@@ -456,6 +501,9 @@ void uiHeaderUpdate() {
 
 void uiHeaderDestroy() {
     uiMenuDestroy();
+    for (int i = 0; i < 8; i++) {
+        if (s_vpot_lbl[i]) { lv_obj_delete(s_vpot_lbl[i]); s_vpot_lbl[i] = NULL; }
+    }
     for (int b = 0; b < 4; b++) {
         if (s_beat_cont[b]) {
             lv_obj_delete(s_beat_cont[b]);  // borra contenedor + hijos
@@ -482,6 +530,7 @@ void uiHeaderDestroy() {
     if (s_cycle_lbl)  { lv_obj_delete(s_cycle_lbl);  s_cycle_lbl  = NULL; }
     if (s_solo_lbl)   { lv_obj_delete(s_solo_lbl);   s_solo_lbl   = NULL; }
     if (s_mode_lbl)   { lv_obj_delete(s_mode_lbl);   s_mode_lbl   = NULL; }
+    if (s_tc_frame)  { lv_obj_delete(s_tc_frame);  s_tc_frame  = NULL; }
     if (s_tc_ghost)  { lv_obj_delete(s_tc_ghost);  s_tc_ghost  = NULL; }
     if (s_timecode)  { lv_obj_delete(s_timecode);  s_timecode  = NULL; }
     if (s_strip)     { lv_obj_delete(s_strip);      s_strip     = NULL; }

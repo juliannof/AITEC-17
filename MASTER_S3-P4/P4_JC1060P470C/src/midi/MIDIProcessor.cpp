@@ -45,6 +45,8 @@ float masterPeakLevel = 0.0f;
 bool masterClip = false;
 unsigned long masterMeterDecayTimer = 0;
 
+String vpotAssignNames[8];
+
 uint8_t g_channelAutoMode[8] = {};
 
 void tickCalibracion() {
@@ -455,17 +457,27 @@ void processMackieSysEx(byte* payload, int len) {
 
             char nameBufs[8][8] = {};
             bool nameChanged[8] = {};
+            char vpotBufs[8][8] = {};
+            bool vpotChanged[8] = {};
 
             for (int t = 0; t < 8; t++) {
                 strncpy(nameBufs[t], trackNames[P4_CH_OFFSET + t].c_str(), 7);
                 nameBufs[t][7] = '\0';
+                strncpy(vpotBufs[t], vpotAssignNames[t].c_str(), 7);
+                vpotBufs[t][7] = '\0';
             }
 
             for (int i = 0; i < text_len; i++) {
                 byte offset = startOffset + i;
-                if (offset >= 56) break;
-                nameBufs[offset / 7][offset % 7] = (char)payload[6 + i];
-                nameChanged[offset / 7] = true;
+                if (offset < 56) {
+                    nameBufs[offset / 7][offset % 7] = (char)payload[6 + i];
+                    nameChanged[offset / 7] = true;
+                } else if (offset < 112) {
+                    int s = (offset - 56) / 7;
+                    int p = (offset - 56) % 7;
+                    vpotBufs[s][p] = (char)payload[6 + i];
+                    vpotChanged[s] = true;
+                }
             }
 
             for (int t = 0; t < 8; t++) {
@@ -477,6 +489,16 @@ void processMackieSysEx(byte* payload, int len) {
                 needsMainAreaRedraw = true;
                 needsButtonsRedraw  = true;
                 rs485.setTrackName(t + 1, nameBufs[t]);
+            }
+
+            for (int t = 0; t < 8; t++) {
+                if (!vpotChanged[t]) continue;
+                trimRight(vpotBufs[t]);
+                String newName = String(vpotBufs[t]);
+                if (vpotAssignNames[t] != newName) {
+                    vpotAssignNames[t] = newName;
+                    needsHeaderRedraw = true;
+                }
             }
             break;
         }
