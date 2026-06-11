@@ -73,11 +73,11 @@
 
 // ── Colores UI P4 (LVGL lv_color_hex) — referencia Logic Pro (2026-06-11) ──
 // Extraídos de captura Logic Pro con pantalla calibrada (junio 2026)
-#define COL_BG            0x2B2B2B   // fondo general arrange
-#define COL_BG_PANEL      0x2E2E2E   // panel inspector lateral
-#define COL_BG_CELL       0x404040   // celda vacía / track inactiva
-#define COL_TRACK_BG      0x3C3C3C   // cabecera canal (lista tracks)
-#define COL_TRACK_SEL     0x3A3020   // track seleccionada (tono cálido)
+#define COL_BG            0x1A1A1A   // fondo general arrange
+#define COL_BG_PANEL      0x1E1E1E   // panel inspector lateral
+#define COL_BG_CELL       0x2A2A2A   // celda vacía / track inactiva
+#define COL_TRACK_BG      0x222222   // cabecera canal (lista tracks)
+#define COL_TRACK_SEL     0x2B2B2B   // track seleccionada (resaltado)
 #define COL_TRACK_SEP     0x505050   // separador horizontal entre tracks
 #define COL_BTN_INACTIVE  0x4A4A4A   // botones M/S/R/I off
 #define COL_TEXT_DIM      0x999999   // texto secundario / etiquetas
