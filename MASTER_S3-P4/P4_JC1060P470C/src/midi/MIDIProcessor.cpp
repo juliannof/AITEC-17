@@ -316,15 +316,13 @@ void processChannelPressure(byte channel, byte value) {
         } else if (newClipState) {
             if (!vuClipState[dispCh]) { vuClipState[dispCh] = true; stateChanged = true; }
         }
-        if (normalizedLevel > vuLevels[dispCh]) {
+        if (normalizedLevel != vuLevels[dispCh]) {
             vuLevels[dispCh] = normalizedLevel;
-            if (normalizedLevel > vuPeakLevels[dispCh]) {
-                vuPeakLevels[dispCh] = normalizedLevel;
-                vuPeakLastUpdateTime[dispCh] = millis();
-            }
             stateChanged = true;
-        } else if (normalizedLevel == 0.0f && vuLevels[dispCh] != 0.0f) {
-            vuLevels[dispCh] = 0.0f;
+        }
+        if (normalizedLevel > vuPeakLevels[dispCh]) {
+            vuPeakLevels[dispCh] = normalizedLevel;
+            vuPeakLastUpdateTime[dispCh] = millis();
             stateChanged = true;
         }
         if (stateChanged) needsVUMetersRedraw = true;
