@@ -310,20 +310,22 @@ void processChannelPressure(byte channel, byte value) {
     if (targetChannel != -1) {
         int dispCh = targetChannel + P4_CH_OFFSET;
         bool stateChanged = false;
-        if (normalizedLevel > 0.0f) vuLastUpdateTime[dispCh] = millis();
         if (clearClip) {
             if (vuClipState[dispCh]) { vuClipState[dispCh] = false; stateChanged = true; }
-        } else if (newClipState) {
-            if (!vuClipState[dispCh]) { vuClipState[dispCh] = true; stateChanged = true; }
-        }
-        if (normalizedLevel != vuLevels[dispCh]) {
-            vuLevels[dispCh] = normalizedLevel;
-            stateChanged = true;
-        }
-        if (normalizedLevel > vuPeakLevels[dispCh]) {
-            vuPeakLevels[dispCh] = normalizedLevel;
-            vuPeakLastUpdateTime[dispCh] = millis();
-            stateChanged = true;
+        } else {
+            if (normalizedLevel > 0.0f) vuLastUpdateTime[dispCh] = millis();
+            if (newClipState) {
+                if (!vuClipState[dispCh]) { vuClipState[dispCh] = true; stateChanged = true; }
+            }
+            if (normalizedLevel != vuLevels[dispCh]) {
+                vuLevels[dispCh] = normalizedLevel;
+                stateChanged = true;
+            }
+            if (normalizedLevel > vuPeakLevels[dispCh]) {
+                vuPeakLevels[dispCh] = normalizedLevel;
+                vuPeakLastUpdateTime[dispCh] = millis();
+                stateChanged = true;
+            }
         }
         if (stateChanged) needsVUMetersRedraw = true;
     }
