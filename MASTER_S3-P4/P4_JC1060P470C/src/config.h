@@ -87,9 +87,9 @@
 // Colores funcionales
 #define COL_HEADER     0x000050   // strip header azul — no cambiar
 #define COL_MUTE_ON    0xFF0000
-#define COL_MUTE_OFF   0x400000
+#define COL_MUTE_OFF   0x3A3A3A
 #define COL_SOLO_ON    0xFFAA00
-#define COL_SOLO_OFF   0x333333
+#define COL_SOLO_OFF   0x3A3A3A
 
 // -- Automode
 #define COL_AUTO_READ   0x006600
