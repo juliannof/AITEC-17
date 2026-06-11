@@ -139,8 +139,7 @@ void initDisplay() {
         .scl_io_num        = (gpio_num_t)TOUCH_SCL_PIN,
         .clk_source        = I2C_CLK_SRC_DEFAULT,
         .glitch_ignore_cnt = 7,
-        // PRUEBA 2026-06-09: pull-up quitado temporalmente para aislar si la negra
-        // viene del touch funcionando (indev) y no del bus en sí.
+        .flags = { .enable_internal_pullup = true },
     };
     i2c_new_master_bus(&i2c_cfg, &i2c_bus);
 

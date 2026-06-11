@@ -65,12 +65,7 @@
 #define CH_W        (P4_W / NUM_CH)     // 64px ancho por canal (columna)
 #define P4_CH_OFFSET 8                  // slots 0-7=S3 (izq), 8-15=P4 nativo (der)
 
-// ── Header strip (LEGADO portrait — se elimina cuando todas las páginas migren) ──
-// TODO landscape: HEADER_X/HEADER_W/CH_H asumían portrait 480×800
-#define MENU_PANEL_H   300
 #define MENU_HAM_SIZE  44
-#define HEADER_X  410
-#define HEADER_W  (P4_W - HEADER_X)   // 70px
 
 // ── Colores UI P4 (LVGL lv_color_hex) — referencia Logic Pro (2026-06-11) ──
 // Extraídos de captura Logic Pro con pantalla calibrada (junio 2026)
@@ -178,7 +173,7 @@ static const uint32_t PALETTE_HEX[9] = {
 static const char* LABELS_PG1[BTN_PG1_COUNT] = {
     "TRACK","SEND", "PAN",  "PLUG", "EQ",   "INST", "BANK<","BANK>","CH<",  "CH>",
     "F1",   "F2",   "F3",   "F4",   "F5",   "F6",   "F7",   "F8",   "FLIP", "GLOB",
-    "MTRK", "INP",  "ATRC", "AINST","AUX",  "BUS",  "OUT",  "USR",  "ZOOM", "SCRUB",
+    "BOUNCE","INP", "ATRC", "AINST","AUX",  "BUS",  "OUT",  "USR",  "ZOOM", "SCRUB",
     "READ", "WRITE","TRIM", "TOUCH","LATCH","GROUP", "SAVE", "UNDO", "CNCL", "ENTER",
     "MARK", "NUDGE","DROP", "RPLC", "UP",   "DOWN", "LEFT", "RIGHT","NAME", ""
 };

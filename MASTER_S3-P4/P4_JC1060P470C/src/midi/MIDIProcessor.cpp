@@ -22,7 +22,7 @@ namespace {
     static const unsigned long MIDI_TIMEOUT_MS = 0;
     static const int DISCONNECT_THRESHOLD = 9;
     static const unsigned long DISCONNECT_WINDOW_MS = 150;
-    static const int16_t PITCHBEND_DEADBAND = 80;
+    static const int16_t PITCHBEND_DEADBAND = 150;
     static int16_t lastSentPitchBend[9] = {INT16_MIN, INT16_MIN, INT16_MIN, INT16_MIN, INT16_MIN, INT16_MIN, INT16_MIN, INT16_MIN, INT16_MIN};
 
     static int8_t  g_selectedChannel    = -1;
@@ -385,6 +385,7 @@ void processMackieSysEx(byte* payload, int len) {
             cycleActive    = false;
             g_clickActive  = false;
             for (int i = 0; i < 8; i++) trackNames[P4_CH_OFFSET + i] = "";
+            _calibPendingFrom = 0;
             for (uint8_t i = 1; i <= NUM_SLAVES; i++) rs485.setFlags(i, 0);
             rs485.beginDisconnectSequence();
             log_i("[MCU] GoOffline recibido — iniciando DISCONNECT SEQUENCE");
