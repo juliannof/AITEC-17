@@ -67,6 +67,42 @@ static lv_color_t automode_color(uint8_t state) {
     }
 }
 
+static void pan_draw_cb(lv_event_t* e) {
+    int vpot_idx = (int)(intptr_t)lv_event_get_user_data(e);
+    lv_layer_t* layer = lv_event_get_layer(e);
+    lv_obj_t*   obj   = (lv_obj_t*)lv_event_get_target(e);
+    lv_area_t   coords;
+    lv_obj_get_coords(obj, &coords);
+    int32_t r = (coords.x2 - coords.x1 + 1) / 2;
+    lv_point_t  center = { coords.x1 + r, coords.y1 + r };
+
+    lv_draw_arc_dsc_t dsc;
+    lv_draw_arc_dsc_init(&dsc);
+    dsc.width  = 4;
+    dsc.opa    = LV_OPA_COVER;
+    dsc.center = center;
+    dsc.radius = (uint16_t)r;
+
+    // arco de fondo (gris, 270° en forma de U invertida)
+    dsc.color       = lv_color_hex(0x333333);
+    dsc.start_angle = 135;
+    dsc.end_angle   = 45;
+    lv_draw_arc(layer, &dsc);
+
+    // arco indicador (verde) según vpotValues[vpot_idx]
+    int pos = (int)(vpotValues[vpot_idx] & 0x0F);
+    if (pos != 0) {
+        int32_t arc_s, arc_e;
+        if (pos == 6) { arc_s = 268; arc_e = 272; }
+        else if (pos < 6) { arc_s = 270 - ((6 - pos) * 135) / 6; arc_e = 270; }
+        else { arc_s = 270; arc_e = (270 + ((pos - 6) * 135) / 6) % 360; }
+        dsc.color       = lv_color_hex(0x00FF00);
+        dsc.start_angle = arc_s;
+        dsc.end_angle   = arc_e;
+        lv_draw_arc(layer, &dsc);
+    }
+}
+
 void uiPage3BCreate(lv_obj_t* parent) {
     s_page_root = lv_obj_create(parent);
     lv_obj_set_pos(s_page_root, 0, 0);
@@ -127,19 +163,17 @@ void uiPage3BCreate(lv_obj_t* parent) {
         lv_obj_set_style_text_font(s_trackname[i], &lv_font_montserrat_14, 0);
         lv_obj_center(s_trackname[i]);
 
-        // panorama (arco)
-        s_arc[i] = lv_arc_create(s_page_root);
+        // panorama (draw callback directo, mismo patrón que VU)
+        s_arc[i] = lv_obj_create(s_page_root);
         lv_obj_set_pos(s_arc[i], x + (CH_W - PAN_SZ) / 2, PAN_TOP);
         lv_obj_set_size(s_arc[i], PAN_SZ, PAN_SZ);
-        lv_arc_set_mode(s_arc[i], LV_ARC_MODE_NORMAL);
-        lv_arc_set_bg_angles(s_arc[i], 135, 45);
-        lv_arc_set_angles(s_arc[i], 270, 270);
-        lv_obj_set_style_arc_color(s_arc[i], lv_color_hex(0x00FF00), LV_PART_INDICATOR);
-        lv_obj_set_style_arc_color(s_arc[i], lv_color_hex(0x333333), LV_PART_MAIN);
-        lv_obj_set_style_arc_width(s_arc[i], 4, LV_PART_MAIN);
-        lv_obj_set_style_arc_width(s_arc[i], 4, LV_PART_INDICATOR);
-        lv_obj_set_style_opa(s_arc[i], LV_OPA_TRANSP, LV_PART_KNOB);
+        lv_obj_set_style_bg_opa(s_arc[i], LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(s_arc[i], 0, 0);
+        lv_obj_set_style_pad_all(s_arc[i], 0, 0);
+        lv_obj_clear_flag(s_arc[i], LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_remove_flag(s_arc[i], LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(s_arc[i], pan_draw_cb, LV_EVENT_DRAW_MAIN,
+                            (void*)(intptr_t)(i + P4_CH_OFFSET));
 
         s_arc_lbl[i] = lv_label_create(s_arc[i]);
         lv_label_set_text(s_arc_lbl[i], "C");
@@ -211,20 +245,10 @@ void uiPage3BUpdate() {
                 AUTOMODE_LABELS[am < 6 ? am : 0]);
             lv_label_set_text(s_trackname[i], trackNames[i + P4_CH_OFFSET].c_str());
             int pos = (int)(vpotValues[i + P4_CH_OFFSET] & 0x0F);
-            uint32_t arc_s, arc_e;
-            if (pos == 0 || pos == 6) {
-                arc_s = arc_e = 270;
-            } else if (pos < 6) {
-                arc_s = (uint32_t)(270 - ((6 - pos) * 135) / 6);
-                arc_e = 270;
-            } else {
-                arc_s = 270;
-                arc_e = (uint32_t)((270 + ((pos - 6) * 135) / 6) % 360);
-            }
-            lv_arc_set_angles(s_arc[i], arc_s, arc_e);
             lv_obj_invalidate(s_arc[i]);
             char pan_txt[5];
-            if (pos == 6)      snprintf(pan_txt, sizeof(pan_txt), "C");
+            if (pos == 0)      snprintf(pan_txt, sizeof(pan_txt), " ");
+            else if (pos == 6) snprintf(pan_txt, sizeof(pan_txt), "C");
             else if (pos > 6)  snprintf(pan_txt, sizeof(pan_txt), "R%d", pos - 6);
             else               snprintf(pan_txt, sizeof(pan_txt), "L%d", 6 - pos);
             lv_label_set_text(s_arc_lbl[i], pan_txt);

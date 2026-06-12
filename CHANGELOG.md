@@ -11,6 +11,42 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 | Prioridad | Tarea | Notas |
 |-----------|-------|-------|
+| 🔴 Alta | **P4: VPot arcs no renderizan — causa raíz sin confirmar (2026-06-12)** | Flujo de datos confirmado correcto en logs (`[VPot] CC48 strip=0 raw=0x21 pos=1`, `arc[8] pos=1 s=158 e=270`). El widget `lv_arc` recibe ángulos correctos pero no produce output visual. 4 enfoques probados: SYMMETRICAL mode, NORMAL + set_value, NORMAL + lv_arc_set_angles, draw_callback (pan_draw_cb — estado actual). Causa raíz del fallo de lv_arc sin confirmar. |
+
+---
+
+### SESIÓN 2026-06-12 — VPot arcs: 4 intentos, estado actual pan_draw_cb (17:56)
+
+**Único problema real:** el arco indicador (verde) del VPot no aparece en pantalla pese a que los datos llegan y los ángulos se calculan correctamente.
+
+**Flujo de datos confirmado funcionando:**
+- Logic Pro → CC48-55 → `MIDIProcessor.processControlChange()` → `vpotValues[strip + P4_CH_OFFSET]` = `vpotValues[8..15]`
+- `needsButtonsRedraw = true` → `uiPage3Update()` → `lv_arc_set_angles(s_arc[8], 158, 270)` + `lv_obj_invalidate`
+- Log confirmado: `[VPot] CC48 strip=0 raw=0x21 pos=1` y `arc[8] pos=1 s=158 e=270`
+
+**Intentos fallidos (esta sesión):**
+
+| # | Enfoque | Resultado | Commit |
+|---|---------|-----------|--------|
+| 1 | `LV_ARC_MODE_SYMMETRICAL` + fórmula `((pos-6)*100)/6` | No renderiza | `4b89c99` |
+| 2 | `LV_ARC_MODE_SYMMETRICAL` + fórmula angular correcta | No renderiza | `4206a00` |
+| 3 | `LV_ARC_MODE_NORMAL` + `lv_arc_set_angles(arc_s, arc_e)` directo | Datos correctos en log, no renderiza | `793deca` |
+| 4 | `lv_obj_create` + `LV_EVENT_DRAW_MAIN` + `pan_draw_cb` / `lv_draw_arc` directo | **Sin commitear — sin validar en hardware** | — |
+
+**Estado del código en el commit actual (intento 4):**
+- `UIPage3.cpp`: `lv_arc_create` reemplazado por `lv_obj_create` + `pan_draw_cb`
+- `UIPage3B.cpp`: ídem, user_data = `i + P4_CH_OFFSET`
+- `uiPage3Update()` / `uiPage3BUpdate()`: eliminado `lv_arc_set_angles`, solo `lv_obj_invalidate`
+- `pan_draw_cb` dibuja fondo gris (135°→45°) e indicador verde según `vpotValues[i]`
+- Mismo patrón que `vu_draw_cb` (VU meter — confirmado funcionando)
+
+**Hipótesis causa raíz del fallo lv_arc (intento 3):**
+`indic_r = arc_r - get_indicator_max_pad(obj)` — si el tema LVGL default aplica padding a `LV_PART_INDICATOR`, `indic_r` podría ser ≤ 0 y el guard `if(indic_r > 0)` en `lv_arc.c:843` evita el dibujo. No confirmado sin compilar con log dentro del widget.
+
+---
+
+| Prioridad | Tarea | Notas |
+|-----------|-------|-------|
 | 🟢 Baja | **OTA WiFi S2** — ✅ validado hardware (2026-05-26) | OTA funcional en 4 faders. Flashear provisioning + firmware. Ver `docs/WIFI-OTA.md`. |
 | 🔴 **VALIDACIÓN HW** | **Fader S2→Logic + detección usuario** — auditado 2026-05-25, listo para flash | S3: mapeo calibrado, jerarquía master, sync guard. S2: detección dirección en MOVING_TO_TARGET. Commits `6f6ace6` + `d171b12`. Firmware verificado en código — pendiente flash y test en hardware. |
 | 🟡 Media | **P4: botón BOUNCE — configurar Logic Pro** | Label "BOUNCE" aplicado en `config.h` LABELS_PG1[20] (nota 0x3E, 62). Pendiente solo: Logic Pro Key Commands → MIDI Learn nota 62 → "Bounce Project or Mix…". |
