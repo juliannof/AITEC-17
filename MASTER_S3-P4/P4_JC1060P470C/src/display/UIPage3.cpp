@@ -104,10 +104,10 @@ void uiPage3Create(lv_obj_t* parent) {
         s_arc[i] = lv_arc_create(s_page_root);
         lv_obj_set_pos(s_arc[i], x + (CH_W - PAN_SZ) / 2, PAN_TOP);
         lv_obj_set_size(s_arc[i], PAN_SZ, PAN_SZ);
-        lv_arc_set_range(s_arc[i], -100, 100);
+        lv_arc_set_range(s_arc[i], 0, 110);
         lv_arc_set_value(s_arc[i], 0);
         lv_arc_set_bg_angles(s_arc[i], 135, 405);
-        lv_arc_set_mode(s_arc[i], LV_ARC_MODE_SYMMETRICAL);
+        lv_arc_set_mode(s_arc[i], LV_ARC_MODE_NORMAL);
         lv_obj_set_style_arc_color(s_arc[i], lv_color_hex(0x00FF00), LV_PART_INDICATOR);
         lv_obj_set_style_arc_color(s_arc[i], lv_color_hex(0x444444), LV_PART_MAIN);
         lv_obj_set_style_arc_width(s_arc[i], 4, LV_PART_MAIN);
@@ -195,8 +195,7 @@ void uiPage3Update() {
                               : lv_color_hex(COL_SOLO_OFF), 0);
             lv_label_set_text(s_trackname[i], trackNames[i].c_str());
             int pos = (int)(vpotValues[i] & 0x0F);
-            int pan = (pos == 0) ? 0 : (pos < 6) ? -(6 - pos) * 20 : (pos - 6) * 20;
-            lv_arc_set_value(s_arc[i], pan);
+            lv_arc_set_value(s_arc[i], pos * 10);
             // tabla pos 0-11 → valor Logic (-64..+63)
             static const int8_t PAN_VAL[12] = {
                 0, -64, -48, -36, -24, -12, 0, 10, 20, 30, 40, 63
