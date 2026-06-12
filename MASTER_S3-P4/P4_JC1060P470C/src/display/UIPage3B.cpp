@@ -212,7 +212,7 @@ void uiPage3BUpdate() {
                 AUTOMODE_LABELS[am < 6 ? am : 0]);
             lv_label_set_text(s_trackname[i], trackNames[i + P4_CH_OFFSET].c_str());
             int pos = (int)(vpotValues[i + P4_CH_OFFSET] & 0x0F);
-            int pan = (pos == 6) ? 2 : ((pos - 6) * 100) / 6;
+            int pan = (pos == 0) ? 0 : (pos == 6) ? 2 : ((pos - 6) * 100) / 6;
             lv_arc_set_value(s_arc[i], pan);
             char pan_txt[5];
             if (pos == 0 || pos == 6) snprintf(pan_txt, sizeof(pan_txt), "C");
