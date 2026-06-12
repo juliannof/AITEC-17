@@ -10,6 +10,7 @@
 #include "display/UIPage3B.h"                                                                                  
 #include "display/UIOffline.h"
 #include "display/UIHeader.h"
+#include "display/UIVPotPopup.h"
 #include <LittleFS.h>
 
 #include <Preferences.h>
@@ -176,6 +177,7 @@ void taskCore1(void* pvParameters) {
             if      (g_currentPage == 1) uiPage1Update();
             else if (g_currentPage == 2) uiPage3BUpdate();
             else                         uiPage3Update();
+            uiVPotPopupUpdate();   // sincroniza el pop-up del V-Pot si está abierto
         }
 
         static uint32_t lastTick = 0;

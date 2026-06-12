@@ -191,7 +191,7 @@ void processMidiByte(byte b) {
 
 
 void processControlChange(byte channel, byte controller, byte value) {
-    log_d("CC CH=%d, CC=%d, Val=0x%02X", channel, controller, value);
+    log_i("CC CH=%d, CC=%d, Val=0x%02X", channel, controller, value);
     if (channel != 0 && channel != 15) return;
 
     if (controller >= 48 && controller <= 55) {

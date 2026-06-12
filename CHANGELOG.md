@@ -11,7 +11,34 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 | Prioridad | Tarea | Notas |
 |-----------|-------|-------|
-| 🔴 Alta | **P4: VPot arcs no renderizan — causa raíz sin confirmar (2026-06-12)** | Flujo de datos confirmado correcto en logs (`[VPot] CC48 strip=0 raw=0x21 pos=1`, `arc[8] pos=1 s=158 e=270`). El widget `lv_arc` recibe ángulos correctos pero no produce output visual. 4 enfoques probados: SYMMETRICAL mode, NORMAL + set_value, NORMAL + lv_arc_set_angles, draw_callback (pan_draw_cb — estado actual). Causa raíz del fallo de lv_arc sin confirmar. |
+| 🔴 Alta | **P4: Logic no aplica el V-Pot relativo del pop-up (2026-06-12 19:47)** | El pop-up envía CC relativo (`CC 16+strip`, bit6=dirección) al arrastrar el arco grande — el MIDI **SALE** (visto en monitor) pero Logic **NO mueve el pan**. Análogo al evento del S2 con los AutoModes (notas 74-78 Read/Write/Trim/Touch/Latch): Logic solo los aplica con un track **seleccionado** (`g_selectedChannel>=0`, `MIDIProcessor.cpp` ~l.611). Hipótesis: falta contexto (track seleccionado / assignment Pan / banco activo) o canal/controller distinto. Probar: (1) canal 0 fijo (`0xB0`, `0x10+strip`) en vez de `0xB0|strip`; (2) forzar selección previa; (3) verificar modo Pan. Ver [[midi_sale_logic_no_aplica]]. |
+| 🟡 Media | **P4: pop-up V-Pot — no refrescar el fondo con el modal abierto (2026-06-12 19:47)** | Fix listo, SIN aplicar: en `main.cpp` loop CONNECTED, si `uiVPotPopupIsOpen()` → solo `uiVPotPopupUpdate()`, saltar `uiHeaderUpdate`/página/`handleVUMeterDecay`. El overlay tapa toda la pantalla (1024×600), no hace falta repintar detrás. |
+| 🟡 Media | **P4: pop-up V-Pot — botón "Cerrar" demasiado grande (2026-06-12 19:47)** | Reducir el `lv_button` (actual 160×56) en `UIVPotPopup.cpp::uiVPotPopupOpen()`. |
+
+---
+
+### SESIÓN 2026-06-12 — P4 VPot RESUELTO (lv_arc) + cadena trazada + pop-up grande (19:47)
+
+**VPot arcs RESUELTOS — widget `lv_arc` (no draw primitives):**
+- Causa de los 4 intentos fallidos previos: se insistió con draw primitives (`lv_draw_arc`) y `lv_arc_set_angles`. La solución que **ya funcionaba** estaba en `P4_JC4880P433C` (P4 pequeño): widget `lv_arc` con `set_range(-100,100)` + `set_value(((pos-6)*100)/6)` + `set_bg_angles(135,405)` + `LV_ARC_MODE_SYMMETRICAL`, estilo en `LV_PART_MAIN`/`LV_PART_INDICATOR`.
+- `UIPage3.cpp`: eliminado `pan_draw_cb`; arco recreado como `lv_arc`; update con `lv_arc_set_value`. Render **OK en hardware**.
+- Única adaptación al P4 grande: sin `set_rotated()` (landscape nativo vs portrait del pequeño).
+- **Norma establecida:** siempre usar widgets de la biblioteca LVGL y revisar primero el P4 pequeño como referencia ([[usar_biblioteca_lvgl]]).
+
+**Cadena del V-Pot trazada end-to-end (confirmada en hardware):**
+- Logic `CC48-55` (ch1) → `processMidiByte` (USB-MIDI `tud_midi_stream_read`) → `case 0xB0` → `processControlChange` → filtro canal 0/15 → `vpotValues[strip + P4_CH_OFFSET]` (8-15) → `uiPage3Update` → `lv_arc_set_value` → columnas 9-16.
+- **Diagnóstico clave:** Logic emite el pan SIEMPRE como `CC48` (strip 0) porque el banco sigue a la selección — el track tocado se coloca como strip 0. No es bug de firmware. Por eso "solo la pista 9 funcionaba".
+- Diagnóstico: `log_d`→`log_i` en `processControlChange:194` para ver todo CC entrante (`CORE_DEBUG_LEVEL=3`).
+- Confirmada la norma: slots **0-7 NO implementados** (banco S3/IAC), trabajar solo 8-15 ([[p4_slots_0_7_no_implementado]]).
+
+**Pop-up grande del V-Pot (NUEVO — `display/UIVPotPopup.{h,cpp}`):**
+- Tocar arco pequeño (col 9-16) → modal en `lv_layer_top()`: nombre del track + `lv_arc` 320px interactivo + valor L/C/R + botón Cerrar.
+- Arrastre del arco → envía pasos relativos `CC 16+strip` a Logic (mismo patrón que el encoder).
+- `UIPage3.cpp`: zona táctil `s_arc_hit[]` (solo 8-15) + `uiVPotPopupClose()` en destroy. `main.cpp`: include + `uiVPotPopupUpdate()` en loop CONNECTED.
+- **Validado en hardware:** abre, arrastra, MIDI sale, cierra correctamente.
+- **Pendientes** (ver tabla arriba): Logic no aplica el pan; no refrescar fondo con modal abierto; botón Cerrar muy grande.
+
+**MCU afectadas:** P4 únicamente. S2/S3 sin cambios.
 
 ---
 

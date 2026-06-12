@@ -1,5 +1,6 @@
 #include "UIPage3.h"
 #include "UIMenu.h"
+#include "UIVPotPopup.h"
 
 #include "../config.h"
 #include "Display.h"
@@ -30,6 +31,7 @@ static lv_obj_t* s_mute[NUM_CH]      = {};
 static lv_obj_t* s_select[NUM_CH]    = {};
 static lv_obj_t* s_trackname[NUM_CH] = {};
 static lv_obj_t* s_arc[NUM_CH]       = {};
+static lv_obj_t* s_arc_hit[NUM_CH]   = {};   // zona táctil sobre el arco → abre pop-up
 static lv_obj_t* s_vu[NUM_CH]        = {};
 
 static void vu_draw_cb(lv_event_t* e);
@@ -48,42 +50,6 @@ static lv_obj_t* s_arc_lbl[NUM_CH] = {};
 static uint32_t blendHex(uint32_t a, uint32_t b, uint8_t alpha);
 
 
-
-static void pan_draw_cb(lv_event_t* e) {
-    int i = (int)(intptr_t)lv_event_get_user_data(e);
-    lv_layer_t* layer = lv_event_get_layer(e);
-    lv_obj_t*   obj   = (lv_obj_t*)lv_event_get_target(e);
-    lv_area_t   coords;
-    lv_obj_get_coords(obj, &coords);
-    int32_t r = (coords.x2 - coords.x1 + 1) / 2;
-    lv_point_t  center = { coords.x1 + r, coords.y1 + r };
-
-    lv_draw_arc_dsc_t dsc;
-    lv_draw_arc_dsc_init(&dsc);
-    dsc.width  = 4;
-    dsc.opa    = LV_OPA_COVER;
-    dsc.center = center;
-    dsc.radius = (uint16_t)r;
-
-    // arco de fondo (gris, 270° en forma de U invertida)
-    dsc.color       = lv_color_hex(0x333333);
-    dsc.start_angle = 135;
-    dsc.end_angle   = 45;
-    lv_draw_arc(layer, &dsc);
-
-    // arco indicador (verde) según vpotValues[i]
-    int pos = (int)(vpotValues[i] & 0x0F);
-    if (pos != 0) {
-        int32_t arc_s, arc_e;
-        if (pos == 6) { arc_s = 268; arc_e = 272; }
-        else if (pos < 6) { arc_s = 270 - ((6 - pos) * 135) / 6; arc_e = 270; }
-        else { arc_s = 270; arc_e = (270 + ((pos - 6) * 135) / 6) % 360; }
-        dsc.color       = lv_color_hex(0x00FF00);
-        dsc.start_angle = arc_s;
-        dsc.end_angle   = arc_e;
-        lv_draw_arc(layer, &dsc);
-    }
-}
 
 void uiPage3Create(lv_obj_t* parent) {
     s_page_root = lv_obj_create(parent);
@@ -136,22 +102,42 @@ void uiPage3Create(lv_obj_t* parent) {
         lv_obj_set_style_text_font(s_trackname[i], &lv_font_montserrat_14, 0);
         lv_obj_center(s_trackname[i]);
 
-        // panorama (draw callback directo, mismo patrón que VU)
-        s_arc[i] = lv_obj_create(s_page_root);
+        // panorama — widget lv_arc estándar (patrón confirmado en P4_JC4880P433C)
+        s_arc[i] = lv_arc_create(s_page_root);
         lv_obj_set_pos(s_arc[i], x + (CH_W - PAN_SZ) / 2, PAN_TOP);
         lv_obj_set_size(s_arc[i], PAN_SZ, PAN_SZ);
-        lv_obj_set_style_bg_opa(s_arc[i], LV_OPA_TRANSP, 0);
-        lv_obj_set_style_border_width(s_arc[i], 0, 0);
-        lv_obj_set_style_pad_all(s_arc[i], 0, 0);
-        lv_obj_clear_flag(s_arc[i], LV_OBJ_FLAG_SCROLLABLE);
+        lv_arc_set_range(s_arc[i], -100, 100);
+        lv_arc_set_value(s_arc[i], 0);
+        lv_arc_set_bg_angles(s_arc[i], 135, 405);
+        lv_arc_set_mode(s_arc[i], LV_ARC_MODE_SYMMETRICAL);
+        lv_obj_set_style_arc_color(s_arc[i], lv_color_hex(0x00FF00), LV_PART_INDICATOR);
+        lv_obj_set_style_arc_color(s_arc[i], lv_color_hex(0x333333), LV_PART_MAIN);
+        lv_obj_set_style_arc_width(s_arc[i], 4, LV_PART_MAIN);
+        lv_obj_set_style_arc_width(s_arc[i], 4, LV_PART_INDICATOR);
+        lv_obj_set_style_opa(s_arc[i], LV_OPA_TRANSP, LV_PART_KNOB);
         lv_obj_remove_flag(s_arc[i], LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_add_event_cb(s_arc[i], pan_draw_cb, LV_EVENT_DRAW_MAIN, (void*)(intptr_t)i);
 
         s_arc_lbl[i] = lv_label_create(s_arc[i]);
         lv_label_set_text(s_arc_lbl[i], "C");
         lv_obj_set_style_text_color(s_arc_lbl[i], lv_color_hex(0xFFFFFF), 0);
         lv_obj_set_style_text_font(s_arc_lbl[i], &lv_font_montserrat_12, 0);
         lv_obj_center(s_arc_lbl[i]);
+
+        // zona táctil transparente sobre el arco → abre el pop-up grande
+        // (solo banco P4: 8-15; el arco pequeño queda display-only)
+        if (i >= P4_CH_OFFSET) {
+            s_arc_hit[i] = lv_obj_create(s_page_root);
+            lv_obj_set_pos(s_arc_hit[i], x + (CH_W - PAN_SZ) / 2, PAN_TOP);
+            lv_obj_set_size(s_arc_hit[i], PAN_SZ, PAN_SZ);
+            lv_obj_set_style_bg_opa(s_arc_hit[i], LV_OPA_TRANSP, 0);
+            lv_obj_set_style_border_width(s_arc_hit[i], 0, 0);
+            lv_obj_clear_flag(s_arc_hit[i], LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_add_flag(s_arc_hit[i], LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_add_event_cb(s_arc_hit[i], [](lv_event_t* e) {
+                int idx = (int)(intptr_t)lv_event_get_user_data(e);
+                uiVPotPopupOpen(idx);
+            }, LV_EVENT_CLICKED, (void*)(intptr_t)i);
+        }
 
         // SELECT (S)
         s_select[i] = lv_obj_create(s_page_root);
@@ -227,7 +213,8 @@ void uiPage3Update() {
                               : lv_color_hex(COL_SOLO_OFF), 0);
             lv_label_set_text(s_trackname[i], trackNames[i].c_str());
             int pos = (int)(vpotValues[i] & 0x0F);
-            lv_obj_invalidate(s_arc[i]);
+            int pan = ((pos - 6) * 100) / 6;
+            lv_arc_set_value(s_arc[i], pan);
             char pan_txt[5];
             if (pos == 0)      snprintf(pan_txt, sizeof(pan_txt), " ");
             else if (pos == 6) snprintf(pan_txt, sizeof(pan_txt), "C");
@@ -372,6 +359,7 @@ void handleVUMeterDecay() {
 }
 
 void uiPage3Destroy() {
+    uiVPotPopupClose();   // el pop-up vive en lv_layer_top, fuera de s_page_root
     if (s_page_root) {
         lv_obj_del(s_page_root);
         s_page_root   = NULL;
