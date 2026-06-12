@@ -104,10 +104,9 @@ void uiPage3Create(lv_obj_t* parent) {
         s_arc[i] = lv_arc_create(s_page_root);
         lv_obj_set_pos(s_arc[i], x + (CH_W - PAN_SZ) / 2, PAN_TOP);
         lv_obj_set_size(s_arc[i], PAN_SZ, PAN_SZ);
-        lv_arc_set_range(s_arc[i], -100, 100);
-        lv_arc_set_value(s_arc[i], 0);
-        lv_arc_set_bg_angles(s_arc[i], 135, 405);
-        lv_arc_set_mode(s_arc[i], LV_ARC_MODE_SYMMETRICAL);
+        lv_arc_set_mode(s_arc[i], LV_ARC_MODE_NORMAL);
+        lv_arc_set_bg_angles(s_arc[i], 135, 45);
+        lv_arc_set_angles(s_arc[i], 270, 270);
         lv_obj_set_style_arc_color(s_arc[i], lv_color_hex(0x00FF00), LV_PART_INDICATOR);
         lv_obj_set_style_arc_color(s_arc[i], lv_color_hex(0x333333), LV_PART_MAIN);
         lv_obj_set_style_arc_width(s_arc[i], 4, LV_PART_MAIN);
@@ -195,10 +194,19 @@ void uiPage3Update() {
                               : lv_color_hex(COL_SOLO_OFF), 0);
             lv_label_set_text(s_trackname[i], trackNames[i].c_str());
             int pos = (int)(vpotValues[i] & 0x0F);
-            int pan = ((pos - 6) * 100) / 6;
-            lv_arc_set_value(s_arc[i], pan);
+            uint32_t arc_s, arc_e;
+            if (pos == 0 || pos == 6) {
+                arc_s = arc_e = 270;
+            } else if (pos < 6) {
+                arc_s = (uint32_t)(270 - ((6 - pos) * 135) / 6);
+                arc_e = 270;
+            } else {
+                arc_s = 270;
+                arc_e = (uint32_t)((270 + ((pos - 6) * 135) / 6) % 360);
+            }
+            lv_arc_set_angles(s_arc[i], arc_s, arc_e);
             lv_obj_invalidate(s_arc[i]);
-            if (i == P4_CH_OFFSET) log_i("[UIPage3] arc[8] pos=%d pan=%d ptr=%p", pos, pan, s_arc[i]);
+            if (i == P4_CH_OFFSET) log_i("[UIPage3] arc[8] pos=%d s=%u e=%u", pos, arc_s, arc_e);
             char pan_txt[5];
             if (pos == 6)      snprintf(pan_txt, sizeof(pan_txt), "C");
             else if (pos > 6)  snprintf(pan_txt, sizeof(pan_txt), "R%d", pos - 6);
