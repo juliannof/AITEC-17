@@ -136,7 +136,7 @@ void uiPage3BCreate(lv_obj_t* parent) {
         lv_arc_set_bg_angles(s_arc[i], 135, 405);
         lv_arc_set_mode(s_arc[i], LV_ARC_MODE_SYMMETRICAL);
         lv_obj_set_style_arc_color(s_arc[i], lv_color_hex(0x00FF00), LV_PART_INDICATOR);
-        lv_obj_set_style_arc_color(s_arc[i], lv_color_hex(0x444444), LV_PART_MAIN);
+        lv_obj_set_style_arc_color(s_arc[i], lv_color_hex(0x333333), LV_PART_MAIN);
         lv_obj_set_style_arc_width(s_arc[i], 4, LV_PART_MAIN);
         lv_obj_set_style_arc_width(s_arc[i], 4, LV_PART_INDICATOR);
         lv_obj_set_style_opa(s_arc[i], LV_OPA_TRANSP, LV_PART_KNOB);
@@ -212,12 +212,12 @@ void uiPage3BUpdate() {
                 AUTOMODE_LABELS[am < 6 ? am : 0]);
             lv_label_set_text(s_trackname[i], trackNames[i + P4_CH_OFFSET].c_str());
             int pos = (int)(vpotValues[i + P4_CH_OFFSET] & 0x0F);
-            int pan = (pos == 0) ? 0 : (pos == 6) ? 2 : ((pos - 6) * 100) / 6;
+            int pan = ((pos - 6) * 100) / 6;
             lv_arc_set_value(s_arc[i], pan);
             char pan_txt[5];
-            if (pos == 0 || pos == 6) snprintf(pan_txt, sizeof(pan_txt), "C");
-            else if (pos > 6)         snprintf(pan_txt, sizeof(pan_txt), "R%d", pos - 6);
-            else                      snprintf(pan_txt, sizeof(pan_txt), "L%d", 6 - pos);
+            if (pos == 6)      snprintf(pan_txt, sizeof(pan_txt), "C");
+            else if (pos > 6)  snprintf(pan_txt, sizeof(pan_txt), "R%d", pos - 6);
+            else               snprintf(pan_txt, sizeof(pan_txt), "L%d", 6 - pos);
             lv_label_set_text(s_arc_lbl[i], pan_txt);
             int fval = (int)(faderPositions[i + P4_CH_OFFSET] * 16383.0f);
             lv_slider_set_value(s_fader[i], fval, LV_ANIM_OFF);
