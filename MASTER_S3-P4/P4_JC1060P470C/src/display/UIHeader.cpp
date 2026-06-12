@@ -249,11 +249,11 @@ void uiHeaderCreate(lv_obj_t* parent) {
         int tw = lv_obj_get_width(s_timecode);
         int tx = lv_obj_get_x(s_timecode);
         s_tc_frame = lv_obj_create(parent);
-        lv_obj_set_pos(s_tc_frame, tx - 56, pos_y - 9);
-        lv_obj_set_size(s_tc_frame, tw + 112, th + 18);
+        lv_obj_set_pos(s_tc_frame, tx - 41, pos_y - 9);
+        lv_obj_set_size(s_tc_frame, tw + 82, th + 18);
         lv_obj_set_style_bg_opa(s_tc_frame, LV_OPA_TRANSP, 0);
         lv_obj_set_style_border_width(s_tc_frame, 1, 0);
-        lv_obj_set_style_border_color(s_tc_frame, lv_color_hex(COL_HEADER_BRIGHT), 0);
+        lv_obj_set_style_border_color(s_tc_frame, lv_color_hex(COL_HEADER_DIM), 0);
         lv_obj_set_style_radius(s_tc_frame, 8, 0);
         lv_obj_set_style_pad_all(s_tc_frame, 0, 0);
         lv_obj_clear_flag(s_tc_frame, LV_OBJ_FLAG_SCROLLABLE);
@@ -268,7 +268,7 @@ void uiHeaderCreate(lv_obj_t* parent) {
         const char* ghost_str[4] = {"0000", "0", "0", "000"};
 
         int bx[4], dx[3];
-        bx[0] = 320;
+        bx[0] = 312;
         for (int b = 0; b < 3; b++) {
             dx[b]     = bx[b] + bwidths[b];
             bx[b + 1] = dx[b] + dot_gap;
@@ -482,14 +482,21 @@ void uiHeaderUpdate() {
 
     if (isBeats) {
         static const int starts[4] = {0, 6, 4, 7};
-        static const int counts[4] = {3, 1, 1, 3};
+        static const int counts[4] = {4, 1, 1, 3};
+        static const int widths[4] = {4, 1, 1, 3};
         for (int b = 0; b < 4; b++) {
             if (!s_beat_real[b]) continue;
-            char display[8] = {};
+            // Extraer solo dígitos del buffer (ignorar espacios y chars no significativos)
+            int val = 0;
             for (int j = 0; j < counts[b]; j++) {
                 char c = (char)(beatsChars_clean[starts[b] + j] & 0x7F);
-                if (c < '0' || c > '9') c = '0';
-                display[j] = c;
+                if (c >= '0' && c <= '9') val = val * 10 + (c - '0');
+            }
+            // Formatear con ceros a la izquierda según ancho requerido
+            char display[8] = {};
+            for (int p = widths[b] - 1; p >= 0; p--) {
+                display[p] = '0' + (val % 10);
+                val /= 10;
             }
             lv_label_set_text(s_beat_real[b], display);
         }
@@ -530,7 +537,7 @@ void uiHeaderDestroy() {
     if (s_cycle_lbl)  { lv_obj_delete(s_cycle_lbl);  s_cycle_lbl  = NULL; }
     if (s_solo_lbl)   { lv_obj_delete(s_solo_lbl);   s_solo_lbl   = NULL; }
     if (s_mode_lbl)   { lv_obj_delete(s_mode_lbl);   s_mode_lbl   = NULL; }
-    if (s_tc_frame)  { lv_obj_delete(s_tc_frame);  s_tc_frame  = NULL; }
+    if (s_tc_frame)   { lv_obj_delete(s_tc_frame);   s_tc_frame   = NULL; }
     if (s_tc_ghost)  { lv_obj_delete(s_tc_ghost);  s_tc_ghost  = NULL; }
     if (s_timecode)  { lv_obj_delete(s_timecode);  s_timecode  = NULL; }
     if (s_strip)     { lv_obj_delete(s_strip);      s_strip     = NULL; }

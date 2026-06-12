@@ -14,6 +14,7 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 | 🟢 Baja | **OTA WiFi S2** — ✅ validado hardware (2026-05-26) | OTA funcional en 4 faders. Flashear provisioning + firmware. Ver `docs/WIFI-OTA.md`. |
 | 🔴 **VALIDACIÓN HW** | **Fader S2→Logic + detección usuario** — auditado 2026-05-25, listo para flash | S3: mapeo calibrado, jerarquía master, sync guard. S2: detección dirección en MOVING_TO_TARGET. Commits `6f6ace6` + `d171b12`. Firmware verificado en código — pendiente flash y test en hardware. |
 | 🟡 Media | **P4: botón BOUNCE — configurar Logic Pro** | Label "BOUNCE" aplicado en `config.h` LABELS_PG1[20] (nota 0x3E, 62). Pendiente solo: Logic Pro Key Commands → MIDI Learn nota 62 → "Bounce Project or Mix…". |
+| 🟡 Media | **P4: assignment display — SysEx 0x12 offset 0 corto contamina trackNames** | Al pulsar PAN/SELECT Logic envía SysEx 0x12 con offset=0 y texto corto (≤30 chars): "Seleccionar" (11), "Track N "nombre"" (30). Ese texto sobreescribe `trackNames[]` en slots 0–4. Causa: el parser de `case 0x12` acepta cualquier offset 0 como nombres de pista. Fix pendiente: detectar strings cortos en offset 0 (text_len < 56) y rutearlos a `assignmentString` en lugar de `trackNames`. Los offsets ≥56 ya van al strip VPot (correcto). |
 | 🟢 Baja | **P4: VU global 16 pistas via MIDI UART S3→P4** | S3 re-emite MIDI de Logic (ch 1–8) a P4 por UART directo (ch 9–16). P4 agrega las 16 pistas en display LVGL. Sin WiFi, sin protocolo custom — reutiliza `processMidiByte()` existente. 1 cable TX→RX. Ver `docs/S3ToP4.md` sección "Feature: Agregación 16 pistas". |
 | 🟢 Baja | **P4: Display 16 pistas via IAC Bus routing (macOS)** — plan completo en `docs/16TRACKS.md` eliminado 2026-06-11 | Fase 2 arrays ya implementados (16 slots, `P4_CH_OFFSET=8`). Pendiente: Fase 1 — IAC Bus macOS (`MIDI Patchbay`: S3 out → P4 in, canal 1→2). Fase 3 — rediseño UIPage3 a 64px/canal + separador visual entre bancos. S3 no se modifica. Desconexión detection debe protegerse para solo banco P4. |
 | 🟢 Baja | **Limpiar código muerto Motor S2** — auditado 2026-05-27 | 4 items: (1) `MotorState::WAITING_FOR_CALIB` nunca asignado — eliminar del enum + comentarios + guard `setADC()` línea 499; (2) `_motor_goingToMin` flag nunca leído — eliminar de `config.h` + `goToMin()` + `setUserDropTarget()`; (3) `setUserDropTarget()` nunca llamada desde fuera — eliminar de Motor.h/cpp; (4) `goToMin()` no establece `_motor_state=GOING_TO_MIN` — riesgo si se llama directa desde SAT/test, añadir la asignación. Sin impacto en comportamiento actual. |
@@ -21,6 +22,22 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 | 🔴 Alta | **P4: `startTask()` RS485 nunca llamada — slaves sin comunicación (2026-05-27)** | `main.cpp setup()`: `rs485.begin()` configura Serial1 pero `rs485.startTask()` nunca se invoca. El task de polling (`runTask()`) no arranca. P4 no envía ni un paquete a ningún slave S2. `tickCalibracion()` encola calibraciones que nunca se envían. **Fix:** añadir `rs485.startTask()` en `setup()` tras `rs485.begin()`, `main.cpp línea ~254`. Ver `RS485.cpp::startTask()` — pineado a Core 1, prioridad 5. |
 | 🔴 Alta | **ADS1115 no lineal — ADC=225 en posición física media (esperado ~13500) (2026-05-30)** | Con `GAIN_ONE` + pot lineal 3.3V, mid-travel debería dar ~13200 ADC counts. En test real: bottom=27, mid=225, top=22795. La respuesta es casi logarítmica (bottom 0.87% del rango total en mid-travel). Causa posible: (1) potenciómetro logarítmico (audio taper) en lugar de lineal — hardware no modificable; (2) carga resistiva externa; (3) wiring inusual. **Impacto:** en AUTO_READ, Logic envía target=X que S3 mapea linealmente al rango calibrado, pero el fader físico en esa posición ADC no corresponde visualmente. Motores pueden buscar posiciones que parecen incorrectas al ojo. **Fix pendiente:** diagnóstico físico (medir resistencia pot en mid-travel) o compensación logarítmica en el mapeo S3→ADC si la no-linealidad es reproducible. |
 | 🟡 Media | **Calibración mismatch — calibratedMin=168 vs ADC físico min=27 (2026-05-30)** | S3 guardó calibratedMin=168 en la sesión de test (motor paró antes del tope físico durante GOING_TO_MIN). El fader físico llega hasta ADC=27. En AUTO_READ con Logic en fondo: S3 manda target=168, motor busca 168, fader en 27 → motor buzzea contra tope. **Fix:** forzar recalibración limpia con slave correcto (ID1/ID2) conectado. Puede ser síntoma del bug de nonlinealidad + motor que no llega al tope físico real. |
+
+---
+
+### SESIÓN 2026-06-12 — P4 Header: beat display zero-padding + ajustes marco (12:35)
+
+**Beat display — zero-padding correcto:**
+
+`UIHeader.cpp` `uiHeaderUpdate()`: reemplazado el algoritmo de lectura del buffer. Problema anterior: espacios del buffer (`beatsChars_clean` inicializado a `' '`) se sanitizaban a `'0'`, desplazando el dígito significativo a posición incorrecta. Nuevo algoritmo: extrae solo dígitos (`'0'–'9'`), parsea como entero, formatea con ceros a la izquierda mediante loop de módulo 10. Sin `snprintf`, sin dependencias externas. `counts[0]` 3→4 (barras hasta 9999). `widths[]={4,1,1,3}` controla ancho de display. Resultado: bar 1→`0001`, bar 182→`0182`, ticks 1→`001`.
+
+**Marco timecode — ajuste visual:**
+
+`UIHeader.cpp` `uiHeaderCreate()`: marco `s_tc_frame` 30px más estrecho (±15px cada lado): `tx-56→tx-41`, `tw+112→tw+82`. Borde cambiado de `COL_HEADER_BRIGHT` a `COL_HEADER_DIM` (menos prominente). Bloques beat desplazados `bx[0]`: 320→312 para mantener alineación dentro del nuevo marco.
+
+**main.cpp:** stack tarea MIDI Core 0: 4096→8192 bytes (margen para callbacks LVGL).
+
+**Documentación:** `docs/MIDI.md` §10 — P4 UIHeader completo (layout, botones táctiles, timecode, VPot strip, navegación).
 
 ---
 

@@ -264,7 +264,7 @@ void setup() {
 
     // 9. Crear tareas
     log_i("8. Creando tareas...");
-    xTaskCreatePinnedToCore(taskCore0, "MIDI", 4096, NULL, 2, &taskCore0Handle, 0);
+    xTaskCreatePinnedToCore(taskCore0, "MIDI", 8192, NULL, 2, &taskCore0Handle, 0);
     xTaskCreatePinnedToCore(taskCore1, "UI", 16384, NULL, 1, &taskCore1Handle, 1);
     log_i("   Tareas creadas");
 
