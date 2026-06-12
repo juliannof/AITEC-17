@@ -1185,3 +1185,82 @@ Botones que **no cambian con Shift:** navegación (BANK/CHAN), modificadores (CT
 - **UNDO shift (PG1 key 24):** MCU no tiene nota para REDO. Opciones: `0x00` (sin acción), o reutilizar una F-key libre. Decisión pendiente.
 - **SAVE shift (PG1 key 25):** Sin nota MCU estándar para "Save As". Misma decisión.
 - **F9–F16 (PG2 keys 8–15):** Las notas 0x3E–0x45 solapan con el submenú Global View. En PG2 se usan como F-keys; en PG1 shift se usan como Global View. El firmware debe distinguir según la página activa.
+
+---
+
+## 10. P4 UIHeader — Barra Superior Persistente (2026-06-12 11:30)
+
+`src/display/UIHeader.cpp` — visible en todas las páginas. Contiene timecode, indicadores de estado y navegación de página.
+
+### 10.1 Layout
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│ [SMPT] [⟳] [S] [♪]       00:00:00:00  (timecode DSEG7)        [Bo][Vu][Fa] [≡] │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│  vpot[0]   vpot[1]   vpot[2]   vpot[3]   vpot[4]   vpot[5]   vpot[6]   vpot[7] │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+- Fila superior (`HEADER_H` px): indicadores + timecode + navegación
+- Fila inferior (`ASSIGN_STRIP_H` px): nombres VPot por canal, alineados con columnas
+
+### 10.2 Botones de estado — MIDI bidireccional
+
+Todos usan `header_btn_cb`: `LV_EVENT_PRESSED` → Note On vel 0x7F, `LV_EVENT_RELEASED` → Note On vel 0x00.
+
+| Widget | Nota enviada P4→Logic | Nota recibida Logic→P4 | Variable de estado | Visual activo |
+|--------|----------------------|------------------------|-------------------|---------------|
+| BEAT/SMPT | 0x35 (53) | 113 = SMPTE / 114 = BEATS | `currentTimecodeMode` | SMPT: fondo relleno; BEAT: solo borde |
+| LOOP `⟳` | 0x56 (86) | 0x56 vel>0/0 | `cycleActive` | Fondo naranja/dorado |
+| RUDE SOLO `S` | **0x5A (90)** | **0x73 (115)** vel>0/0 | `rudeSoloActive` | Fondo rojo |
+| CLICK `♪` | 0x59 (89) | 0x59 vel>0/0 | `g_clickActive` | Fondo verde |
+
+> **Asimetría RUDE SOLO:** Logic envía nota 0x73 para indicar "hay solos activos" (solo indicador LED). P4 envía 0x5A para pedir a Logic que limpie todos los solos. Son notas distintas.
+
+> **Asimetría BEAT/SMPT:** Logic envía 113 ó 114 para informar del modo activo. P4 envía 0x35 para solicitar el cambio. Logic no responde con nota de confirmación — solo actualiza el CC del timecode.
+
+### 10.3 Timecode — display no interactivo
+
+Fuente de datos: CC 64–73 canal 0 ó 15 → `timeCodeChars_clean[10]` (ver §4.9).
+
+**Técnica ghost+real:** dos labels superpuestos al (0,0). Ghost en `COL_HEADER_DIM`, real en `COL_HEADER_BRIGHT`. El ghost siempre muestra `"00:00:00: 00"` dando efecto de dígitos inactivos estilo 7-seg.
+
+**Modo SMPTE** (`currentTimecodeMode == MODE_SMPTE`):
+- Label único `s_timecode`, formato `HH:MM:SS:FF` via `formatTimecodeString()`
+- Bloques beat ocultos
+
+**Modo BEATS** (`currentTimecodeMode == MODE_BEATS`):
+- 4 contenedores independientes `s_beat_cont[0..3]`, cada uno con ghost+real
+- Separados por 3 puntos `s_beat_dot[0..2]`
+- Anchos: BARS=160px (4 dígitos), BEAT=40px (1), SUBDIV=40px (1), TICKS=120px (3)
+- Origen X: `bx[0]=320`, resto calculado dinámicamente con `dot_gap=12`
+- Mapeo buffer → bloque: `starts[]={0,6,4,7}`, `counts[]={3,1,1,3}`
+- Timecode SMPTE oculto
+
+Throttle de redibujado: máximo 1 frame cada 16 ms (`~60 fps`), controlado por `needsTimecodeRedraw`.
+
+### 10.4 VPot assignment strip
+
+8 labels `s_vpot_lbl[0..7]` en la fila inferior del header, alineados con las columnas de canal:
+
+```
+posición X = (P4_CH_OFFSET + i) * CH_W
+```
+
+- Fuente: SysEx 0x12 offsets 56–111 → `vpotAssignNames[i]` (ver §4.2)
+- Texto centrado, font montserrat 14, color `COL_HEADER_BRIGHT`
+- `LV_LABEL_LONG_CLIP` — texto recortado si supera `CH_W`
+- Actualización: `needsHeaderRedraw = true` en `processControlChange` al recibir CC 48–55
+
+### 10.5 Navegación Bo/Vu/Fa — sin MIDI
+
+Tres botones en la esquina derecha del header (x=812/864/916). Solo navegación local, no envían MIDI.
+
+| Botón | X | Página destino | Activo cuando |
+|-------|---|---------------|---------------|
+| Bo | 812 | Page 1 (Botones) | `g_currentPage == 1` |
+| Vu | 864 | Page 3A (VU meters) | `g_currentPage == 0` |
+| Fa | 916 | Page 3B (Faders) | `g_currentPage == 2` |
+
+Estado visual: página activa = `COL_HEADER_BRIGHT`, resto = `COL_HEADER_DIM`. Actualizado en cada `uiHeaderUpdate()` cuando `g_currentPage` cambia.
