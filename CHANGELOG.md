@@ -25,6 +25,18 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 ---
 
+### SESIÓN 2026-06-12 — P4 Header: indicador VPot assignment + ajuste botones VU (12:45)
+
+**Indicador VPot Assignment en header:**
+
+`UIHeader.cpp`: nuevo widget `s_assign_cont`/`s_assign_lbl` a x=244 (8px tras CLICK), 44×34 px. Display-only (sin hit area, sin MIDI). Lee `btnStatePG1[0..5]` en cada ciclo de `uiHeaderUpdate()` y muestra la abreviatura del modo activo: TRK / SND / PAN / PLG / EQ / INS. Dim + "--" cuando ningún modo activo. Activo: borde + texto `COL_HEADER_BRIGHT`. Destroy incluido.
+
+**UIPage3 — separación botones SOLO/MUTE:**
+
+`UIPage3.cpp`: `MUTE_TOP` gap 2→4 px. `MUTE_TOP` pasa de 58 a 62 px.
+
+---
+
 ### SESIÓN 2026-06-12 — P4 Header: beat display zero-padding + ajustes marco (12:35)
 
 **Beat display — zero-padding correcto:**

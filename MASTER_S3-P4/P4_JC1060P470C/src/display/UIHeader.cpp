@@ -48,6 +48,8 @@ static lv_obj_t* s_bo_hit     = NULL;
 static lv_obj_t* s_vu_hit     = NULL;
 static lv_obj_t* s_fa_hit     = NULL;
 static lv_obj_t* s_vpot_lbl[8] = {};
+static lv_obj_t* s_assign_cont = NULL;
+static lv_obj_t* s_assign_lbl  = NULL;
 static uint8_t   s_lastPage   = 255;
 
 // Beats: contenedor por bloque, ghost+real dentro al (0,0)
@@ -226,6 +228,23 @@ void uiHeaderCreate(lv_obj_t* parent) {
         lv_obj_center(t);
     }
 
+    // ── Indicador VPot Assignment (TRACK/SEND/PAN/PLUG/EQ/INST) ─────
+    s_assign_cont = lv_obj_create(parent);
+    lv_obj_set_pos(s_assign_cont, 244, (HEADER_H - 34) / 2);
+    lv_obj_set_size(s_assign_cont, 44, 34);
+    lv_obj_set_style_bg_opa(s_assign_cont, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(s_assign_cont, 1, 0);
+    lv_obj_set_style_border_color(s_assign_cont, lv_color_hex(COL_HEADER_DIM), 0);
+    lv_obj_set_style_radius(s_assign_cont, 4, 0);
+    lv_obj_set_style_pad_all(s_assign_cont, 0, 0);
+    lv_obj_clear_flag(s_assign_cont, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(s_assign_cont, LV_OBJ_FLAG_CLICKABLE);
+    s_assign_lbl = lv_label_create(s_assign_cont);
+    lv_label_set_text(s_assign_lbl, "--");
+    lv_obj_set_style_text_color(s_assign_lbl, lv_color_hex(COL_HEADER_DIM), 0);
+    lv_obj_set_style_text_font(s_assign_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_center(s_assign_lbl);
+
     // ── Timecode SMPTE ghost + real (sin cambios) ─────────────────
     s_tc_ghost = lv_label_create(parent);
     lv_label_set_text(s_tc_ghost, "00:00:00: 00");
@@ -391,6 +410,28 @@ void uiHeaderCreate(lv_obj_t* parent) {
 void uiHeaderUpdate() {
     if (g_currentPage != s_lastPage) updateNavButtons();
 
+    // ── Indicador VPot Assignment ──────────────────────────────────
+    if (s_assign_lbl && s_assign_cont) {
+        static const char* ASSIGN_SHORT[6] = {"TRK","SND","PAN","PLG","EQ","INS"};
+        static int8_t s_lastAssign = -1;
+        int8_t active = -1;
+        for (int a = 0; a < 6; a++) {
+            if (btnStatePG1[a]) { active = a; break; }
+        }
+        if (active != s_lastAssign) {
+            s_lastAssign = active;
+            if (active >= 0) {
+                lv_label_set_text(s_assign_lbl, ASSIGN_SHORT[active]);
+                lv_obj_set_style_text_color(s_assign_lbl, lv_color_hex(COL_HEADER_BRIGHT), 0);
+                lv_obj_set_style_border_color(s_assign_cont, lv_color_hex(COL_HEADER_BRIGHT), 0);
+            } else {
+                lv_label_set_text(s_assign_lbl, "--");
+                lv_obj_set_style_text_color(s_assign_lbl, lv_color_hex(COL_HEADER_DIM), 0);
+                lv_obj_set_style_border_color(s_assign_cont, lv_color_hex(COL_HEADER_DIM), 0);
+            }
+        }
+    }
+
     if (needsHeaderRedraw) {
         needsHeaderRedraw = false;
         for (int i = 0; i < 8; i++) {
@@ -528,6 +569,7 @@ void uiHeaderDestroy() {
     if (s_fa_lbl)     { lv_obj_delete(s_fa_lbl);     s_fa_lbl     = NULL; }
     if (s_vu_lbl)     { lv_obj_delete(s_vu_lbl);     s_vu_lbl     = NULL; }
     if (s_bo_lbl)     { lv_obj_delete(s_bo_lbl);     s_bo_lbl     = NULL; }
+    if (s_assign_cont) { lv_obj_delete(s_assign_cont); s_assign_cont = NULL; s_assign_lbl = NULL; }
     if (s_click_hit)  { lv_obj_delete(s_click_hit);  s_click_hit  = NULL; }
     if (s_solo_hit)   { lv_obj_delete(s_solo_hit);   s_solo_hit   = NULL; }
     if (s_cycle_hit)  { lv_obj_delete(s_cycle_hit);  s_cycle_hit  = NULL; }
