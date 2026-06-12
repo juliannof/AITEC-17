@@ -200,26 +200,26 @@ void uiPage3BUpdate() {
     if (needsButtonsRedraw) {
         for (int i = 0; i < P3B_CH; i++) {
             lv_obj_set_style_bg_color(s_track_bg[i],
-                selectStates[i] ? lv_color_hex(COL_TRACK_SEL)
-                                : lv_color_hex(COL_TRACK_BG), 0);
+                selectStates[i + P4_CH_OFFSET] ? lv_color_hex(COL_TRACK_SEL)
+                                               : lv_color_hex(COL_TRACK_BG), 0);
             lv_obj_set_style_bg_color(s_mute[i],
-                muteStates[i] ? lv_color_hex(COL_MUTE_ON)
-                              : lv_color_hex(COL_MUTE_OFF), 0);
+                muteStates[i + P4_CH_OFFSET] ? lv_color_hex(COL_MUTE_ON)
+                                             : lv_color_hex(COL_MUTE_OFF), 0);
             uint8_t am = g_channelAutoMode[i];
             lv_obj_set_style_bg_color(s_automode[i],
                 AUTOMODE_COLORS[am < 6 ? am : 0], 0);
             lv_label_set_text(s_automode_lbl[i],
                 AUTOMODE_LABELS[am < 6 ? am : 0]);
-            lv_label_set_text(s_trackname[i], trackNames[i].c_str());
-            int pos = (int)(vpotValues[i] & 0x0F);
-            int pan = ((pos - 6) * 100) / 6;
+            lv_label_set_text(s_trackname[i], trackNames[i + P4_CH_OFFSET].c_str());
+            int pos = (int)(vpotValues[i + P4_CH_OFFSET] & 0x0F);
+            int pan = (pos == 0) ? 0 : ((pos - 6) * 100) / 6;
             lv_arc_set_value(s_arc[i], pan);
             char pan_txt[5];
-            if (pos == 6)      snprintf(pan_txt, sizeof(pan_txt), "C");
-            else if (pos > 6)  snprintf(pan_txt, sizeof(pan_txt), "R%d", pos - 6);
-            else               snprintf(pan_txt, sizeof(pan_txt), "L%d", 6 - pos);
+            if (pos == 0 || pos == 6) snprintf(pan_txt, sizeof(pan_txt), "C");
+            else if (pos > 6)         snprintf(pan_txt, sizeof(pan_txt), "R%d", pos - 6);
+            else                      snprintf(pan_txt, sizeof(pan_txt), "L%d", 6 - pos);
             lv_label_set_text(s_arc_lbl[i], pan_txt);
-            int fval = (int)(faderPositions[i] * 16383.0f);
+            int fval = (int)(faderPositions[i + P4_CH_OFFSET] * 16383.0f);
             lv_slider_set_value(s_fader[i], fval, LV_ANIM_OFF);
         }
         needsButtonsRedraw = false;

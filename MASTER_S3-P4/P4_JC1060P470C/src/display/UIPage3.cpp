@@ -195,7 +195,7 @@ void uiPage3Update() {
                               : lv_color_hex(COL_SOLO_OFF), 0);
             lv_label_set_text(s_trackname[i], trackNames[i].c_str());
             int pos = (int)(vpotValues[i] & 0x0F);
-            int pan = (pos < 6) ? -(6 - pos) * 20 : (pos - 6) * 20;
+            int pan = (pos == 0) ? 0 : (pos < 6) ? -(6 - pos) * 20 : (pos - 6) * 20;
             lv_arc_set_value(s_arc[i], pan);
             // tabla pos 0-11 → valor Logic (-64..+63)
             static const int8_t PAN_VAL[12] = {
