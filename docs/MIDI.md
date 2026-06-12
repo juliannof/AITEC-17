@@ -1242,6 +1242,15 @@ Throttle de redibujado: máximo 1 frame cada 16 ms (`~60 fps`), controlado por `
 
 ### 10.4 VPot assignment strip
 
+En un MCU físico cada canal tiene un scribble strip LCD de 2 filas. El P4 distribuye esas filas en distintas áreas de la UI:
+
+| Fila MCU real | SysEx 0x12 offsets | Contenido | En P4 |
+|---------------|--------------------|-----------|-------|
+| Fila superior | 0–55 | Nombre de track | Página VU meters y botones (`trackNames[]`) |
+| Fila inferior | 56–111 | Parámetro VPot activo | **Header strip** (`vpotAssignNames[]`) |
+
+El parámetro VPot sube al header porque es contexto global: conviene verlo en cualquier página activa.
+
 8 labels `s_vpot_lbl[0..7]` en la fila inferior del header, alineados con las columnas de canal:
 
 ```
