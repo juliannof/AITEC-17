@@ -199,8 +199,8 @@ void processControlChange(byte channel, byte controller, byte value) {
         rs485.setVPotValue(strip + 1, value);
         vpotValues[strip + P4_CH_OFFSET] = value;
         needsButtonsRedraw = true;
-        log_v("[VPot] strip=%u raw=0x%02X mode=%u pos=%u center=%u",
-              strip, value, (value >> 4) & 0x03, value & 0x0F, (value >> 6) & 0x01);
+        log_i("[VPot] CC%d strip=%u raw=0x%02X pos=%u",
+              controller, strip, value, value & 0x0F);
         return;
     }
 

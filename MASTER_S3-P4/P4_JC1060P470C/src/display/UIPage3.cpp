@@ -197,6 +197,8 @@ void uiPage3Update() {
             int pos = (int)(vpotValues[i] & 0x0F);
             int pan = ((pos - 6) * 100) / 6;
             lv_arc_set_value(s_arc[i], pan);
+            lv_obj_invalidate(s_arc[i]);
+            if (i == P4_CH_OFFSET) log_i("[UIPage3] arc[8] pos=%d pan=%d ptr=%p", pos, pan, s_arc[i]);
             char pan_txt[5];
             if (pos == 6)      snprintf(pan_txt, sizeof(pan_txt), "C");
             else if (pos > 6)  snprintf(pan_txt, sizeof(pan_txt), "R%d", pos - 6);
