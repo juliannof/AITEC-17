@@ -25,6 +25,12 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 ---
 
+### SESIÓN 2026-06-12 — P4 UIPage1: recall estado botones al crear página (12:46)
+
+`UIPage1.cpp` `uiPage1Create()`: inicialización de botones cambiada de `applyButtonState(i, false)` a `applyButtonState(i, btnStatePG1[i])`. Añadido `needsButtonsRedraw = true` al final del create. Resuelve que al navegar a la página de botones estos aparecían todos apagados aunque Logic tuviera estados activos.
+
+---
+
 ### SESIÓN 2026-06-12 — P4 Header: indicador VPot assignment + ajuste botones VU (12:45)
 
 **Indicador VPot Assignment en header:**

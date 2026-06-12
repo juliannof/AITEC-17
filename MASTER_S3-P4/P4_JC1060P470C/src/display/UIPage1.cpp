@@ -130,9 +130,10 @@ void uiPage1Create(lv_obj_t* parent) {
         s_btns[i] = btn;
         s_lbls[i] = lbl;
 
-        applyButtonState(i, false);
+        applyButtonState(i, btnStatePG1[i]);
     }
 
+    needsButtonsRedraw = true;
     log_i("[UIPage1] Creada: cell_w=%d cell_h=%d btn=%dx%d",
           (int)cell_w, (int)cell_h, (int)btn_w);
 }
