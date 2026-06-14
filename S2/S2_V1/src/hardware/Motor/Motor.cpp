@@ -403,6 +403,11 @@ void update() {
                    millis() - _stallProtectStart > STALL_PROTECT_MS) {
             _hwOff();  // _motor_hw_active = false → no refire inmediato
             log_e("[MOTOR] STALL — tope físico, motor apagado (adc=%d)", _motor_adcPos);
+            _stallProtectStart = 0;  // evitar refire inmediato al reactivarse
+            if (_motor_state == MotorState::MOVING_TO_TARGET) {
+                _motor_state       = MotorState::AT_TARGET;
+                _atTargetStartTime = millis();
+            }
         }
     } else if (!_motor_hw_active) {
         _stallProtectStart   = 0;

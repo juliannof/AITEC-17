@@ -47,7 +47,7 @@ enum class ConnectionState {
 //     • pre-commit     →  sube en cada commit con cambios S2
 //     Modificarlo a mano rompe el historial de versiones
 // ⚠️ ============================================================ ⚠️
-#define FW_REVISION 21
+#define FW_REVISION 22
 
 
 // ===================================

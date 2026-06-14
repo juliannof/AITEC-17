@@ -135,7 +135,7 @@ void onMasterData(const MasterPacket& pkt) {
     // Log fader cada 500ms — target de Logic vs posición ADC actual
     static unsigned long lastLog = 0;
     if (millis() - lastLog > 500) {
-        log_i("[FADER] target=%d adc=%d diff=%d mode=%d conn=%d",
+        log_d("[FADER] target=%d adc=%d diff=%d mode=%d conn=%d",
               pkt.faderTarget, Motor::getRawADC(),
               (int)pkt.faderTarget - (int)Motor::getRawADC(),
               (int)getAutoMode(pkt.flags), pkt.connected);
