@@ -487,6 +487,14 @@ void update() {
     case MotorState::AT_TARGET:
         // En posición — fricción mecánica mantiene el fader, motor completamente apagado
         if (_motor_hw_active) _hwOff();
+        // Umbral 80 > arrival threshold 60 — evita bucle AT_TARGET↔GOING_TO_MIN en tope físico
+        if (!_connected && _motor_adcPos > (MOTOR_ADC_MIN + 80)) {
+            _goToMinStallStart = 0;
+            _goToMinLastADC    = _motor_adcPos;
+            _motor_state       = MotorState::GOING_TO_MIN;
+            _hwDown(_pwm_max);
+            log_i("[MOTOR-STATE] AT_TARGET → GOING_TO_MIN (desconectado, adc=%d)", _motor_adcPos);
+        }
         break;
 
     default:
