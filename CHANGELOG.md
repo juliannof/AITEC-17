@@ -847,6 +847,11 @@ Todos los valores de brillo de pantalla hardcodeados (255/70/0/200) movidos a de
 ---
 
 ### Upload log S2
+- `2026-06-14 18:43` · Commit S2 · **FW 0.5.29** (sin upload)
+- `2026-06-14 18:09` · Flash S2 · **FW 0.5.28** · `lolin_s2_mini`
+- `2026-06-14 18:08` · Flash S2 · **FW 0.5.27** · `lolin_s2_mini`
+- `2026-06-14 15:58` · Flash S2 · **FW 0.5.26** · `lolin_s2_mini`
+- `2026-06-14 15:57` · Flash S2 · **FW 0.5.25** · `lolin_s2_mini`
 - `2026-06-14 15:27` · Commit S2 · **FW 0.5.24** (sin upload)
 - `2026-06-14 14:55` · Commit S2 · **FW 0.5.23** (sin upload)
 - `2026-06-14 14:42` · Commit S2 · **FW 0.5.22** (sin upload)

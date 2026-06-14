@@ -200,10 +200,12 @@ void setup() {
     initHardware();
     log_i("Hardware OK");
 
-    FaderTouch::init();
-    FaderTouch::onTouch([]()   { digitalWrite(LED_BUILTIN_PIN, HIGH); });
-    FaderTouch::onRelease([]() { digitalWrite(LED_BUILTIN_PIN, LOW);  });
-    log_i("FaderTouch OK");
+    // FaderTouch DESACTIVADO completamente (2026-06-14) — capacitivo no fiable en todo el recorrido
+    // Para reactivar: descomentar init/callbacks/update y revisar setADCDelta() en Motor.cpp
+    // FaderTouch::init();
+    // FaderTouch::onTouch([]()   { digitalWrite(LED_BUILTIN_PIN, HIGH); });
+    // FaderTouch::onRelease([]() { digitalWrite(LED_BUILTIN_PIN, LOW);  });
+    log_i("FaderTouch DESACTIVADO");
 
     setVPotLevel(VPOT_DEFAULT_LEVEL);
     Encoder::begin();
@@ -329,9 +331,7 @@ void loop() {
         Motor::update();
     }
 
-    // FaderTouch DESPUÉS de sendResponse — no bloquea el path crítico RS485 (2026-05-23 19:48)
-    // touchRead (3 muestras) ya no está en el camino de respuesta a S3
-    FaderTouch::update();
+    // FaderTouch::update();  // DESACTIVADO (2026-06-14) — ver setup()
 
     // ─── AUTO-CALIB DESACTIVADO — S3 ordena vía RS485 FLAG_CALIB (2026-05-16 07:48) ───
     // Razón: Arquitectura maestro-esclavo — S3 es autoridad única para calibración
