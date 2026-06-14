@@ -17,6 +17,20 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 ---
 
+### SESIÓN 2026-06-14b — S2 calibración: fix CALIB_DONE prematuro al recalibrar
+
+**Bug:** Cuando S3 se reiniciaba pero S2 seguía corriendo con `_motor_phase=DONE`, al recibir el siguiente FLAG_CALIB S2 entraba en `GOING_TO_MIN` (para recalibrar) pero seguía enviando `SLAVE_FLAG_CALIB_DONE` con los datos de la calibración anterior. S3 marcaba al slave como "calibrado" inmediatamente con `MIN=0 MAX=0` porque sus variables estaban a 0 tras el reinicio. Resultado: `_motor_adcSpan=0` en S2 → `_positionTick()` abortaba → motor no respondía a targets.
+
+**Fix aplicado (2026-06-14):**
+
+| Archivo | Cambio |
+|---------|--------|
+| `S2/S2_V1/src/RS485/RS485Handler.cpp` | `buildResponse()`: añadir `pendingNewCalib` flag — detecta `DONE + GOING_TO_MIN` → suprime `SLAVE_FLAG_CALIB_DONE` y resetea `_calib_send_state=0` hasta que la nueva calibración complete |
+
+**MCU afectadas:** solo S2 (Slave).
+
+---
+
 ### SESIÓN 2026-06-14 — AutoMode nota 79 corregida + derivación AUTO_OFF por ausencia
 
 **Diagnóstico previo:** revisión de la cadena completa AutoMode reveló que S3 mapeaba nota MIDI 79 → `AUTO_OFF` (incorrecto: nota 79 es "Automation Group" en la spec Mackie, no un botón de automodo). P4 ya ignoraba nota 79 correctamente pero carecía de Note Off → `AUTO_OFF`. S2 tenía una comparación `uint8_t` vs `AutoMode` sin seguridad de tipo.
@@ -832,6 +846,7 @@ Todos los valores de brillo de pantalla hardcodeados (255/70/0/200) movidos a de
 ---
 
 ### Upload log S2
+- `2026-06-14 15:27` · Commit S2 · **FW 0.5.24** (sin upload)
 - `2026-06-14 14:55` · Commit S2 · **FW 0.5.23** (sin upload)
 - `2026-06-14 14:42` · Commit S2 · **FW 0.5.22** (sin upload)
 - `2026-06-14 14:35` · Commit S2 · **FW 0.5.21** (sin upload)

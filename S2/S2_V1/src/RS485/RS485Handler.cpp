@@ -301,6 +301,15 @@ SlavePacket buildResponse(FaderADC& faderADC, SatMenu& satMenu) {
 
     Motor::CalibState cs = Motor::getCalibState();
 
+    // Recalibración pedida pero pendiente: phase=DONE y motor bajando a 0 para recalibrar.
+    // Suprimir CALIB_DONE hasta que la nueva calibración complete — evita que S3 marque
+    // "calibrado" con MIN=0 MAX=0 antes de recibir los datos reales. (2026-06-14)
+    bool pendingNewCalib = (cs == Motor::CalibState::DONE &&
+                            Motor::getState() == Motor::MotorState::GOING_TO_MIN);
+    if (pendingNewCalib && _calib_send_state > 0) {
+        _calib_send_state = 0;  // Forzar reenvío de MIN+MAX tras nueva calibración
+    }
+
     // Detección: si volvemos a calibración desde DONE, resetear estado de envío
     if (cs != Motor::CalibState::DONE && _last_cs == Motor::CalibState::DONE) {
         _calib_send_state = 0;  // Reset para próxima calibración
@@ -308,7 +317,7 @@ SlavePacket buildResponse(FaderADC& faderADC, SatMenu& satMenu) {
     _last_cs = cs;
 
     // Máquina de estado: enviar min/max tras calibración
-    if (cs == Motor::CalibState::DONE && _calib_send_state < 2) {
+    if (cs == Motor::CalibState::DONE && _calib_send_state < 2 && !pendingNewCalib) {
         if (_calib_send_state == 0) {
             // Paquete 1: enviar MIN — sin CALIB_DONE (S3 espera MAX antes de declarar OK)
             resp.faderPos = Motor::getADCMin();
@@ -323,7 +332,7 @@ SlavePacket buildResponse(FaderADC& faderADC, SatMenu& satMenu) {
     } else {
         // Normal: enviar posición actual
         resp.faderPos = Motor::getRawADC();
-        if (cs == Motor::CalibState::DONE)  resp.buttons |= SLAVE_FLAG_CALIB_DONE;
+        if (cs == Motor::CalibState::DONE && !pendingNewCalib) resp.buttons |= SLAVE_FLAG_CALIB_DONE;
     }
 
     if (cs == Motor::CalibState::ERROR) resp.buttons |= SLAVE_FLAG_CALIB_ERROR;
