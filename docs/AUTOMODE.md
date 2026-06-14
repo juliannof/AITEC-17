@@ -2,9 +2,9 @@
 
 Documentación del sistema de **AutoMode awareness** del fader motorizado S2. Define cómo el handler RS485 enruta el target del DAW al motor en función del modo de automatización activo (OFF / READ / WRITE / TRIM / TOUCH / LATCH).
 
-**Última actualización:** 2026-05-30 09:35
+**Última actualización:** 2026-06-14
 **Estado:** En implementación — pendiente validación hardware
-**Aplica a:** S2 (Slave). S3 y P4 ya transmiten AutoMode en `MasterPacket.flags` (bits 5-7).
+**Aplica a:** S2 (Slave). S3 y P4 transmiten AutoMode en `MasterPacket.flags` (bits 5-7).
 
 ---
 
@@ -279,9 +279,62 @@ Si Logic solicita calibración (`FLAG_CALIB`) mientras `_rsLatchFrozen` es true:
 | `S2/S2_V1/src/hardware/Motor/Motor.cpp` | + implementación `Motor::setTargetForced()` |
 | `S2/S2_V1/src/config.h` | + constantes `AUTOMODE_*` + estado `_rs*` |
 | `S2/S2_V1/src/RS485/RS485Handler.h` | + `Internal` namespace con `_applyFaderTarget`, `_touchDebounceForMode` |
-| `S2/S2_V1/src/RS485/RS485Handler.cpp` | + implementaciones `Internal::*`, refactor `onMasterData()` + `buildResponse()` |
+| `S2/S2_V1/src/RS485/RS485Handler.cpp` | + implementaciones `Internal::*`, refactor `onMasterData()` + `buildResponse()`; fix type-safe `pktMode != currentAutoMode` (2026-06-14) |
+| `MASTER_S3-P4/S3/.../MIDIProcessor.cpp` | + `_autoNoteState[5]`; corrección nota 79 → derivación AUTO_OFF por ausencia (2026-06-14) |
+| `MASTER_S3-P4/P4_JC1060P470C/.../MIDIProcessor.cpp` | + `_autoNoteState[5]`; Note Off → AUTO_OFF añadido (2026-06-14) |
 
-**MCU no afectadas:** S3 (ya envía AutoMode), P4 (no toca fader directo).
+---
+
+## 9B. MAPEO MIDI → AUTOMODE (S3 y P4) — confirmado por captura real (2026-06-14)
+
+### Notas Mackie MCU para automodo (Logic Pro)
+
+| Nota | Nombre | AutoMode |
+|------|--------|----------|
+| 74 | D4 | `AUTO_READ` |
+| 75 | D♯4 | `AUTO_WRITE` |
+| 76 | E4 | `AUTO_TRIM` |
+| 77 | F4 | `AUTO_TOUCH` |
+| 78 | F♯4 | `AUTO_LATCH` |
+| 79 | — | "Automation Group" — **NO mapeada** |
+
+**AUTO_OFF:** no tiene nota propia. Es el estado cuando **ninguna** de las notas 74-78 está a velocity > 0. Se deriva de la ausencia.
+
+### Comportamiento de transición (confirmado)
+
+Los cinco botones de automodo son un grupo de radio excluyente. En un cambio de modo Logic envía Note On (vel 127) para el modo nuevo y Note Off (vel 0) para el modo previo. El controlador **nunca** establece el modo por sí mismo — deriva el modo activo de lo que Logic confirma via MIDI feedback (misma arquitectura que REC/SOLO/MUTE/SELECT).
+
+### Anomalía TRIM (observada en captura)
+
+Al activar TRIM (nota 76), en ocasiones Logic envía Note On sin el Note Off previo del modo saliente. El sistema lo resuelve mediante `_autoNoteState[5]`: cualquier Note On limpia los otros 4 índices antes de activar el nuevo, garantizando mutual exclusion independientemente del orden de llegada.
+
+### Refresh masivo de canal
+
+Al reconectar o cambiar el track enfocado, Logic envía un burst de ~90 notas que incluye las 5 de automodo (74-78) intercaladas con decenas de notas no relacionadas. El handler rastrea cada una de las 5 notas de forma independiente en `_autoNoteState[5]` y deriva el modo al final de cada nota procesada — el orden de llegada no afecta el resultado final.
+
+### Implementación (`MIDIProcessor.cpp` — S3 y P4)
+
+```cpp
+// Namespace anónimo:
+static bool _autoNoteState[5] = {};  // índices 0-4 → notas 74-78
+
+// En processNote():
+if (note >= 74 && note <= 78 && g_selectedChannel >= 0) {
+    uint8_t idx = note - 74;
+    if (is_on) {
+        for (uint8_t i = 0; i < 5; i++) _autoNoteState[i] = false;  // mutual exclusion
+        _autoNoteState[idx] = true;
+    } else {
+        _autoNoteState[idx] = false;
+    }
+    // Derivar: primer índice true → ese modo; ninguno → AUTO_OFF
+    AutoMode newMode = AUTO_OFF;
+    for (uint8_t i = 0; i < 5; i++) {
+        if (_autoNoteState[i]) { newMode = noteToMode[i]; break; }
+    }
+    if (newMode != prevMode) rs485.setAutoMode(g_selectedChannel + 1, newMode);
+}
+```
 
 ---
 

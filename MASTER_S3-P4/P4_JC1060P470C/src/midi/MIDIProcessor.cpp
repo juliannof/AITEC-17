@@ -30,6 +30,15 @@ namespace {
     static const unsigned long CONNECT_GRACE_MS = 1500;
     static uint8_t  _calibPendingFrom = 0;
     static uint32_t _calibNextTime    = 0;
+
+    // Estado de las 5 notas de automodo (notas 74-78 → índices 0-4). (2026-06-14)
+    // WHAT: rastrea qué nota del grupo está actualmente On según Logic.
+    // WHY:  AUTO_OFF se deriva de la ausencia de cualquier nota activa — no existe
+    //       una nota dedicada para OFF. Este array permite sobrevivir refreshes
+    //       masivos donde las 5 notas llegan intercaladas con ~80 notas ajenas.
+    // Ciclo de vida: activado por Note On; borrado por Note Off del mismo índice
+    //   O por Note On de otro índice del grupo (mutual exclusion).
+    static bool _autoNoteState[5] = {};
 }
 
 void processMidiByte(byte b);
@@ -608,13 +617,46 @@ void processNote(byte status, byte note, byte velocity) {
         return;
     }
 
-    if (note >= 74 && note <= 78 && is_on && g_selectedChannel >= 0) {
-        const AutoMode modeMap[] = {
-            AUTO_READ, AUTO_WRITE, AUTO_TRIM, AUTO_TOUCH, AUTO_LATCH
-        };
-        AutoMode mode = modeMap[note - 74];
-        g_channelAutoMode[g_selectedChannel] = (uint8_t)mode;
-        rs485.setAutoMode(g_selectedChannel + 1, mode);
+    // ── Automodo — notas 74-78 (2026-06-14) ─────────────────────────────────
+    // WHAT: detecta transiciones de modo de automatización por Note On/Off.
+    // WHY:  AUTO_OFF se deriva de la AUSENCIA de cualquier nota activa en el
+    //       grupo (74-78) — no existe nota dedicada. Nota 79 ("Automation Group"
+    //       en la spec Mackie) NO se mapea a AutoMode.
+    // ASSUMES: las 5 notas son mutuamente excluyentes. Un Note On en el grupo
+    //          implica que las otras 4 deben ser Off. El estado se rastrea en
+    //          _autoNoteState[5] para sobrevivir refreshes masivos donde las
+    //          notas llegan intercaladas con ~80 eventos no relacionados.
+    if (note >= 74 && note <= 78 && g_selectedChannel >= 0) {
+        uint8_t idx = note - 74;  // 0=READ 1=WRITE 2=TRIM 3=TOUCH 4=LATCH
+        AutoMode prevMode = (AutoMode)g_channelAutoMode[g_selectedChannel];
+
+        if (is_on) {
+            // Note On: este modo es activo. Borrar las otras 4 (mutual exclusion
+            // garantizada por el protocolo). Esto resuelve la anomalía TRIM —
+            // Note On sin Note Off previo — sin lógica adicional.
+            for (uint8_t i = 0; i < 5; i++) _autoNoteState[i] = false;
+            _autoNoteState[idx] = true;
+        } else {
+            // Note Off: desactivar esta nota. Si el resto siguen Off → AUTO_OFF.
+            // Si alguno quedó On por anomalía de protocolo, ese modo prevalece.
+            _autoNoteState[idx] = false;
+        }
+
+        // Derivar modo activo: primer índice true, o AUTO_OFF si ninguno.
+        static const AutoMode noteToMode[5] = {AUTO_READ, AUTO_WRITE, AUTO_TRIM, AUTO_TOUCH, AUTO_LATCH};
+        AutoMode newMode = AUTO_OFF;
+        for (uint8_t i = 0; i < 5; i++) {
+            if (_autoNoteState[i]) { newMode = noteToMode[i]; break; }
+        }
+
+        if (newMode != prevMode) {
+            log_i("[AUTOMODE] P4 nota=%d vel=%d canal=%d %d→%d",
+                  note, velocity, g_selectedChannel, (int)prevMode, (int)newMode);
+            g_channelAutoMode[g_selectedChannel] = (uint8_t)newMode;
+            rs485.setAutoMode(g_selectedChannel + 1, newMode);
+        }
+
+        // Actualizar estado visual del botón en el mapa de PG1.
         for (int key = 0; key < BTN_PG1_COUNT; key++) {
             if (MIDI_NOTES_PG1[key] != 0x00 && MIDI_NOTES_PG1[key] == note) {
                 btnStatePG1[key]  = is_on;

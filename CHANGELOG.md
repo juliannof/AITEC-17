@@ -17,6 +17,27 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 ---
 
+### SESIÓN 2026-06-14 — AutoMode nota 79 corregida + derivación AUTO_OFF por ausencia
+
+**Diagnóstico previo:** revisión de la cadena completa AutoMode reveló que S3 mapeaba nota MIDI 79 → `AUTO_OFF` (incorrecto: nota 79 es "Automation Group" en la spec Mackie, no un botón de automodo). P4 ya ignoraba nota 79 correctamente pero carecía de Note Off → `AUTO_OFF`. S2 tenía una comparación `uint8_t` vs `AutoMode` sin seguridad de tipo.
+
+**Confirmado por captura MIDI real (Logic Pro):** notas 74-78 = READ/WRITE/TRIM/TOUCH/LATCH. `AUTO_OFF` no tiene nota dedicada — es la ausencia de cualquier nota del grupo activa. Nota 79 no se emite nunca para cambios de automodo de fader.
+
+**Anomalía TRIM documentada:** al activar TRIM, Logic a veces envía Note On 76 sin el Note Off del modo previo. Resuelto sin lógica especial mediante mutual exclusion en `_autoNoteState`.
+
+**Cambios aplicados (2026-06-14):**
+
+| Archivo | Cambio |
+|---------|--------|
+| `S3/.../MIDIProcessor.cpp` | Rango `74-79 && is_on` → `74-78` (On y Off). `_autoNoteState[5]` en namespace anónimo. AUTO_OFF por ausencia. Log `[AUTOMODE] S3 nota=...` |
+| `P4_JC1060P470C/.../MIDIProcessor.cpp` | Mismo patrón que S3. `_autoNoteState[5]`. Note Off → AUTO_OFF. Log `[AUTOMODE] P4 nota=...` |
+| `S2/.../RS485Handler.cpp` | `uint8_t newAutoMode` eliminado → comparación type-safe `pktMode != currentAutoMode` |
+| `docs/AUTOMODE.md` | Sección 9B añadida: mapeo MIDI confirmado, anomalía TRIM, refresh masivo, implementación |
+
+**Resultado:** S3 y P4 producen valores `AutoMode` idénticos para el mismo input de Logic. Los S2 de ambos buses (A y B) entrarán siempre en el mismo modo.
+
+---
+
 ### SESIÓN 2026-06-12 — P4 VPot RESUELTO (lv_arc) + cadena trazada + pop-up grande (19:47)
 
 **VPot arcs RESUELTOS — widget `lv_arc` (no draw primitives):**
@@ -811,6 +832,7 @@ Todos los valores de brillo de pantalla hardcodeados (255/70/0/200) movidos a de
 ---
 
 ### Upload log S2
+- `2026-06-14 14:35` · Commit S2 · **FW 0.5.21** (sin upload)
 - `2026-05-30 11:53` · Commit S2 · **FW 0.5.20** (sin upload)
 - `2026-05-27 23:14` · Commit S2 · **FW 0.4.19** (sin upload)
 - `2026-05-27 22:36` · Commit S2 · **FW 0.4.18** (sin upload)

@@ -239,9 +239,9 @@ void onMasterData(const MasterPacket& pkt) {
         _rsLastTouchTime  = 0;
     }
 
-    uint8_t newAutoMode = (uint8_t)pktMode;  // legacy: setAutoMode(uint8_t) para display
-    if (newAutoMode != currentAutoMode) {
-        setAutoMode(newAutoMode);
+    // Comparación type-safe: ambos lados AutoMode. setAutoMode() acepta uint8_t. (2026-06-14)
+    if (pktMode != currentAutoMode) {
+        setAutoMode((uint8_t)pktMode);
         needsVPotRedraw   = true;
         needsHeaderRedraw = true;
     }
