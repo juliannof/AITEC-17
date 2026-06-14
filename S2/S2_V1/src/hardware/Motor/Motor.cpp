@@ -528,12 +528,24 @@ void setADCDelta(uint16_t currentADC) {
     }
 
     // No detectar usuario durante calibración ni goToMin
+    static bool _prevInCalibFlow = false;
     bool inCalibFlow = _isCalibrating() ||
                        _motor_state == MotorState::GOING_TO_MIN ||
                        _motor_state == MotorState::CALIBRATING;
     if (inCalibFlow) {
+        _prevInCalibFlow       = true;
         _motor_lastADCForDelta = currentADC;
         _motor_manualTouchDetected = false;  // motor bajo control automático — resetear flag usuario (2026-05-27)
+        return;
+    }
+
+    // Primer ciclo tras salir de calibFlow: resetear ventana delta para evitar falso touch (2026-06-14)
+    // _deltaWindowRef queda con el ADC de antes del goToMin → delta enorme → falsa detección
+    if (_prevInCalibFlow) {
+        _prevInCalibFlow       = false;
+        _deltaWindowRef        = currentADC;
+        _deltaWindowStart      = millis();
+        _motor_lastADCForDelta = currentADC;
         return;
     }
 
