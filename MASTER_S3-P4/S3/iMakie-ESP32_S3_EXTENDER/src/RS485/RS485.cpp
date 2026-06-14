@@ -309,12 +309,28 @@ void RS485Master::_handleResponse() {
         if (calibDone) {
             _ch[_currentId].calibrating = false;
             if (!_ch[_currentId].calibrated) {
-                _ch[_currentId].calibrated = true;
-                _ch[_currentId].dirty      = true;
-                log_i("[CALIB] Slave %d ✓ CALIBRADO OK: MIN=%d MAX=%d",
-                      _currentId, _ch[_currentId].calibratedMin, _ch[_currentId].calibratedMax);
-                // Cascade con wraparound — incluye slaves que fallaron antes (2026-05-26)
-                _triggerNextCalibration(_currentId);
+                // Guard: rechazar datos inválidos (MIN=0 MAX=0) — indica CALIB_DONE prematuro
+                // antes de que S2 enviara los paquetes MIN/MAX reales. (2026-06-14)
+                bool dataValida = (_ch[_currentId].calibratedMin > 0 &&
+                                   _ch[_currentId].calibratedMax > _ch[_currentId].calibratedMin);
+                if (dataValida) {
+                    _ch[_currentId].calibrated = true;
+                    _ch[_currentId].dirty      = true;
+                    log_i("[CALIB] Slave %d ✓ CALIBRADO OK: MIN=%d MAX=%d",
+                          _currentId, _ch[_currentId].calibratedMin, _ch[_currentId].calibratedMax);
+                    // Cascade con wraparound — incluye slaves que fallaron antes (2026-05-26)
+                    _triggerNextCalibration(_currentId);
+                } else {
+                    log_w("[CALIB] Slave %d ✗ CALIB_DONE inválido (MIN=%d MAX=%d) — reintentando",
+                          _currentId, _ch[_currentId].calibratedMin, _ch[_currentId].calibratedMax);
+                    _ch[_currentId].calibRetries++;
+                    if (_ch[_currentId].calibRetries >= MAX_CALIBRATION_RETRIES) {
+                        log_w("[CALIB] Slave %d — presupuesto agotado, saltando", _currentId);
+                        _triggerNextCalibration(_currentId);
+                    } else {
+                        _ch[_currentId].stableRespCount = 0;  // grace period → espera respuestas estables
+                    }
+                }
             }
         } else if (calibError) {
             // Guard: contar solo si este intento fue nuestro (2026-05-26)
