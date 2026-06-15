@@ -193,6 +193,9 @@ void setup() {
 
     delay(100);
     faderADC.begin();
+    if (!faderADC.isOk()) {
+        log_e("[BOOT] ADS1115 no encontrado — LED GPIO15 parpadeará");
+    }
     log_i("Fader iniciado.");
     
 
@@ -264,6 +267,17 @@ static bool g_calibStarted = false;
 //  loop
 // =============================================================
 void loop() {
+    // Parpadeo LED GPIO15 si ADS1115 no se encontró en el boot (2026-06-15)
+    if (!faderADC.isOk()) {
+        static uint32_t _adsBlinkLast = 0;
+        static bool     _adsBlinkOn   = false;
+        if (millis() - _adsBlinkLast >= 500) {
+            _adsBlinkLast = millis();
+            _adsBlinkOn   = !_adsBlinkOn;
+            digitalWrite(LED_BUILTIN_PIN, _adsBlinkOn ? HIGH : LOW);
+        }
+    }
+
     // OTA siempre tiene máxima prioridad, incluso si SAT está abierto
     // Actualizar ADC SIEMPRE (incluso en SAT) para Test Mode live feedback (2026-05-10 21:57)
     faderADC.update();

@@ -17,6 +17,7 @@ public:
     int      getRawLast()  const { return _rawLast;  }
     uint16_t getCalibMin() const { return _calibratedFaderMin; }
     uint16_t getCalibMax() const { return _calibratedFaderMax; }
+    bool     isOk()        const { return _adsOk; }
 
 private:
     Adafruit_ADS1115 _ads;
@@ -39,6 +40,7 @@ private:
 
     static void IRAM_ATTR _alertISR();
 
+    bool     _adsOk    = false;
     uint16_t _faderPos = 0;
     int      _rawLast  = 0;
     uint16_t _calibratedFaderMin = 0;     // Mínimo real del fader (guardado por Motor al calibrar)

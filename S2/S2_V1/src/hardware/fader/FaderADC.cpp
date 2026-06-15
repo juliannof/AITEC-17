@@ -9,8 +9,9 @@ void IRAM_ATTR FaderADC::_alertISR() {
 }
 
 void FaderADC::begin() {
-    _i2c.begin(ADS_SDA_PIN, ADS_SCL_PIN);
-    _i2c.setClock(100000);
+    // 400kHz Fast Mode — pasar en begin() evita el warning "Bus already started"
+    // que ignoraba el setClock() posterior (2026-06-15)
+    _i2c.begin(ADS_SDA_PIN, ADS_SCL_PIN, 400000);
 
     if (!_ads.begin(ADS_I2C_ADDR, &_i2c)) {
         log_e("[ADC] ADS1115 not found at 0x%02X", ADS_I2C_ADDR);
@@ -33,6 +34,7 @@ void FaderADC::begin() {
             if (raw < 0) raw = 0;
             _rawLast = raw;
             _adsLogIdx = 0;
+            _adsOk = true;
             log_i("[ADC] ADS1115 OK  GAIN_ONE  860SPS  ALERT=IO%d  seed=%d", ADS_ALERT_PIN, _rawLast);
             return;  // Éxito
         }
