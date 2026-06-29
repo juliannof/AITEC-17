@@ -64,24 +64,43 @@ static void mode_color(uint8_t* r, uint8_t* g, uint8_t* b) {
     *b =  col        & 0xFF;
 }
 
-// ── Redibuja los 64 dots con el estado actual ─────────────────────────
-static void update_leds_draw() {
+// ── Redibuja solo los dots afectados (d<=3 desde el centro) ──────────
+// Si pos_changed=true limpia primero los dots del radio anterior
+static void update_leds_draw(bool pos_changed = false) {
     uint8_t mr, mg, mb;
     mode_color(&mr, &mg, &mb);
-    bool center_on = s_pressing || (bool)g_holdMode;
 
-    for (int i = 0; i < DOTS_N; i++) {
-        for (int j = 0; j < DOTS_N; j++) {
+    // Si no hay nada que mostrar y no hubo cambio de posición: no hacer nada
+    if (s_glow_t <= 0.0f && !s_pressing && !(bool)g_holdMode && !pos_changed) return;
+
+    // Cuando el dedo se mueve, limpia TODOS los dots del grid anterior
+    if (pos_changed) {
+        for (int i = 0; i < DOTS_N; i++)
+            for (int j = 0; j < DOTS_N; j++)
+                if (s_dots[i][j])
+                    lv_obj_set_style_bg_color(s_dots[i][j], lv_color_make(0,0,0), 0);
+    }
+
+    // Actualiza solo la zona ±3 alrededor del centro activo
+    int i0 = s_i_near - 3; if (i0 < 0) i0 = 0;
+    int i1 = s_i_near + 3; if (i1 >= DOTS_N) i1 = DOTS_N - 1;
+    int j0 = s_j_near - 3; if (j0 < 0) j0 = 0;
+    int j1 = s_j_near + 3; if (j1 >= DOTS_N) j1 = DOTS_N - 1;
+
+    for (int i = i0; i <= i1; i++) {
+        for (int j = j0; j <= j1; j++) {
             if (!s_dots[i][j]) continue;
-
             int di = i - s_i_near; if (di < 0) di = -di;
             int dj = j - s_j_near; if (dj < 0) dj = -dj;
-            int d  = (di > dj) ? di : dj;  // Chebyshev
+            int d  = (di > dj) ? di : dj;
 
             uint8_t bright = 0;
             if (d == 0) {
-                bright = center_on ? 255 : 0;
-            } else if (d <= 3 && s_glow_t > 0.0f) {
+                // Centro: 100% mientras se toca o HOLD; fade tras soltar
+                bright = (s_pressing || (bool)g_holdMode)
+                       ? 255
+                       : (uint8_t)(255.0f * s_glow_t);
+            } else if (d <= 3) {
                 bright = (uint8_t)((float)k_peak[d] * s_glow_t);
             }
 
@@ -94,10 +113,10 @@ static void update_leds_draw() {
     }
 }
 
-// ── Timer: decae adjacentes mientras se mantiene el toque ────────────
-static void decay_timer_cb(lv_timer_t* /*t*/) {
-    if (s_glow_t <= 0.0f) return;
-    s_glow_t -= 0.03f;   // ~1.7s para llegar a 0 desde pico
+// ── Timer: decay <1s, se pausa solo cuando llega a 0 ─────────────────
+static void decay_timer_cb(lv_timer_t* t) {
+    if (s_glow_t <= 0.0f) { lv_timer_pause(t); return; }
+    s_glow_t -= 0.07f;   // ~700ms para llegar a 0 (14 ticks × 50ms)
     if (s_glow_t < 0.0f) s_glow_t = 0.0f;
     update_leds_draw();
 }
@@ -127,38 +146,40 @@ static void pad_event_cb(lv_event_t* e) {
         s_j_near   = nj;
         s_glow_t   = 1.0f;
         s_pressing = true;
+        if (s_decay_tmr) lv_timer_resume(s_decay_tmr);
 
-        sendCC(MIDI_CH, CC_X, kaoss.mapXtoCC(pad_x));
-        sendCC(MIDI_CH, CC_Y, kaoss.mapYtoCC(pad_y));
-        sendNote(MIDI_CH, kaoss.noteFromY(pad_y), NOTE_VELOCITY, true);
-        g_lastCCX = kaoss.mapXtoCC(pad_x);
-        g_lastCCY = kaoss.mapYtoCC(pad_y);
+        uint8_t ccX = kaoss.mapXtoCC(pad_x);
+        uint8_t ccY = kaoss.mapYtoCC(pad_y);
+        sendCC(MIDI_CH, kaoss.getCCX(), ccX);
+        sendCC(MIDI_CH, kaoss.getCCY(), ccY);
+        g_lastCCX = ccX;
+        g_lastCCY = ccY;
         g_touched  = true;
         update_leds_draw();
 
     } else if (code == LV_EVENT_PRESSING) {
-        if (ni != s_i_near || nj != s_j_near) {
+        bool moved = (ni != s_i_near || nj != s_j_near);
+        if (moved) {
             s_i_near = ni;
             s_j_near = nj;
-            s_glow_t = 1.0f;   // reinicia adjacentes al moverse
+            s_glow_t = 1.0f;
+            if (s_decay_tmr) lv_timer_resume(s_decay_tmr);
         }
         uint8_t ccX = kaoss.mapXtoCC(pad_x);
         uint8_t ccY = kaoss.mapYtoCC(pad_y);
         if (ccX != (uint8_t)g_lastCCX || ccY != (uint8_t)g_lastCCY) {
-            sendCC(MIDI_CH, CC_X, ccX);
-            sendCC(MIDI_CH, CC_Y, ccY);
+            sendCC(MIDI_CH, kaoss.getCCX(), ccX);
+            sendCC(MIDI_CH, kaoss.getCCY(), ccY);
             g_lastCCX = ccX;
             g_lastCCY = ccY;
         }
-        update_leds_draw();
+        update_leds_draw(moved);
 
     } else if (code == LV_EVENT_RELEASED) {
         s_pressing = false;
         g_touched  = false;
-        if (!g_holdMode) {
-            sendAllNotesOff(MIDI_CH);
-            s_glow_t = 0.0f;
-        }
+        // sin notas — no hace falta All Notes Off
+        // No resetear s_glow_t — el decay continúa visible tras soltar
         update_leds_draw();
     }
 }
@@ -195,12 +216,15 @@ static void btn_event_cb(lv_event_t* e) {
                 uiKaossUpdateHold();
                 break;
             case 2:
-                g_currentScale = (g_currentScale + 1) % NUM_SCALES;
-                kaoss.setScale(g_currentScale);
+                kaoss.nextPreset();
                 uiKaossUpdateScale();
                 break;
             case 3:
-                sendAllNotesOff(MIDI_CH);
+                // PANIC: resetea ambos CCs a 64 (centro)
+                sendCC(MIDI_CH, kaoss.getCCX(), 64);
+                sendCC(MIDI_CH, kaoss.getCCY(), 64);
+                g_lastCCX  = 64;
+                g_lastCCY  = 64;
                 g_touched  = false;
                 s_pressing = false;
                 s_glow_t   = 0.0f;
@@ -305,7 +329,7 @@ void uiKaossCreate(lv_obj_t* parent) {
     s_btn[3] = make_btn(parent, 0,     PAD_START_Y + PAD_SIZE, "PANIC", COL_FUNC_PANIC, COL_BTN_PANIC, 3);
 
     s_lbl_scale = lv_label_create(s_btn[2]);
-    lv_label_set_text(s_lbl_scale, kaoss.scaleName());
+    lv_label_set_text(s_lbl_scale, kaoss.presetName());
     lv_obj_set_style_text_color(s_lbl_scale, lv_color_hex(COL_TEXT_DIM), 0);
     lv_obj_set_style_text_font(s_lbl_scale, &lv_font_montserrat_14, 0);
     lv_obj_align(s_lbl_scale, LV_ALIGN_CENTER, -15, 0);
@@ -322,7 +346,7 @@ void uiKaossCreate(lv_obj_t* parent) {
 }
 
 void uiKaossUpdateScale() {
-    if (s_lbl_scale) lv_label_set_text(s_lbl_scale, kaoss.scaleName());
+    if (s_lbl_scale) lv_label_set_text(s_lbl_scale, kaoss.presetName());
 }
 
 void uiKaossUpdateHold() {
