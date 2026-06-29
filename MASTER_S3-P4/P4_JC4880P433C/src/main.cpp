@@ -43,6 +43,7 @@ void taskCore1(void* pv) {
         } else if (!uiReady) {
             uiBootDestroy();
             uiKaossCreate(displayGetRoot());
+            uiKaossStartScroll();
             uiReady = true;
         }
 

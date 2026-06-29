@@ -50,6 +50,10 @@
 // ── Splash ────────────────────────────────────────────────────────────
 #define BOOT_SCREEN_MS    3000
 
+// ── Scroll "ExPressive" en grilla 8×8 ────────────────────────────────
+#define SCROLL_STEP_MS      80    // ms por columna
+#define SCROLL_IDLE_TICKS   60    // 60×50ms = 3s idle antes de scroll
+
 // ── Modos ────────────────────────────────────────────────────────────
 enum class ExMode : uint8_t {
     KAOSS_XY    = 0,

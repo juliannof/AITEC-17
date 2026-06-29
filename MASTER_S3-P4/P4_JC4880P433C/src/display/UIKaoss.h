@@ -7,3 +7,4 @@ void uiKaossDestroy();
 void uiKaossUpdateScale();   // refresca sub-label del botón SCALE
 void uiKaossUpdateHold();    // refresca visual del botón HOLD
 void uiKaossUpdateLeds();    // refresca rejilla 8×8 con color del modo activo
+void uiKaossStartScroll();   // arranca animación "ExPressive" (boot + idle)

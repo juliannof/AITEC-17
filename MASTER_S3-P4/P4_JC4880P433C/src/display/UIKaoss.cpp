@@ -46,6 +46,34 @@ static int    s_i_near   = 0;
 static int    s_j_near   = 0;
 static bool   s_pressing = false;
 
+// ── Scroll "ExPressive" ───────────────────────────────────────────────
+// Font 5×7 col-based: bit0=fila top, bit6=fila bottom
+// Letras mayúsculas: filas 0-6 (altura plena). Minúsculas: filas 2-6.
+#define SCROLL_CHAR_COLS 5
+#define SCROLL_CHAR_GAP  1
+#define SCROLL_CHARS     10
+#define SCROLL_TEXT_W    (SCROLL_CHARS * (SCROLL_CHAR_COLS + SCROLL_CHAR_GAP))  // 60
+
+static const uint8_t s_font[SCROLL_CHARS][SCROLL_CHAR_COLS] = {
+    /* E */ {0x7F, 0x49, 0x49, 0x49, 0x41},
+    /* x */ {0x44, 0x28, 0x10, 0x28, 0x44},
+    /* P */ {0x7F, 0x09, 0x09, 0x09, 0x06},
+    /* r */ {0x7C, 0x04, 0x04, 0x04, 0x08},
+    /* e */ {0x38, 0x54, 0x54, 0x54, 0x18},
+    /* s */ {0x48, 0x54, 0x54, 0x54, 0x24},
+    /* s */ {0x48, 0x54, 0x54, 0x54, 0x24},
+    /* i */ {0x00, 0x48, 0x7A, 0x48, 0x00},
+    /* v */ {0x0C, 0x30, 0x40, 0x30, 0x0C},
+    /* e */ {0x38, 0x54, 0x54, 0x54, 0x18},
+};
+
+static int16_t     s_scroll_tick   = 0;
+static bool        s_scroll_active = false;
+static uint16_t    s_idle_ticks    = 0;
+static lv_timer_t* s_scroll_tmr    = NULL;
+
+void uiKaossStartScroll();  // forward declaration (definida al final)
+
 // ── Helpers ──────────────────────────────────────────────────────────
 static void rot_label(lv_obj_t* lbl) {
     lv_obj_set_style_transform_rotation(lbl, 900, 0);
@@ -114,12 +142,68 @@ static void update_leds_draw(bool pos_changed = false) {
     }
 }
 
-// ── Timer: decay <1s, se pausa solo cuando llega a 0 ─────────────────
+// ── Scroll: dibuja columna actual del texto en la grilla ─────────────
+// Mapping: text_col_en_j = scroll_tick + j - 7
+//   tick=0  → j=7 muestra col 0 (primera col de 'E', entra por derecha)
+//   tick=7  → j=0 muestra col 0 (primera col llega al borde izquierdo)
+// Mapping filas: i=7→font_row 0 (top), i=1→font_row 6 (bottom), i=0=margen
+static void scroll_draw() {
+    uint8_t mr, mg, mb;
+    mode_color(&mr, &mg, &mb);
+
+    for (int j = 0; j < DOTS_N; j++) {
+        int tc = s_scroll_tick + j - (DOTS_N - 1);  // columna de texto en este j
+        uint8_t col_bits = 0;
+        if (tc >= 0 && tc < SCROLL_TEXT_W) {
+            int ci = tc / (SCROLL_CHAR_COLS + SCROLL_CHAR_GAP);
+            int cc = tc % (SCROLL_CHAR_COLS + SCROLL_CHAR_GAP);
+            if (cc < SCROLL_CHAR_COLS) col_bits = s_font[ci][cc];
+        }
+
+        for (int i = 0; i < DOTS_N; i++) {
+            if (!s_dots[i][j]) continue;
+            uint8_t bright = 0;
+            if (i >= 1) {
+                int font_row = (DOTS_N - 1) - i;  // i=7→0, i=1→6
+                if (col_bits & (1 << font_row)) bright = 200;
+            }
+            lv_obj_set_style_bg_color(s_dots[i][j],
+                lv_color_make((uint32_t)mr * bright / 255,
+                              (uint32_t)mg * bright / 255,
+                              (uint32_t)mb * bright / 255), 0);
+        }
+    }
+}
+
+static void scroll_timer_cb(lv_timer_t* t) {
+    if (!s_scroll_active) { lv_timer_pause(t); return; }
+    scroll_draw();
+    s_scroll_tick++;
+    if (s_scroll_tick >= SCROLL_TEXT_W + DOTS_N) {
+        s_scroll_active = false;
+        s_scroll_tick   = 0;
+        s_idle_ticks    = 0;
+        for (int i = 0; i < DOTS_N; i++)
+            for (int j = 0; j < DOTS_N; j++)
+                if (s_dots[i][j])
+                    lv_obj_set_style_bg_color(s_dots[i][j], lv_color_make(0,0,0), 0);
+        lv_timer_pause(t);
+    }
+}
+
+// ── Timer: decay + idle counter ───────────────────────────────────────
 static void decay_timer_cb(lv_timer_t* t) {
-    if (s_glow_t <= 0.0f) { lv_timer_pause(t); return; }
-    s_glow_t -= 0.07f;   // ~700ms para llegar a 0 (14 ticks × 50ms)
-    if (s_glow_t < 0.0f) s_glow_t = 0.0f;
-    update_leds_draw();
+    (void)t;
+    if (s_glow_t > 0.0f) {
+        s_glow_t -= 0.07f;   // ~700ms para llegar a 0 (14 ticks × 50ms)
+        if (s_glow_t < 0.0f) s_glow_t = 0.0f;
+        update_leds_draw();
+        s_idle_ticks = 0;
+        return;
+    }
+    if (s_pressing || s_scroll_active) { s_idle_ticks = 0; return; }
+    if (s_idle_ticks < SCROLL_IDLE_TICKS) s_idle_ticks++;
+    if (s_idle_ticks >= SCROLL_IDLE_TICKS) uiKaossStartScroll();
 }
 
 // ── Callback pad ──────────────────────────────────────────────────────
@@ -143,11 +227,16 @@ static void pad_event_cb(lv_event_t* e) {
     uint16_t pad_y = (PAD_SIZE - 1) - cx;
 
     if (code == LV_EVENT_PRESSED) {
+        if (s_scroll_active) {
+            s_scroll_active = false;
+            s_scroll_tick   = 0;
+            if (s_scroll_tmr) lv_timer_pause(s_scroll_tmr);
+        }
+        s_idle_ticks = 0;
         s_i_near   = ni;
         s_j_near   = nj;
         s_glow_t   = 1.0f;
         s_pressing = true;
-        if (s_decay_tmr) lv_timer_resume(s_decay_tmr);
 
         uint8_t ccX = kaoss.mapXtoCC(pad_x);
         uint8_t ccY = kaoss.mapYtoCC(pad_y);
@@ -347,7 +436,9 @@ void uiKaossCreate(lv_obj_t* parent) {
     lv_obj_align(lbl_panic, LV_ALIGN_CENTER, -15, 0);
     rot_label(lbl_panic);
 
-    s_decay_tmr = lv_timer_create(decay_timer_cb, 50, NULL);
+    s_decay_tmr  = lv_timer_create(decay_timer_cb,  50,              NULL);
+    s_scroll_tmr = lv_timer_create(scroll_timer_cb, SCROLL_STEP_MS,  NULL);
+    lv_timer_pause(s_scroll_tmr);
 }
 
 void uiKaossUpdateScale() {
@@ -371,8 +462,18 @@ void uiKaossUpdateLeds() {
     update_leds_draw();
 }
 
+void uiKaossStartScroll() {
+    if (s_scroll_active) return;
+    s_scroll_active = true;
+    s_scroll_tick   = 0;
+    s_idle_ticks    = 0;
+    s_glow_t        = 0.0f;
+    if (s_scroll_tmr) lv_timer_resume(s_scroll_tmr);
+}
+
 void uiKaossDestroy() {
-    if (s_decay_tmr) { lv_timer_delete(s_decay_tmr); s_decay_tmr = NULL; }
+    if (s_scroll_tmr) { lv_timer_delete(s_scroll_tmr); s_scroll_tmr = NULL; }
+    if (s_decay_tmr)  { lv_timer_delete(s_decay_tmr);  s_decay_tmr  = NULL; }
     if (s_pad) { lv_obj_delete(s_pad); s_pad = NULL; }
     for (int i = 0; i < 4; i++) {
         if (s_btn[i]) { lv_obj_delete(s_btn[i]); s_btn[i] = NULL; }
