@@ -49,7 +49,18 @@ Controlador MIDI de performance inspirado en el Korg Kaoss Pad. El área táctil
 - **Touch** → Note On en la escala activa (nota determinada por posición Y)
 - **Drag** → CC_X (eje horizontal, def. CC74) + CC_Y (eje vertical, def. CC71)
 - **Release** → Note Off (salvo HOLD activo)
-- **Crosshair** → sigue el dedo; color varía de azul (arriba) a naranja (abajo)
+- **Grilla 8×8 de dots** → cada dot iluminado al tocar; radio de brillo decae ~700ms tras soltar
+
+### Animación LED (grilla 8×8)
+La grilla funciona como un display de matriz LED gigante (cada "pixel" ≈ 58×60 px en pantalla real):
+
+| Momento | Comportamiento |
+|---|---|
+| **Arranque** | "ExPressive" scrollea derecha → izquierda (~5.4 s) en font 5×7 pixel |
+| **Reposo (3 s sin toque)** | Scroll automático indefinido |
+| **Toque** | Cancela scroll, activa modo normal (brillo radial en posición XY) |
+
+El color del texto y de los dots sigue el modo activo (`COL_MODE_KAOSS` rojo por defecto).
 
 ### Botones
 | Botón | Función | Estado |
@@ -95,7 +106,9 @@ El pad abarca **2 octavas** en el eje Y. La raíz es C4 por defecto.
 
 #define SCALE_MAJOR    0
 #define OCTAVE_DEFAULT 4
-#define BOOT_SCREEN_MS 3000
+#define BOOT_SCREEN_MS   3000  // duración splash (ms)
+#define SCROLL_STEP_MS     80  // velocidad scroll grilla: 1 col cada 80 ms (~5.4 s texto completo)
+#define SCROLL_IDLE_TICKS  60  // 60 × 50 ms = 3 s de reposo antes de scroll automático
 ```
 
 ---
@@ -113,7 +126,7 @@ src/
 ├── display/
 │   ├── Display.h/cpp         — Init LCD + LVGL + rotación landscape
 │   ├── UIBoot.h/cpp          — Splash 3s (AITEC / ExPressif)
-│   └── UIKaoss.h/cpp         — Pad XY + 4 botones laterales
+│   └── UIKaoss.h/cpp         — Pad XY + 4 botones + grilla 8×8 dots + scroll "ExPressive"
 └── lcd/ touch/               — Drivers ST7701S + GT911 (no modificar)
 ```
 
