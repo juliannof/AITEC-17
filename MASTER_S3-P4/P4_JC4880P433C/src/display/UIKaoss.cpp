@@ -36,6 +36,7 @@ static lv_obj_t*   s_lbl_hold         = NULL;
 static lv_obj_t*   s_btn[4]           = {};
 static lv_obj_t*   s_strips[4]        = {};
 static uint32_t    s_accent_cols[4]   = {};
+static uint32_t    s_dim_cols[4]      = {};
 static lv_obj_t*   s_dots[DOTS_N][DOTS_N] = {};
 static lv_timer_t* s_decay_tmr        = NULL;
 
@@ -199,7 +200,7 @@ static void strip_set_lit(uint8_t idx, bool lit) {
                           brighten((c>> 8)&0xFF),
                           brighten( c     &0xFF)), 0);
     } else {
-        lv_obj_set_style_bg_color(s_strips[idx], lv_color_hex(s_accent_cols[idx]), 0);
+        lv_obj_set_style_bg_color(s_strips[idx], lv_color_hex(s_dim_cols[idx]), 0);
     }
 }
 
@@ -233,14 +234,17 @@ static void btn_event_cb(lv_event_t* e) {
             default: break;
         }
     } else if (code == LV_EVENT_RELEASED) {
-        strip_set_lit(idx, false);
-        if (idx == 0 && g_holdMode) strip_set_lit(0, true);
+        if (idx == 0) {
+            uiKaossUpdateHold();
+        } else {
+            strip_set_lit(idx, false);
+        }
     }
 }
 
 // ── Helper botón ─────────────────────────────────────────────────────
 static lv_obj_t* make_btn(lv_obj_t* parent, int32_t btn_x, int32_t btn_y,
-                           const char* label, uint32_t accent_col,
+                           const char* label, uint32_t accent_col, uint32_t dim_col,
                            uint32_t bg_col, uint8_t idx) {
     lv_obj_t* btn = lv_obj_create(parent);
     lv_obj_set_pos(btn, btn_x, btn_y);
@@ -258,7 +262,7 @@ static lv_obj_t* make_btn(lv_obj_t* parent, int32_t btn_x, int32_t btn_y,
     lv_obj_t* strip = lv_obj_create(btn);
     lv_obj_set_pos(strip, 0, strip_y);
     lv_obj_set_size(strip, BTN_W, 4);
-    lv_obj_set_style_bg_color(strip, lv_color_hex(accent_col), 0);
+    lv_obj_set_style_bg_color(strip, lv_color_hex(dim_col), 0);
     lv_obj_set_style_bg_opa(strip, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(strip, 0, 0);
     lv_obj_set_style_radius(strip, 0, 0);
@@ -266,6 +270,7 @@ static lv_obj_t* make_btn(lv_obj_t* parent, int32_t btn_x, int32_t btn_y,
     lv_obj_clear_flag(strip, LV_OBJ_FLAG_CLICKABLE);
     s_strips[idx]      = strip;
     s_accent_cols[idx] = accent_col;
+    s_dim_cols[idx]    = dim_col;
 
     lv_obj_t* lbl = lv_label_create(btn);
     lv_label_set_text(lbl, label);
@@ -315,8 +320,8 @@ void uiKaossCreate(lv_obj_t* parent) {
 
     pad_draw_leds(s_pad);
 
-    s_btn[0] = make_btn(parent, BTN_W, 0, "HOLD", COL_FUNC_HOLD, COL_BTN_BG,  0);
-    s_btn[1] = make_btn(parent, 0,     0, "TAP",  COL_BTN_TAP,   COL_BTN_BG,  1);
+    s_btn[0] = make_btn(parent, BTN_W, 0, "HOLD", COL_FUNC_HOLD,  COL_BTN_HOLD, COL_BTN_BG, 0);
+    s_btn[1] = make_btn(parent, 0,     0, "TAP",  COL_ACCENT,     COL_BTN_BG,   COL_BTN_BG, 1);
 
     s_lbl_hold = lv_label_create(s_btn[0]);
     lv_label_set_text(s_lbl_hold, "OFF");
@@ -325,8 +330,8 @@ void uiKaossCreate(lv_obj_t* parent) {
     lv_obj_align(s_lbl_hold, LV_ALIGN_CENTER, -15, 0);
     rot_label(s_lbl_hold);
 
-    s_btn[2] = make_btn(parent, BTN_W, PAD_START_Y + PAD_SIZE, "SCALE", 0x00AA44, COL_BTN_BG,    2);
-    s_btn[3] = make_btn(parent, 0,     PAD_START_Y + PAD_SIZE, "PANIC", COL_FUNC_PANIC, COL_BTN_PANIC, 3);
+    s_btn[2] = make_btn(parent, BTN_W, PAD_START_Y + PAD_SIZE, "SCALE", 0x00AA44,       COL_BTN_SCALE, COL_BTN_BG,    2);
+    s_btn[3] = make_btn(parent, 0,     PAD_START_Y + PAD_SIZE, "PANIC", COL_FUNC_PANIC, COL_BTN_PANIC, COL_BTN_PANIC, 3);
 
     s_lbl_scale = lv_label_create(s_btn[2]);
     lv_label_set_text(s_lbl_scale, kaoss.presetName());
@@ -356,7 +361,9 @@ void uiKaossUpdateHold() {
     lv_label_set_text(s_lbl_hold, g_holdMode ? "ON" : "OFF");
     lv_obj_set_style_text_color(s_lbl_hold,
         lv_color_hex(g_holdMode ? (uint32_t)COL_FUNC_HOLD : (uint32_t)COL_TEXT_DIM), 0);
-    strip_set_lit(0, g_holdMode);
+    if (s_strips[0])
+        lv_obj_set_style_bg_color(s_strips[0],
+            lv_color_hex(g_holdMode ? s_accent_cols[0] : s_dim_cols[0]), 0);
 }
 
 void uiKaossUpdateLeds() {
