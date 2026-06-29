@@ -54,7 +54,6 @@ void taskCore1(void* pv) {
 
 // ── Setup ─────────────────────────────────────────────────────────────
 void setup() {
-    Serial.begin(115200);
     log_i("=== BOOT ExPressif (AITEC) ===");
 
     if (!LittleFS.begin(false)) log_e("LittleFS FALLO");
