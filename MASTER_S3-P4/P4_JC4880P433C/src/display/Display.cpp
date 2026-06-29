@@ -162,52 +162,51 @@ void initDisplay() {
         lv_display_flush_ready(disp);
     });
 
-   // LVGL input device touch
-lv_indev_t* indev = lv_indev_create();
-lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
-lv_indev_set_read_cb(indev, [](lv_indev_t* drv, lv_indev_data_t* data) {
-    esp_lcd_touch_handle_t tp = (esp_lcd_touch_handle_t)lv_indev_get_user_data(drv);
-    uint16_t x, y, strength;
-    uint8_t count = 0;
-    esp_lcd_touch_read_data(tp);
-    if (esp_lcd_touch_get_coordinates(tp, &x, &y, &strength, &count, 1) && count > 0) {
-        data->point.x = x;
-        data->point.y = y;
-        data->state = LV_INDEV_STATE_PRESSED;
-    } else {
-        data->state = LV_INDEV_STATE_RELEASED;
-    }
-});
-lv_indev_set_user_data(indev, s_tp);
-   
-    
-    // ── Pantalla raíz ────────────────────────────────────────────────
-s_root = lv_obj_create(NULL);
-lv_obj_set_style_bg_color(s_root, lv_color_hex(COL_BG), 0);
-lv_obj_set_style_bg_opa(s_root, LV_OPA_COVER, 0);
-lv_obj_set_style_pad_all(s_root, 0, 0);
-lv_obj_set_style_border_width(s_root, 0, 0);
-lv_obj_clear_flag(s_root, LV_OBJ_FLAG_SCROLLABLE);
-lv_obj_clear_flag(s_root, LV_OBJ_FLAG_SCROLL_ELASTIC);
-lv_obj_clear_flag(s_root, LV_OBJ_FLAG_SCROLL_MOMENTUM);
-    lv_obj_clear_flag(s_root, LV_OBJ_FLAG_SCROLL_CHAIN_HOR);  // ← añadir
-lv_obj_clear_flag(s_root, LV_OBJ_FLAG_SCROLL_CHAIN_VER);  // ← añadir
+    // LVGL input device touch
+    lv_indev_t* indev = lv_indev_create();
+    lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
+    lv_indev_set_read_cb(indev, [](lv_indev_t* drv, lv_indev_data_t* data) {
+        esp_lcd_touch_handle_t tp = (esp_lcd_touch_handle_t)lv_indev_get_user_data(drv);
+        uint16_t x, y, strength;
+        uint8_t count = 0;
+        esp_lcd_touch_read_data(tp);
+        if (esp_lcd_touch_get_coordinates(tp, &x, &y, &strength, &count, 1) && count > 0) {
+            data->point.x = x;
+            data->point.y = y;
+            data->state = LV_INDEV_STATE_PRESSED;
+        } else {
+            data->state = LV_INDEV_STATE_RELEASED;
+        }
+    });
+    lv_indev_set_user_data(indev, s_tp);
 
-// ── Content area — padre de todas las páginas ────────────────────
-s_content_area = lv_obj_create(s_root);
-lv_obj_set_pos(s_content_area, 0, 0);
-lv_obj_set_size(s_content_area, HEADER_X, P4_H);
-lv_obj_set_style_pad_all(s_content_area, 0, 0);
-lv_obj_set_style_border_width(s_content_area, 0, 0);
-lv_obj_set_style_bg_color(s_content_area, lv_color_hex(COL_BG), 0);
-lv_obj_set_style_bg_opa(s_content_area, LV_OPA_COVER, 0);
-lv_obj_clear_flag(s_content_area, LV_OBJ_FLAG_SCROLLABLE);
-lv_obj_clear_flag(s_content_area, LV_OBJ_FLAG_SCROLL_ELASTIC);
-lv_obj_clear_flag(s_content_area, LV_OBJ_FLAG_SCROLL_MOMENTUM);
-lv_obj_clear_flag(s_content_area, LV_OBJ_FLAG_SCROLL_CHAIN_HOR);  // ← añadir
-lv_obj_clear_flag(s_content_area, LV_OBJ_FLAG_SCROLL_CHAIN_VER);  // ← añadir
-lv_obj_add_flag(s_content_area, LV_OBJ_FLAG_CLICKABLE);
+    // Pantalla raíz
+    s_root = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(s_root, lv_color_hex(COL_BG), 0);
+    lv_obj_set_style_bg_opa(s_root, LV_OPA_COVER, 0);
+    lv_obj_set_style_pad_all(s_root, 0, 0);
+    lv_obj_set_style_border_width(s_root, 0, 0);
+    lv_obj_clear_flag(s_root, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(s_root, LV_OBJ_FLAG_SCROLL_ELASTIC);
+    lv_obj_clear_flag(s_root, LV_OBJ_FLAG_SCROLL_MOMENTUM);
+    lv_obj_clear_flag(s_root, LV_OBJ_FLAG_SCROLL_CHAIN_HOR);
+    lv_obj_clear_flag(s_root, LV_OBJ_FLAG_SCROLL_CHAIN_VER);
 
-lv_scr_load(s_root);
+    // Content area
+    s_content_area = lv_obj_create(s_root);
+    lv_obj_set_pos(s_content_area, 0, 0);
+    lv_obj_set_size(s_content_area, LCD_H_RES, LCD_V_RES);
+    lv_obj_set_style_pad_all(s_content_area, 0, 0);
+    lv_obj_set_style_border_width(s_content_area, 0, 0);
+    lv_obj_set_style_bg_color(s_content_area, lv_color_hex(COL_BG), 0);
+    lv_obj_set_style_bg_opa(s_content_area, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(s_content_area, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(s_content_area, LV_OBJ_FLAG_SCROLL_ELASTIC);
+    lv_obj_clear_flag(s_content_area, LV_OBJ_FLAG_SCROLL_MOMENTUM);
+    lv_obj_clear_flag(s_content_area, LV_OBJ_FLAG_SCROLL_CHAIN_HOR);
+    lv_obj_clear_flag(s_content_area, LV_OBJ_FLAG_SCROLL_CHAIN_VER);
+    lv_obj_add_flag(s_content_area, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_scr_load(s_root);
     log_i("[Display] Init OK");
 }
