@@ -105,9 +105,9 @@
 #define LV_USE_SPINNER 1
 #define LV_USE_SWITCH 1
 #define LV_USE_TABLE 0
-#define LV_USE_TABVIEW 0
+#define LV_USE_TABVIEW 1
 #define LV_USE_TEXTAREA 1
-#define LV_USE_TILEVIEW 0
+#define LV_USE_TILEVIEW 1
 #define LV_USE_WIN 0
 #define LV_USE_SCALE 0
 #define LV_USE_CHART 0

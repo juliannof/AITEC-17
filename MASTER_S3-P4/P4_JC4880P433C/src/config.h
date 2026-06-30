@@ -24,10 +24,12 @@
 #define BTN_H         150   // botón: extensión en LVGL y (= 150px horizontal en pantalla)
 
 // ── NeoTrellis I2C (v2) ───────────────────────────────────────────────
-#define TRELLIS_SDA_PIN   33
-#define TRELLIS_SCL_PIN   31
-#define TRELLIS_ADDR_L    0x2F
-#define TRELLIS_ADDR_R    0x2E
+#define TRELLIS_SDA_PIN    31    // SDA=31, SCL=33 (2026-06-30)
+#define TRELLIS_SCL_PIN    33
+#define TRELLIS_ADDR_L     0x2F
+#define TRELLIS_ADDR_R     0x2E
+#define TRELLIS_BRIGHTNESS   15   // 0-255: nivel max-canal LEDs activos
+#define TRELLIS_DIM_ABS       5   // 0-255: nivel max-canal LEDs en reposo
 
 // ── MIDI ──────────────────────────────────────────────────────────────
 #define MIDI_CH           1
@@ -96,3 +98,27 @@ extern volatile int16_t g_lastCCX;
 extern volatile int16_t g_lastCCY;
 extern volatile bool    g_touched;
 extern volatile bool    g_bootDone;
+
+// ── Flags cross-core NeoTrellis→LVGL (Core0→Core1) ───────────────────
+extern volatile bool   g_trellis_holdToggle;  // toggle g_holdMode
+extern volatile bool   g_trellis_nextPreset;  // kaoss.nextPreset()
+extern volatile bool   g_trellis_panic;       // CC reset a 64
+extern volatile int8_t g_trellis_setPreset;   // -1=none, 0-3=preset directo
+extern volatile bool   g_trellis_nextSynth;   // cicla sintetizador activo
+extern volatile bool   g_trellis_openBank;    // abre/cierra UIBank
+extern volatile int8_t g_trellis_bankSlot;    // slot NeoTrellis pulsado en modo Bank (-1=ninguno)
+
+// ── Bank / Canal MIDI ─────────────────────────────────────────────────────
+extern volatile uint8_t g_midiChannel;   // canal MIDI activo (1-16)
+extern volatile bool    g_bankOpen;      // UIBank visible
+extern volatile uint8_t g_bankTab;       // pestaña activa (0=FAV 1=SON 2=CH)
+
+// ── Sintetizador activo ───────────────────────────────────────────────
+enum class ExSynth : uint8_t { JV2080=0, TRITON=1, TG55=2, D110=3, WAVE=4 };
+#define NUM_SYNTHS       5
+#define COL_SYNTH_JV     0x0044FF
+#define COL_SYNTH_TRI    0x8800FF
+#define COL_SYNTH_TG     0x00CC00
+#define COL_SYNTH_D110   0x00BBAA
+#define COL_SYNTH_WAVE   0xFF6600
+extern volatile ExSynth g_currentSynth;

@@ -17,6 +17,7 @@ public:
 
     // Preset de CC activo
     void        nextPreset();
+    void        setPreset(uint8_t n);
     uint8_t     getCCX()       const { return _presets[_preset].ccX; }
     uint8_t     getCCY()       const { return _presets[_preset].ccY; }
     const char* presetName()   const { return _presets[_preset].name; }

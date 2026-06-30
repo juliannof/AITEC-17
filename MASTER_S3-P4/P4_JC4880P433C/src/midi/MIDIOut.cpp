@@ -16,3 +16,9 @@ void sendNote(uint8_t ch, uint8_t note, uint8_t vel, bool on) {
 void sendAllNotesOff(uint8_t ch) {
     sendCC(ch, 123, 0);
 }
+
+void sendBankPC(uint8_t ch, uint8_t msb, uint8_t lsb, uint8_t pc) {
+    MIDI.controlChange(0,  msb, ch);   // CC0  Bank Select MSB
+    MIDI.controlChange(32, lsb, ch);   // CC32 Bank Select LSB
+    MIDI.programChange(pc, ch);        // Program Change
+}

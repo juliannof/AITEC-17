@@ -1,0 +1,498 @@
+// display/UIBank.cpp — Página Bank (AITEC 2026-06-30)
+// LVGL portrait 480×800 → landscape 800×480
+// Mapping: screen_x = LVGL_y,  screen_y = 479 − LVGL_x
+// Tab bar LV_DIR_TOP (y=0) → aparece en el borde físico izquierdo (landscape).
+// Pestañas físicas bottom→top: FAV(0) / SON(1) / CH(2)
+//
+// Tab 0 — Favoritos:  lv_tileview, páginas de 16 slots, 2 cols × 8 filas
+// Tab 1 — Sonidos:    placeholder
+// Tab 2 — Canal MIDI: selector estilo S2 (∧ número ∨)
+//
+#include "UIBank.h"
+#include "../config.h"
+#include "../midi/MIDIOut.h"
+#include "../midi/JVPatches.h"
+#include "../nvs/FavStore.h"
+#include "lvgl.h"
+#include <stdio.h>
+
+// ── Estado estático ───────────────────────────────────────────────────────
+static lv_obj_t* s_cont     = NULL;   // contenedor full-screen
+static lv_obj_t* s_tabview  = NULL;
+static lv_obj_t* s_tab_fav  = NULL;
+static lv_obj_t* s_tab_son  = NULL;
+static lv_obj_t* s_tab_ch   = NULL;
+static lv_obj_t* s_tileview = NULL;   // Tab 0 — tileview favoritos
+static lv_obj_t* s_lbl_ch   = NULL;   // Tab 2 — valor canal MIDI
+static uint8_t   s_cur_page = 0;      // página activa en tileview (Tab 0)
+static bool      s_open     = false;
+
+// ── Sonidos state (Tab 1) ─────────────────────────────────────────────────
+static uint8_t   s_son_msb       = 0x51;   // PR-A por defecto
+static uint8_t   s_son_lsb       = 0;
+static lv_obj_t* s_son_tileview  = NULL;
+static lv_obj_t* s_son_tab_ref   = NULL;
+static lv_obj_t* s_son_bank_btns[6] = {};
+
+struct BankDef { uint8_t msb, lsb; const char* label; };
+static const BankDef kBanks[6] = {
+    {0x50, 0, "USER"},
+    {0x51, 0, "PR-A"},
+    {0x51, 1, "PR-B"},
+    {0x51, 2, "PR-C"},
+    {0x51, 3, "GM"},
+    {0x51, 4, "PR-E"},
+};
+
+// ── Helper rotación (mismo que UIKaoss) ──────────────────────────────────
+static void rot_label(lv_obj_t* lbl) {
+    lv_obj_set_style_transform_rotation(lbl, 900, 0);
+    lv_obj_set_style_transform_pivot_x(lbl, LV_PCT(50), 0);
+    lv_obj_set_style_transform_pivot_y(lbl, LV_PCT(50), 0);
+}
+
+// ── Fondo oscuro uniforme en objeto ──────────────────────────────────────
+static void dark_bg(lv_obj_t* obj) {
+    lv_obj_set_style_bg_color(obj, lv_color_hex(COL_BG), 0);
+    lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(obj, 0, 0);
+    lv_obj_set_style_radius(obj, 0, 0);
+    lv_obj_set_style_pad_all(obj, 0, 0);
+}
+
+// ── Canal MIDI: refresca el label grande ─────────────────────────────────
+static void ch_refresh() {
+    if (!s_lbl_ch) return;
+    char buf[4];
+    snprintf(buf, sizeof(buf), "%d", (int)g_midiChannel);
+    lv_label_set_text(s_lbl_ch, buf);
+}
+
+// ── Callback favorito pulsado (recall) ───────────────────────────────────
+static void fav_btn_cb(lv_event_t* e) {
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+    uint8_t slot = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
+    FavEntry entry;
+    if (!favLoad(slot, entry)) return;
+    sendBankPC(entry.ch, entry.msb, entry.lsb, entry.pc);
+}
+
+// ── Callback scroll tileview (actualiza página activa) ───────────────────
+static void tv_scroll_cb(lv_event_t* e) {
+    if (!s_tileview) return;
+    lv_obj_t* tile = lv_tileview_get_tile_active(s_tileview);
+    if (tile) s_cur_page = (uint8_t)lv_obj_get_index(tile);
+}
+
+// ── Callback ∧ canal ─────────────────────────────────────────────────────
+static void cb_ch_up(lv_event_t* e) {
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+    if (g_midiChannel < 16) { g_midiChannel = g_midiChannel + 1; ch_refresh(); }
+}
+
+// ── Callback ∨ canal ─────────────────────────────────────────────────────
+static void cb_ch_dn(lv_event_t* e) {
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+    if (g_midiChannel > 1) { g_midiChannel = g_midiChannel - 1; ch_refresh(); }
+}
+
+// ── Callback cerrar ──────────────────────────────────────────────────────
+static void close_cb(lv_event_t* e) {
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+    uiBankHide();
+}
+
+// ── Construye / reconstruye tileview de favoritos ────────────────────────
+// Layout en landscape: cada tile = 16 botones en grid 2 cols × 8 filas.
+// LVGL portrait: cada botón (60 × 340) → físico 340px ancho × 60px alto.
+// Col 0: LVGL y = 0-340  (físico x: 120-460)
+// Col 1: LVGL y = 340-680 (físico x: 460-800)
+// Filas: LVGL x = 0,60,120,...,420 → fila 0-7
+static void fav_build_tiles() {
+    if (s_tileview) {
+        lv_obj_delete(s_tileview);
+        s_tileview = NULL;
+    }
+
+    s_tileview = lv_tileview_create(s_tab_fav);
+    lv_obj_set_size(s_tileview, LV_PCT(100), LV_PCT(100));
+    dark_bg(s_tileview);
+    lv_obj_set_style_radius(s_tileview, 0, 0);
+    lv_obj_add_event_cb(s_tileview, tv_scroll_cb, LV_EVENT_SCROLL_END, NULL);
+
+    int count = favCount();
+    int pages = (count + 15) / 16;
+    if (pages < 1) pages = 1;
+
+    for (int p = 0; p < pages; p++) {
+        lv_obj_t* tile = lv_tileview_add_tile(s_tileview, p, 0,
+                         p == 0 ? LV_DIR_RIGHT : (p == pages-1 ? LV_DIR_LEFT : (lv_dir_t)(LV_DIR_LEFT | LV_DIR_RIGHT)));
+        dark_bg(tile);
+
+        for (int i = 0; i < 16; i++) {
+            int  slot = p * 16 + i;
+            int  row  = i % 8;
+            int  col  = i / 8;
+
+            lv_obj_t* btn = lv_obj_create(tile);
+            lv_obj_set_size(btn, 58, 338);
+            lv_obj_set_pos(btn, row * 60 + 1, col * 340 + 1);
+            lv_obj_set_style_radius(btn, 3, 0);
+            lv_obj_set_style_border_width(btn, 0, 0);
+            lv_obj_set_style_pad_all(btn, 0, 0);
+            lv_obj_clear_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
+
+            FavEntry e;
+            bool valid = favLoad(slot, e);
+
+            if (valid) {
+                lv_obj_set_style_bg_color(btn, lv_color_hex(COL_BTN_BG), 0);
+                lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+                lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
+                lv_obj_add_event_cb(btn, fav_btn_cb, LV_EVENT_CLICKED,
+                                    (void*)(uintptr_t)slot);
+
+                // número de slot
+                char numstr[4];
+                snprintf(numstr, sizeof(numstr), "%02d", slot + 1);
+                lv_obj_t* lbl_n = lv_label_create(btn);
+                lv_label_set_text(lbl_n, numstr);
+                lv_obj_set_style_text_font(lbl_n, &lv_font_montserrat_10, 0);
+                lv_obj_set_style_text_color(lbl_n, lv_color_hex(COL_TEXT_DIM), 0);
+                lv_obj_align(lbl_n, LV_ALIGN_CENTER, -18, 0);
+                rot_label(lbl_n);
+
+                // nombre del patch
+                lv_obj_t* lbl = lv_label_create(btn);
+                lv_label_set_text(lbl, e.name);
+                lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
+                lv_obj_set_style_text_color(lbl, lv_color_hex(COL_TEXT), 0);
+                lv_obj_align(lbl, LV_ALIGN_CENTER, 6, 0);
+                lv_label_set_long_mode(lbl, LV_LABEL_LONG_CLIP);
+                lv_obj_set_width(lbl, 44);
+                rot_label(lbl);
+            } else {
+                lv_obj_set_style_bg_color(btn, lv_color_hex(0x060A10), 0);
+                lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+                lv_obj_clear_flag(btn, LV_OBJ_FLAG_CLICKABLE);
+
+                char numstr[4];
+                snprintf(numstr, sizeof(numstr), "%02d", slot + 1);
+                lv_obj_t* lbl = lv_label_create(btn);
+                lv_label_set_text(lbl, numstr);
+                lv_obj_set_style_text_font(lbl, &lv_font_montserrat_10, 0);
+                lv_obj_set_style_text_color(lbl, lv_color_hex(0x1A2030), 0);
+                lv_obj_align(lbl, LV_ALIGN_CENTER, 0, 0);
+                rot_label(lbl);
+            }
+        }
+    }
+}
+
+// ── Tab 0 — Favoritos ────────────────────────────────────────────────────
+static void build_tab_fav(lv_obj_t* tab) {
+    dark_bg(tab);
+    lv_obj_clear_flag(tab, LV_OBJ_FLAG_SCROLLABLE);
+    fav_build_tiles();
+}
+
+// ── Sonidos helpers (Tab 1) ───────────────────────────────────────────────
+static void son_bank_refresh_btns() {
+    for (int i = 0; i < 6; i++) {
+        if (!s_son_bank_btns[i]) continue;
+        bool active = (kBanks[i].msb == s_son_msb && kBanks[i].lsb == s_son_lsb);
+        lv_obj_set_style_bg_color(s_son_bank_btns[i],
+            lv_color_hex(active ? 0x003366 : 0x0A0F18), 0);
+    }
+}
+
+static void son_patch_cb(lv_event_t* e) {
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+    uint8_t pc = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
+    sendBankPC(g_midiChannel, s_son_msb, s_son_lsb, pc);
+}
+
+static void son_build_tiles() {
+    if (s_son_tileview) { lv_obj_delete(s_son_tileview); s_son_tileview = NULL; }
+    if (!s_son_tab_ref) return;
+
+    // Tileview: LVGL x=60..480 (420px), y=100% (680px)
+    // Clave: lv_obj_set_width(lbl, W) → W = chars visibles × px_por_char
+    //   porque rot_label rota 90° y el "ancho" LVGL se convierte en altura física.
+    //   Con 3 por página (PITCH=140): botones 138px LVGL x → label width=128 →
+    //   montserrat_16 ~10px/char → 12 chars visibles sin clip ✓
+    s_son_tileview = lv_tileview_create(s_son_tab_ref);
+    lv_obj_set_size(s_son_tileview, 420, LV_PCT(100));
+    lv_obj_set_pos(s_son_tileview, 60, 0);
+    dark_bg(s_son_tileview);
+
+    const int PER_PAGE = 3;
+    const int PITCH    = 140;   // 3×140 = 420 = tileview LVGL x
+    int pages = (128 + PER_PAGE - 1) / PER_PAGE;   // 43
+
+    for (int p = 0; p < pages; p++) {
+        lv_obj_t* tile = lv_tileview_add_tile(s_son_tileview, p, 0,
+            p == 0 ? LV_DIR_RIGHT :
+            (p == pages-1 ? LV_DIR_LEFT : (lv_dir_t)(LV_DIR_LEFT | LV_DIR_RIGHT)));
+        dark_bg(tile);
+        lv_obj_clear_flag(tile, LV_OBJ_FLAG_SCROLLABLE);
+
+        int on_page = (p == pages-1) ? (128 - p * PER_PAGE) : PER_PAGE;
+        for (int i = 0; i < on_page; i++) {
+            uint8_t pc = (uint8_t)(p * PER_PAGE + i);
+
+            lv_obj_t* btn = lv_btn_create(tile);
+            lv_obj_set_size(btn, 138, 668);
+            lv_obj_set_pos(btn, i * PITCH + 1, 6);
+            lv_obj_set_style_radius(btn, 5, 0);
+            lv_obj_set_style_border_width(btn, 0, 0);
+            lv_obj_set_style_pad_all(btn, 0, 0);
+            lv_obj_set_style_shadow_width(btn, 0, 0);
+            lv_obj_set_style_bg_color(btn, lv_color_hex(COL_BTN_BG), 0);
+            lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+            lv_obj_set_style_bg_color(btn, lv_color_hex(COL_BTN_ACTIVE), LV_STATE_PRESSED);
+            lv_obj_add_event_cb(btn, son_patch_cb, LV_EVENT_CLICKED, (void*)(uintptr_t)pc);
+
+            // Número PC (hacia arriba físico = +x_ofs en LVGL)
+            char numstr[4];
+            snprintf(numstr, sizeof(numstr), "%d", (int)pc + 1);
+            lv_obj_t* lbl_n = lv_label_create(btn);
+            lv_label_set_text(lbl_n, numstr);
+            lv_obj_set_style_text_font(lbl_n, &lv_font_montserrat_12, 0);
+            lv_obj_set_style_text_color(lbl_n, lv_color_hex(COL_TEXT_DIM), 0);
+            lv_obj_align(lbl_n, LV_ALIGN_CENTER, 50, 0);
+            rot_label(lbl_n);
+
+            // Nombre completo: width=128 LVGL x → ~12 chars montserrat_16 ✓
+            const char* name = jvPatchName(s_son_msb, s_son_lsb, pc);
+            lv_obj_t* lbl = lv_label_create(btn);
+            lv_label_set_text(lbl, name ? name : "---");
+            lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
+            lv_obj_set_style_text_color(lbl, lv_color_hex(COL_TEXT), 0);
+            lv_obj_align(lbl, LV_ALIGN_CENTER, 0, 0);
+            lv_label_set_long_mode(lbl, LV_LABEL_LONG_DOT);
+            lv_obj_set_width(lbl, 128);
+            rot_label(lbl);
+        }
+    }
+}
+
+static void son_bank_cb(lv_event_t* e) {
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+    uint8_t idx = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
+    s_son_msb = kBanks[idx].msb;
+    s_son_lsb = kBanks[idx].lsb;
+    son_bank_refresh_btns();
+    son_build_tiles();
+}
+
+// ── Tab 1 — Sonidos ───────────────────────────────────────────────────────
+// Layout físico landscape: 6 botones banco abajo (LVGL x=0..58) + tileview patches arriba
+static void build_tab_sounds(lv_obj_t* tab) {
+    dark_bg(tab);
+    lv_obj_clear_flag(tab, LV_OBJ_FLAG_SCROLLABLE);
+    s_son_tab_ref = tab;
+
+    // 6 botones banco: LVGL size=(58, 113) stacked en LVGL y
+    // → físico: 113px ancho × 58px alto, fila en borde inferior pantalla
+    const int BTN_H_SON = (P4_H - 120) / 6;   // 680/6 = 113
+    for (int i = 0; i < 6; i++) {
+        lv_obj_t* btn = lv_btn_create(tab);
+        lv_obj_set_size(btn, 58, BTN_H_SON);
+        lv_obj_set_pos(btn, 1, i * BTN_H_SON + 1);
+        lv_obj_set_style_bg_color(btn, lv_color_hex(0x0A0F18), 0);
+        lv_obj_set_style_border_width(btn, 0, 0);
+        lv_obj_set_style_radius(btn, 4, 0);
+        lv_obj_set_style_shadow_width(btn, 0, 0);
+        lv_obj_set_style_pad_all(btn, 0, 0);
+        lv_obj_add_event_cb(btn, son_bank_cb, LV_EVENT_CLICKED, (void*)(uintptr_t)i);
+        s_son_bank_btns[i] = btn;
+
+        lv_obj_t* lbl = lv_label_create(btn);
+        lv_label_set_text(lbl, kBanks[i].label);
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(lbl, lv_color_hex(COL_TEXT), 0);
+        lv_obj_center(lbl);
+        rot_label(lbl);
+    }
+    son_bank_refresh_btns();   // resalta PR-A (default)
+    son_build_tiles();
+}
+
+// ── Tab 2 — Canal MIDI (estilo S2 _drawValEdit) ──────────────────────────
+// Físico (landscape): título arriba → ∧ → número grande → [1-16] → ∨ abajo.
+// LVGL portrait: x_ofs positivo = hacia arriba físico (479 - LVGL_x = top).
+static void build_tab_channel(lv_obj_t* tab) {
+    dark_bg(tab);
+    lv_obj_clear_flag(tab, LV_OBJ_FLAG_SCROLLABLE);
+
+    // Título
+    lv_obj_t* title = lv_label_create(tab);
+    lv_label_set_text(title, "Canal MIDI");
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_text_color(title, lv_color_hex(COL_TEXT), 0);
+    lv_obj_align(title, LV_ALIGN_CENTER, 155, 0);
+    rot_label(title);
+
+    // ∧ botón arriba
+    lv_obj_t* btn_up = lv_btn_create(tab);
+    lv_obj_set_size(btn_up, 65, 220);  // 65h×220w LVGL → físico 220px ancho × 65px alto
+    lv_obj_set_style_bg_color(btn_up, lv_color_hex(COL_BTN_BG), 0);
+    lv_obj_set_style_border_width(btn_up, 0, 0);
+    lv_obj_set_style_radius(btn_up, 8, 0);
+    lv_obj_set_style_shadow_width(btn_up, 0, 0);
+    lv_obj_align(btn_up, LV_ALIGN_CENTER, 85, 0);
+    lv_obj_add_event_cb(btn_up, cb_ch_up, LV_EVENT_CLICKED, NULL);
+    lv_obj_t* lbl_up = lv_label_create(btn_up);
+    lv_label_set_text(lbl_up, LV_SYMBOL_UP);
+    lv_obj_set_style_text_font(lbl_up, &lv_font_montserrat_32, 0);
+    lv_obj_set_style_text_color(lbl_up, lv_color_hex(COL_ACCENT), 0);
+    lv_obj_center(lbl_up);
+    rot_label(lbl_up);
+
+    // Valor — número grande
+    s_lbl_ch = lv_label_create(tab);
+    lv_obj_set_style_text_font(s_lbl_ch, &lv_font_montserrat_44, 0);
+    lv_obj_set_style_text_color(s_lbl_ch, lv_color_hex(COL_TEXT), 0);
+    lv_obj_align(s_lbl_ch, LV_ALIGN_CENTER, 0, 0);
+    rot_label(s_lbl_ch);
+    ch_refresh();
+
+    // Rango
+    lv_obj_t* lbl_range = lv_label_create(tab);
+    lv_label_set_text(lbl_range, "[ 1 - 16 ]");
+    lv_obj_set_style_text_font(lbl_range, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(lbl_range, lv_color_hex(COL_TEXT_DIM), 0);
+    lv_obj_align(lbl_range, LV_ALIGN_CENTER, -52, 0);
+    rot_label(lbl_range);
+
+    // ∨ botón abajo
+    lv_obj_t* btn_dn = lv_btn_create(tab);
+    lv_obj_set_size(btn_dn, 65, 220);
+    lv_obj_set_style_bg_color(btn_dn, lv_color_hex(COL_BTN_BG), 0);
+    lv_obj_set_style_border_width(btn_dn, 0, 0);
+    lv_obj_set_style_radius(btn_dn, 8, 0);
+    lv_obj_set_style_shadow_width(btn_dn, 0, 0);
+    lv_obj_align(btn_dn, LV_ALIGN_CENTER, -120, 0);
+    lv_obj_add_event_cb(btn_dn, cb_ch_dn, LV_EVENT_CLICKED, NULL);
+    lv_obj_t* lbl_dn = lv_label_create(btn_dn);
+    lv_label_set_text(lbl_dn, LV_SYMBOL_DOWN);
+    lv_obj_set_style_text_font(lbl_dn, &lv_font_montserrat_32, 0);
+    lv_obj_set_style_text_color(lbl_dn, lv_color_hex(COL_ACCENT), 0);
+    lv_obj_center(lbl_dn);
+    rot_label(lbl_dn);
+}
+
+// ── API pública ───────────────────────────────────────────────────────────
+void uiBankCreate(lv_obj_t* parent) {
+    s_cont = lv_obj_create(parent);
+    lv_obj_set_size(s_cont, P4_W, P4_H);
+    lv_obj_set_pos(s_cont, 0, 0);
+    dark_bg(s_cont);
+    lv_obj_clear_flag(s_cont, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(s_cont, LV_OBJ_FLAG_HIDDEN);   // oculto al inicio
+
+    // ── Tabview ──────────────────────────────────────────────────────────
+    s_tabview = lv_tabview_create(s_cont);
+    lv_tabview_set_tab_bar_position(s_tabview, LV_DIR_TOP);
+    lv_tabview_set_tab_bar_size(s_tabview, 120);
+    lv_obj_set_size(s_tabview, P4_W, P4_H);
+    lv_obj_set_pos(s_tabview, 0, 0);
+    dark_bg(s_tabview);
+
+    s_tab_fav = lv_tabview_add_tab(s_tabview, "FAV");
+    s_tab_son = lv_tabview_add_tab(s_tabview, "SON");
+    s_tab_ch  = lv_tabview_add_tab(s_tabview, "CH");
+
+    // Fondo de tabs y tabbar
+    lv_obj_t* tabbar = lv_tabview_get_tab_bar(s_tabview);
+    lv_obj_set_style_bg_color(tabbar, lv_color_hex(0x080C12), 0);
+    lv_obj_set_style_bg_opa(tabbar, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(tabbar, 0, 0);
+    lv_obj_set_style_pad_all(tabbar, 2, 0);
+
+    // Rotar etiquetas de los tabs para que sean legibles en landscape
+    uint32_t n = lv_obj_get_child_count(tabbar);
+    for (uint32_t i = 0; i < n; i++) {
+        lv_obj_t* tbtn = lv_obj_get_child(tabbar, i);
+        lv_obj_set_style_bg_color(tbtn, lv_color_hex(0x080C12), LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(tbtn, lv_color_hex(COL_TEXT_DIM), LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(tbtn, lv_color_hex(COL_ACCENT), LV_STATE_CHECKED);
+        lv_obj_set_style_text_font(tbtn, &lv_font_montserrat_18, 0);
+        lv_obj_set_style_border_width(tbtn, 0, 0);
+        // Rotar el label hijo
+        lv_obj_t* lbl = lv_obj_get_child(tbtn, 0);
+        if (lbl) rot_label(lbl);
+    }
+
+    // ── Contenido de cada tab ─────────────────────────────────────────────
+    build_tab_fav(s_tab_fav);
+    build_tab_sounds(s_tab_son);
+    build_tab_channel(s_tab_ch);
+
+    // ── Botón cerrar (físico: top-right) ─────────────────────────────────
+    // Físico top-right = LVGL (x≈455, y≈760)
+    lv_obj_t* btn_close = lv_btn_create(s_cont);
+    lv_obj_set_size(btn_close, 36, 55);
+    lv_obj_set_pos(btn_close, 444, 745);
+    lv_obj_set_style_bg_color(btn_close, lv_color_hex(0x220000), 0);
+    lv_obj_set_style_border_width(btn_close, 0, 0);
+    lv_obj_set_style_radius(btn_close, 6, 0);
+    lv_obj_set_style_shadow_width(btn_close, 0, 0);
+    lv_obj_add_event_cb(btn_close, close_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t* lbl_x = lv_label_create(btn_close);
+    lv_label_set_text(lbl_x, LV_SYMBOL_CLOSE);
+    lv_obj_set_style_text_color(lbl_x, lv_color_hex(0xFF4444), 0);
+    lv_obj_set_style_text_font(lbl_x, &lv_font_montserrat_18, 0);
+    lv_obj_center(lbl_x);
+    rot_label(lbl_x);
+}
+
+void uiBankShow() {
+    if (!s_cont) return;
+    uiBankRefreshFavList();
+    lv_obj_clear_flag(s_cont, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(s_cont);
+    lv_tabview_set_active(s_tabview, 0, LV_ANIM_OFF);
+    s_open = true;
+    g_bankOpen = true;
+    g_bankTab  = 0;
+}
+
+void uiBankHide() {
+    if (!s_cont) return;
+    lv_obj_add_flag(s_cont, LV_OBJ_FLAG_HIDDEN);
+    s_open = false;
+    g_bankOpen = false;
+}
+
+bool uiBankIsOpen() { return s_open; }
+
+void uiBankRefreshFavList() {
+    fav_build_tiles();
+}
+
+void uiBankNeoKey(uint8_t k) {
+    if (!s_open || !s_tabview) return;
+    uint32_t tab = lv_tabview_get_tab_active(s_tabview);
+    g_bankTab = (uint8_t)tab;
+
+    if (tab == 0) {
+        uint8_t slot = s_cur_page * 16 + k;
+        FavEntry e;
+        if (favLoad(slot, e)) sendBankPC(e.ch, e.msb, e.lsb, e.pc);
+    } else if (tab == 2) {
+        g_midiChannel = k + 1;
+        ch_refresh();
+    }
+}
+
+void uiBankDestroy() {
+    if (s_cont) { lv_obj_delete(s_cont); s_cont = NULL; }
+    s_tabview = s_tab_fav = s_tab_son = s_tab_ch = NULL;
+    s_tileview = s_lbl_ch = NULL;
+    s_son_tileview = s_son_tab_ref = NULL;
+    for (int i = 0; i < 6; i++) s_son_bank_btns[i] = NULL;
+    s_open = false;
+    g_bankOpen = false;
+}

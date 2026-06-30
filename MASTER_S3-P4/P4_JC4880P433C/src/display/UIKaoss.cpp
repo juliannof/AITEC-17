@@ -16,6 +16,7 @@
 //   Decay:  d=1/2/3 decrecen con el tiempo mientras se mantiene el toque
 
 #include "UIKaoss.h"
+#include "UIBank.h"
 #include "../config.h"
 #include "../midi/MIDIOut.h"
 #include "../kaoss/KaossPad.h"
@@ -33,6 +34,7 @@ static const uint8_t k_peak[4] = {255, 191, 89, 38};  // 100%, 75%, 35%, 15%
 static lv_obj_t*   s_pad              = NULL;
 static lv_obj_t*   s_lbl_scale        = NULL;
 static lv_obj_t*   s_lbl_hold         = NULL;
+static lv_obj_t*   s_lbl_synth        = NULL;
 static lv_obj_t*   s_btn[4]           = {};
 static lv_obj_t*   s_strips[4]        = {};
 static uint32_t    s_accent_cols[4]   = {};
@@ -79,6 +81,28 @@ static void rot_label(lv_obj_t* lbl) {
     lv_obj_set_style_transform_rotation(lbl, 900, 0);
     lv_obj_set_style_transform_pivot_x(lbl, LV_PCT(50), 0);
     lv_obj_set_style_transform_pivot_y(lbl, LV_PCT(50), 0);
+}
+
+static const char* synthName() {
+    switch (g_currentSynth) {
+        case ExSynth::JV2080: return "JV-2080";
+        case ExSynth::TRITON: return "TRITON";
+        case ExSynth::TG55:   return "TG55";
+        case ExSynth::D110:   return "D-110";
+        case ExSynth::WAVE:   return "WAVE";
+        default:               return "?";
+    }
+}
+
+static uint32_t synthColor() {
+    switch (g_currentSynth) {
+        case ExSynth::JV2080: return COL_SYNTH_JV;
+        case ExSynth::TRITON: return COL_SYNTH_TRI;
+        case ExSynth::TG55:   return COL_SYNTH_TG;
+        case ExSynth::D110:   return COL_SYNTH_D110;
+        case ExSynth::WAVE:   return COL_SYNTH_WAVE;
+        default:               return COL_ACCENT;
+    }
 }
 
 static void mode_color(uint8_t* r, uint8_t* g, uint8_t* b) {
@@ -294,37 +318,59 @@ static void strip_set_lit(uint8_t idx, bool lit) {
 }
 
 // ── Callback botones ──────────────────────────────────────────────────
+// btn[1] (Synth): press corto = cicla synth, press largo = abre Bank.
+// Se detecta vía LONG_PRESSED: si llega, se suprime la acción de RELEASED.
+static bool s_btn1_long_press = false;
+
 static void btn_event_cb(lv_event_t* e) {
     lv_event_code_t code = lv_event_get_code(e);
     uint8_t idx = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
 
     if (code == LV_EVENT_PRESSED) {
         strip_set_lit(idx, true);
-        switch (idx) {
-            case 0:
-                g_holdMode = !g_holdMode;
-                uiKaossUpdateHold();
-                break;
-            case 2:
-                kaoss.nextPreset();
-                uiKaossUpdateScale();
-                break;
-            case 3:
-                // PANIC: resetea ambos CCs a 64 (centro)
-                sendCC(MIDI_CH, kaoss.getCCX(), 64);
-                sendCC(MIDI_CH, kaoss.getCCY(), 64);
-                g_lastCCX  = 64;
-                g_lastCCY  = 64;
-                g_touched  = false;
-                s_pressing = false;
-                s_glow_t   = 0.0f;
-                update_leds_draw();
-                break;
-            default: break;
+        if (idx == 1) {
+            s_btn1_long_press = false;   // resetea flag — se confirma en LONG_PRESSED
+            // acción de ciclar synth se pospone a RELEASED
+        } else {
+            switch (idx) {
+                case 0:
+                    g_holdMode = !g_holdMode;
+                    uiKaossUpdateHold();
+                    break;
+                case 2:
+                    kaoss.nextPreset();
+                    uiKaossUpdateScale();
+                    break;
+                case 3:
+                    sendCC(MIDI_CH, kaoss.getCCX(), 64);
+                    sendCC(MIDI_CH, kaoss.getCCY(), 64);
+                    g_lastCCX  = 64;
+                    g_lastCCY  = 64;
+                    g_touched  = false;
+                    s_pressing = false;
+                    s_glow_t   = 0.0f;
+                    update_leds_draw();
+                    break;
+                default: break;
+            }
+        }
+    } else if (code == LV_EVENT_LONG_PRESSED) {
+        if (idx == 1) {
+            s_btn1_long_press = true;
+            if (uiBankIsOpen()) uiBankHide();
+            else                uiBankShow();
         }
     } else if (code == LV_EVENT_RELEASED) {
         if (idx == 0) {
             uiKaossUpdateHold();
+        } else if (idx == 1) {
+            if (!s_btn1_long_press) {
+                // press corto: cicla sintetizador
+                g_currentSynth = (ExSynth)(((uint8_t)g_currentSynth + 1) % NUM_SYNTHS);
+                uiKaossUpdateSynth();
+            }
+            strip_set_lit(1, false);
+            s_btn1_long_press = false;
         } else {
             strip_set_lit(idx, false);
         }
@@ -410,7 +456,15 @@ void uiKaossCreate(lv_obj_t* parent) {
     pad_draw_leds(s_pad);
 
     s_btn[0] = make_btn(parent, BTN_W, 0, "HOLD", COL_FUNC_HOLD,  COL_BTN_HOLD, COL_BTN_BG, 0);
-    s_btn[1] = make_btn(parent, 0,     0, "TAP",  COL_ACCENT,     COL_BTN_BG,   COL_BTN_BG, 1);
+    s_btn[1] = make_btn(parent, 0,     0, "",  synthColor(),   COL_BTN_TAP,  COL_BTN_BG, 1);
+
+    s_lbl_synth = lv_label_create(s_btn[1]);
+    lv_label_set_text(s_lbl_synth, synthName());
+    lv_obj_set_style_text_color(s_lbl_synth, lv_color_hex(COL_TEXT), 0);
+    lv_obj_set_style_text_font(s_lbl_synth, &lv_font_montserrat_24, 0);
+    lv_obj_align(s_lbl_synth, LV_ALIGN_CENTER, 15, 0);
+    rot_label(s_lbl_synth);
+    s_accent_cols[1] = synthColor();
 
     s_lbl_hold = lv_label_create(s_btn[0]);
     lv_label_set_text(s_lbl_hold, "OFF");
@@ -443,6 +497,17 @@ void uiKaossCreate(lv_obj_t* parent) {
 
 void uiKaossUpdateScale() {
     if (s_lbl_scale) lv_label_set_text(s_lbl_scale, kaoss.presetName());
+}
+
+void uiKaossUpdateSynth() {
+    if (!s_btn[1] || !s_lbl_synth) return;
+    uint32_t col = synthColor();
+    lv_label_set_text(s_lbl_synth, synthName());
+    lv_obj_set_style_text_color(s_lbl_synth, lv_color_hex(COL_TEXT), 0);
+    s_accent_cols[1] = col;
+    s_dim_cols[1]    = COL_BTN_TAP;
+    if (s_strips[1])
+        lv_obj_set_style_bg_color(s_strips[1], lv_color_hex(COL_BTN_TAP), 0);
 }
 
 void uiKaossUpdateHold() {
@@ -482,5 +547,5 @@ void uiKaossDestroy() {
     for (int i = 0; i < DOTS_N; i++)
         for (int j = 0; j < DOTS_N; j++)
             s_dots[i][j] = NULL;
-    s_lbl_scale = s_lbl_hold = NULL;
+    s_lbl_scale = s_lbl_hold = s_lbl_synth = NULL;
 }

@@ -16,6 +16,10 @@ void KaossPad::nextPreset() {
     _preset = (_preset + 1) % NUM_SCALES;
 }
 
+void KaossPad::setPreset(uint8_t n) {
+    if (n < NUM_SCALES) _preset = n;
+}
+
 uint8_t KaossPad::mapXtoCC(uint16_t pad_x) const {
     if (pad_x >= PAD_SIZE) return 127;
     return (uint8_t)((pad_x * 127UL) / (PAD_SIZE - 1));
