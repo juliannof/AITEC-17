@@ -85,7 +85,7 @@ static void fav_btn_cb(lv_event_t* e) {
     // Actualizar selección visual
     if (s_fav_selected_btn)
         lv_obj_set_style_bg_color(s_fav_selected_btn, lv_color_hex(COL_BTN_BG), 0);
-    s_fav_selected_btn = lv_event_get_target(e);
+    s_fav_selected_btn = (lv_obj_t*)lv_event_get_target(e);
     lv_obj_set_style_bg_color(s_fav_selected_btn, lv_color_hex(0x003366), 0);
     s_fav_last_slot = slot;
     sendBankPC(entry.ch, entry.msb, entry.lsb, entry.pc);
@@ -232,7 +232,7 @@ static void son_patch_cb(lv_event_t* e) {
     // Actualizar selección visual
     if (s_son_selected_btn)
         lv_obj_set_style_bg_color(s_son_selected_btn, lv_color_hex(COL_BTN_BG), 0);
-    s_son_selected_btn = lv_event_get_target(e);
+    s_son_selected_btn = (lv_obj_t*)lv_event_get_target(e);
     lv_obj_set_style_bg_color(s_son_selected_btn, lv_color_hex(0x003366), 0);
     s_son_last_msb = s_son_msb;
     s_son_last_lsb = s_son_lsb;
@@ -258,7 +258,7 @@ static void son_patch_long_cb(lv_event_t* e) {
     entry.name[sizeof(entry.name) - 1] = '\0';
     favSave(slot, entry);
     // Feedback visual: verde = guardado
-    lv_obj_set_style_bg_color(lv_event_get_target(e), lv_color_hex(0x003300), 0);
+    lv_obj_set_style_bg_color((lv_obj_t*)lv_event_get_target(e), lv_color_hex(0x003300), 0);
     fav_build_tiles();   // actualiza Tab 0 con el nuevo favorito
 }
 
