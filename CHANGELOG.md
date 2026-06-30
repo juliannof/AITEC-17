@@ -18,6 +18,59 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 ---
 
+### SESIÓN 2026-06-30 — ExPressif (P4_JC4880P433C): UIBank, JV-2080, NeoTrellis
+
+**Commits:** `54419d3` → `37d693b` → `c8406f3`  
+**MCU afectada:** solo P4_JC4880P433C (ExPressif).
+
+#### Nuevos módulos
+
+| Archivo | Descripción |
+|---------|-------------|
+| `src/display/UIBank.cpp/h` | Pantalla Bank — 3 pestañas: FAV / Sonidos / Canal MIDI |
+| `src/midi/JVPatches.cpp/h` | Tabla Roland JV-2080 completa: 768 patches en flash (USER + PR-A..E + GM) |
+| `src/neotrellis/NeoTrellis.cpp/h` | Driver 2× Adafruit seesaw 4×4 NeoTrellis (I2C SDA=31 SCL=33) |
+| `src/nvs/FavStore.cpp/h` | Almacén NVS: favoritos MIDI (`FavEntry`) + última selección |
+| `docs/Roland_JV-2080_Patches_Verificado.md` | Fuente verificada de los 768 nombres de patch |
+
+#### UIBank — comportamiento
+
+- **Abrir:** long-press en botón sintetizador (touchscreen btn\[1\] ≥400ms) o NeoTrellis k=4 ≥600ms
+- **Tab 0 (FAV):** tileview 16 slots/página — tap para recall; slot activo resaltado azul
+- **Tab 1 (Sonidos):** browser JV-2080 — 10 patches/página (5×2), montserrat\_16
+  - Selector de banco inferior: USER / PR-A / PR-B / PR-C / GM / PR-E
+  - **Tap** → envía CC0→CC32→PC al JV-2080; patch activo resaltado azul
+  - **Long-press** → guarda patch como siguiente favorito en Tab 0; botón verde = confirmado
+- **Tab 2 (Canal MIDI):** selector ∧ número ∨, rango 1-16
+- **Botón ×** (esquina top-right física): cierra Bank
+
+#### Memoria de selección
+
+| Dato | Almacenamiento | Persiste |
+|------|---------------|----------|
+| Último patch seleccionado (banco + PC) | NVS — claves `lm`/`ll`/`lp` | Entre reinicios ✅ |
+| Slot FAV activo | RAM | Solo sesión |
+
+Al arrancar, UIBank restaura el banco y patch del último uso (la tab Sonidos abre con ese patch resaltado).
+
+#### Cambios en archivos existentes
+
+| Archivo | Cambio |
+|---------|--------|
+| `config.h` | `ExSynth` enum, `COL_SYNTH_*`, `g_trellis_openBank/bankSlot`, `g_midiChannel`, `TRELLIS_DIM_ABS` (renombrado), pines I2C NeoTrellis 31/33 |
+| `UIKaoss.cpp` | Long-press btn\[1\] abre/cierra Bank; short-press cicla sintetizador activo |
+| `MIDIOut.cpp/h` | `sendBankPC(ch, msb, lsb, pc)` — secuencia CC0→CC32→PC |
+| `main.cpp` | `favInit()`, `uiBankCreate()`, flags cross-core `openBank`/`bankSlot` |
+| `lv_conf.h` | `LV_USE_TABVIEW=1`, `LV_USE_TILEVIEW=1` (estaban a 0) |
+
+#### Nota técnica — labels rotados en LVGL
+
+`lv_obj_set_width(lbl, W)` en un label con `rot_label()` (transform\_rotation=900):  
+**W = chars\_visibles × px\_por\_char** — el "ancho" LVGL se convierte en altura física tras rotar.  
+Diseño validado: botón 82px LVGL x, width=76, montserrat\_16 → 7-8 chars legibles.
+
+---
+
 ### SESIÓN 2026-06-14b — S2 calibración: fix CALIB_DONE prematuro al recalibrar
 
 **Bug:** Cuando S3 se reiniciaba pero S2 seguía corriendo con `_motor_phase=DONE`, al recibir el siguiente FLAG_CALIB S2 entraba en `GOING_TO_MIN` (para recalibrar) pero seguía enviando `SLAVE_FLAG_CALIB_DONE` con los datos de la calibración anterior. S3 marcaba al slave como "calibrado" inmediatamente con `MIN=0 MAX=0` porque sus variables estaban a 0 tras el reinicio. Resultado: `_motor_adcSpan=0` en S2 → `_positionTick()` abortaba → motor no respondía a targets.
