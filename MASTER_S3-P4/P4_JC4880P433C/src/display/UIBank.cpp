@@ -217,18 +217,18 @@ static void son_build_tiles() {
     if (!s_son_tab_ref) return;
 
     // Tileview: LVGL x=60..480 (420px), y=100% (680px)
-    // Clave: lv_obj_set_width(lbl, W) → W = chars visibles × px_por_char
-    //   porque rot_label rota 90° y el "ancho" LVGL se convierte en altura física.
-    //   Con 3 por página (PITCH=140): botones 138px LVGL x → label width=128 →
-    //   montserrat_16 ~10px/char → 12 chars visibles sin clip ✓
+    // Grid 5 filas × 2 cols = 10/página. Botón 82px LVGL x → label width=76 →
+    // montserrat_16 ~10px/char → 7-8 chars visibles. Nombres cortos completos;
+    // largos muestran "NombreXX..." (LONG_DOT). Balance grid denso + tipo legible.
     s_son_tileview = lv_tileview_create(s_son_tab_ref);
     lv_obj_set_size(s_son_tileview, 420, LV_PCT(100));
     lv_obj_set_pos(s_son_tileview, 60, 0);
     dark_bg(s_son_tileview);
 
-    const int PER_PAGE = 3;
-    const int PITCH    = 140;   // 3×140 = 420 = tileview LVGL x
-    int pages = (128 + PER_PAGE - 1) / PER_PAGE;   // 43
+    const int PER_PAGE  = 10;   // 5 filas × 2 cols
+    const int ROWS      = 5;
+    const int ROW_PITCH = 84;   // 5×84 = 420 = tileview LVGL x
+    int pages = (128 + PER_PAGE - 1) / PER_PAGE;   // 13
 
     for (int p = 0; p < pages; p++) {
         lv_obj_t* tile = lv_tileview_add_tile(s_son_tileview, p, 0,
@@ -239,12 +239,14 @@ static void son_build_tiles() {
 
         int on_page = (p == pages-1) ? (128 - p * PER_PAGE) : PER_PAGE;
         for (int i = 0; i < on_page; i++) {
-            uint8_t pc = (uint8_t)(p * PER_PAGE + i);
+            uint8_t pc  = (uint8_t)(p * PER_PAGE + i);
+            int row = i % ROWS;   // 0-4 en LVGL x → físico y
+            int col = i / ROWS;   // 0-1 en LVGL y → físico x
 
             lv_obj_t* btn = lv_btn_create(tile);
-            lv_obj_set_size(btn, 138, 668);
-            lv_obj_set_pos(btn, i * PITCH + 1, 6);
-            lv_obj_set_style_radius(btn, 5, 0);
+            lv_obj_set_size(btn, 82, 338);
+            lv_obj_set_pos(btn, row * ROW_PITCH + 1, col * 340 + 1);
+            lv_obj_set_style_radius(btn, 3, 0);
             lv_obj_set_style_border_width(btn, 0, 0);
             lv_obj_set_style_pad_all(btn, 0, 0);
             lv_obj_set_style_shadow_width(btn, 0, 0);
@@ -253,25 +255,25 @@ static void son_build_tiles() {
             lv_obj_set_style_bg_color(btn, lv_color_hex(COL_BTN_ACTIVE), LV_STATE_PRESSED);
             lv_obj_add_event_cb(btn, son_patch_cb, LV_EVENT_CLICKED, (void*)(uintptr_t)pc);
 
-            // Número PC (hacia arriba físico = +x_ofs en LVGL)
+            // Número PC (arriba físico = +x_ofs LVGL)
             char numstr[4];
             snprintf(numstr, sizeof(numstr), "%d", (int)pc + 1);
             lv_obj_t* lbl_n = lv_label_create(btn);
             lv_label_set_text(lbl_n, numstr);
-            lv_obj_set_style_text_font(lbl_n, &lv_font_montserrat_12, 0);
+            lv_obj_set_style_text_font(lbl_n, &lv_font_montserrat_10, 0);
             lv_obj_set_style_text_color(lbl_n, lv_color_hex(COL_TEXT_DIM), 0);
-            lv_obj_align(lbl_n, LV_ALIGN_CENTER, 50, 0);
+            lv_obj_align(lbl_n, LV_ALIGN_CENTER, 28, 0);
             rot_label(lbl_n);
 
-            // Nombre completo: width=128 LVGL x → ~12 chars montserrat_16 ✓
+            // Nombre: width=76 LVGL x → ~7-8 chars montserrat_16
             const char* name = jvPatchName(s_son_msb, s_son_lsb, pc);
             lv_obj_t* lbl = lv_label_create(btn);
             lv_label_set_text(lbl, name ? name : "---");
             lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
             lv_obj_set_style_text_color(lbl, lv_color_hex(COL_TEXT), 0);
-            lv_obj_align(lbl, LV_ALIGN_CENTER, 0, 0);
+            lv_obj_align(lbl, LV_ALIGN_CENTER, -8, 0);
             lv_label_set_long_mode(lbl, LV_LABEL_LONG_DOT);
-            lv_obj_set_width(lbl, 128);
+            lv_obj_set_width(lbl, 76);
             rot_label(lbl);
         }
     }
