@@ -28,11 +28,19 @@ static uint8_t   s_cur_page = 0;      // página activa en tileview (Tab 0)
 static bool      s_open     = false;
 
 // ── Sonidos state (Tab 1) ─────────────────────────────────────────────────
-static uint8_t   s_son_msb       = 0x51;   // PR-A por defecto
-static uint8_t   s_son_lsb       = 0;
-static lv_obj_t* s_son_tileview  = NULL;
-static lv_obj_t* s_son_tab_ref   = NULL;
+static uint8_t   s_son_msb          = 0x51;
+static uint8_t   s_son_lsb          = 0;
+static lv_obj_t* s_son_tileview     = NULL;
+static lv_obj_t* s_son_tab_ref      = NULL;
 static lv_obj_t* s_son_bank_btns[6] = {};
+static lv_obj_t* s_son_selected_btn = NULL;   // botón patch activo (nullptr = ninguno)
+static uint8_t   s_son_last_msb     = 0xFF;   // último patch seleccionado (NVS)
+static uint8_t   s_son_last_lsb     = 0xFF;
+static uint8_t   s_son_last_pc      = 0xFF;
+
+// ── FAV selection state (Tab 0) ───────────────────────────────────────────
+static lv_obj_t* s_fav_selected_btn = NULL;
+static uint8_t   s_fav_last_slot    = 0xFF;
 
 struct BankDef { uint8_t msb, lsb; const char* label; };
 static const BankDef kBanks[6] = {
@@ -74,6 +82,12 @@ static void fav_btn_cb(lv_event_t* e) {
     uint8_t slot = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
     FavEntry entry;
     if (!favLoad(slot, entry)) return;
+    // Actualizar selección visual
+    if (s_fav_selected_btn)
+        lv_obj_set_style_bg_color(s_fav_selected_btn, lv_color_hex(COL_BTN_BG), 0);
+    s_fav_selected_btn = lv_event_get_target(e);
+    lv_obj_set_style_bg_color(s_fav_selected_btn, lv_color_hex(0x003366), 0);
+    s_fav_last_slot = slot;
     sendBankPC(entry.ch, entry.msb, entry.lsb, entry.pc);
 }
 
@@ -114,6 +128,8 @@ static void fav_build_tiles() {
         s_tileview = NULL;
     }
 
+    s_fav_selected_btn = NULL;   // punteros anteriores ya inválidos
+
     s_tileview = lv_tileview_create(s_tab_fav);
     lv_obj_set_size(s_tileview, LV_PCT(100), LV_PCT(100));
     dark_bg(s_tileview);
@@ -128,31 +144,33 @@ static void fav_build_tiles() {
         lv_obj_t* tile = lv_tileview_add_tile(s_tileview, p, 0,
                          p == 0 ? LV_DIR_RIGHT : (p == pages-1 ? LV_DIR_LEFT : (lv_dir_t)(LV_DIR_LEFT | LV_DIR_RIGHT)));
         dark_bg(tile);
+        lv_obj_clear_flag(tile, LV_OBJ_FLAG_SCROLLABLE);
 
         for (int i = 0; i < 16; i++) {
             int  slot = p * 16 + i;
             int  row  = i % 8;
             int  col  = i / 8;
 
-            lv_obj_t* btn = lv_obj_create(tile);
+            FavEntry e;
+            bool valid = favLoad(slot, e);
+            bool is_sel = (slot == (int)s_fav_last_slot && valid);
+
+            lv_obj_t* btn = lv_btn_create(tile);
             lv_obj_set_size(btn, 58, 338);
             lv_obj_set_pos(btn, row * 60 + 1, col * 340 + 1);
             lv_obj_set_style_radius(btn, 3, 0);
             lv_obj_set_style_border_width(btn, 0, 0);
             lv_obj_set_style_pad_all(btn, 0, 0);
-            lv_obj_clear_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
-
-            FavEntry e;
-            bool valid = favLoad(slot, e);
+            lv_obj_set_style_shadow_width(btn, 0, 0);
 
             if (valid) {
-                lv_obj_set_style_bg_color(btn, lv_color_hex(COL_BTN_BG), 0);
+                lv_obj_set_style_bg_color(btn, lv_color_hex(is_sel ? 0x003366 : COL_BTN_BG), 0);
                 lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
-                lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
+                lv_obj_set_style_bg_color(btn, lv_color_hex(COL_BTN_ACTIVE), LV_STATE_PRESSED);
+                if (is_sel) s_fav_selected_btn = btn;
                 lv_obj_add_event_cb(btn, fav_btn_cb, LV_EVENT_CLICKED,
                                     (void*)(uintptr_t)slot);
 
-                // número de slot
                 char numstr[4];
                 snprintf(numstr, sizeof(numstr), "%02d", slot + 1);
                 lv_obj_t* lbl_n = lv_label_create(btn);
@@ -162,7 +180,6 @@ static void fav_build_tiles() {
                 lv_obj_align(lbl_n, LV_ALIGN_CENTER, -18, 0);
                 rot_label(lbl_n);
 
-                // nombre del patch
                 lv_obj_t* lbl = lv_label_create(btn);
                 lv_label_set_text(lbl, e.name);
                 lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
@@ -196,6 +213,9 @@ static void build_tab_fav(lv_obj_t* tab) {
     fav_build_tiles();
 }
 
+// ── Forward declarations ──────────────────────────────────────────────────
+static void fav_build_tiles();
+
 // ── Sonidos helpers (Tab 1) ───────────────────────────────────────────────
 static void son_bank_refresh_btns() {
     for (int i = 0; i < 6; i++) {
@@ -209,11 +229,42 @@ static void son_bank_refresh_btns() {
 static void son_patch_cb(lv_event_t* e) {
     if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
     uint8_t pc = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
+    // Actualizar selección visual
+    if (s_son_selected_btn)
+        lv_obj_set_style_bg_color(s_son_selected_btn, lv_color_hex(COL_BTN_BG), 0);
+    s_son_selected_btn = lv_event_get_target(e);
+    lv_obj_set_style_bg_color(s_son_selected_btn, lv_color_hex(0x003366), 0);
+    s_son_last_msb = s_son_msb;
+    s_son_last_lsb = s_son_lsb;
+    s_son_last_pc  = pc;
+    favSaveLastSel(s_son_msb, s_son_lsb, pc);
     sendBankPC(g_midiChannel, s_son_msb, s_son_lsb, pc);
+}
+
+// Long-press en patch → guardar en Tab 0 (FAV) como siguiente slot
+static void son_patch_long_cb(lv_event_t* e) {
+    if (lv_event_get_code(e) != LV_EVENT_LONG_PRESSED) return;
+    uint8_t pc = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
+    int slot = favCount();
+    if (slot > 127) return;
+    FavEntry entry;
+    entry.synth = g_currentSynth;
+    entry.ch    = (uint8_t)g_midiChannel;
+    entry.msb   = s_son_msb;
+    entry.lsb   = s_son_lsb;
+    entry.pc    = pc;
+    const char* name = jvPatchName(s_son_msb, s_son_lsb, pc);
+    strncpy(entry.name, name ? name : "---", sizeof(entry.name) - 1);
+    entry.name[sizeof(entry.name) - 1] = '\0';
+    favSave(slot, entry);
+    // Feedback visual: verde = guardado
+    lv_obj_set_style_bg_color(lv_event_get_target(e), lv_color_hex(0x003300), 0);
+    fav_build_tiles();   // actualiza Tab 0 con el nuevo favorito
 }
 
 static void son_build_tiles() {
     if (s_son_tileview) { lv_obj_delete(s_son_tileview); s_son_tileview = NULL; }
+    s_son_selected_btn = NULL;   // punteros del tileview anterior ya son inválidos
     if (!s_son_tab_ref) return;
 
     // Tileview: LVGL x=60..480 (420px), y=100% (680px)
@@ -250,10 +301,13 @@ static void son_build_tiles() {
             lv_obj_set_style_border_width(btn, 0, 0);
             lv_obj_set_style_pad_all(btn, 0, 0);
             lv_obj_set_style_shadow_width(btn, 0, 0);
-            lv_obj_set_style_bg_color(btn, lv_color_hex(COL_BTN_BG), 0);
+            bool is_sel = (pc == s_son_last_pc && s_son_msb == s_son_last_msb && s_son_lsb == s_son_last_lsb);
+            lv_obj_set_style_bg_color(btn, lv_color_hex(is_sel ? 0x003366 : COL_BTN_BG), 0);
             lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
             lv_obj_set_style_bg_color(btn, lv_color_hex(COL_BTN_ACTIVE), LV_STATE_PRESSED);
-            lv_obj_add_event_cb(btn, son_patch_cb, LV_EVENT_CLICKED, (void*)(uintptr_t)pc);
+            if (is_sel) s_son_selected_btn = btn;
+            lv_obj_add_event_cb(btn, son_patch_cb,      LV_EVENT_CLICKED,      (void*)(uintptr_t)pc);
+            lv_obj_add_event_cb(btn, son_patch_long_cb, LV_EVENT_LONG_PRESSED, (void*)(uintptr_t)pc);
 
             // Número PC (arriba físico = +x_ofs LVGL)
             char numstr[4];
@@ -387,6 +441,14 @@ static void build_tab_channel(lv_obj_t* tab) {
 
 // ── API pública ───────────────────────────────────────────────────────────
 void uiBankCreate(lv_obj_t* parent) {
+    // Cargar última selección de Sonidos desde NVS
+    favLoadLastSel(s_son_last_msb, s_son_last_lsb, s_son_last_pc);
+    // Si el banco guardado coincide con PR-A (default), activarlo
+    if (s_son_last_msb != 0xFF) {
+        s_son_msb = s_son_last_msb;
+        s_son_lsb = s_son_last_lsb;
+    }
+
     s_cont = lv_obj_create(parent);
     lv_obj_set_size(s_cont, P4_W, P4_H);
     lv_obj_set_pos(s_cont, 0, 0);
@@ -494,6 +556,7 @@ void uiBankDestroy() {
     s_tabview = s_tab_fav = s_tab_son = s_tab_ch = NULL;
     s_tileview = s_lbl_ch = NULL;
     s_son_tileview = s_son_tab_ref = NULL;
+    s_son_selected_btn = s_fav_selected_btn = NULL;
     for (int i = 0; i < 6; i++) s_son_bank_btns[i] = NULL;
     s_open = false;
     g_bankOpen = false;

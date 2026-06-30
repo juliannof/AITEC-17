@@ -41,3 +41,17 @@ void favDelete(int idx) {
     snprintf(key, sizeof(key), "%d", idx);
     s_prefs.remove(key);
 }
+
+bool favSaveLastSel(uint8_t msb, uint8_t lsb, uint8_t pc) {
+    s_prefs.putUChar("lm", msb);
+    s_prefs.putUChar("ll", lsb);
+    s_prefs.putUChar("lp", pc);
+    return true;
+}
+
+bool favLoadLastSel(uint8_t& msb, uint8_t& lsb, uint8_t& pc) {
+    msb = s_prefs.getUChar("lm", 0xFF);
+    lsb = s_prefs.getUChar("ll", 0xFF);
+    pc  = s_prefs.getUChar("lp", 0xFF);
+    return msb != 0xFF;
+}

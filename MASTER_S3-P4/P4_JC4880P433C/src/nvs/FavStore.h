@@ -19,3 +19,7 @@ int  favCount();         // número de slots guardados (0 = vacío)
 bool favLoad(int idx, FavEntry& out);   // false si slot vacío
 bool favSave(int idx, const FavEntry& e);
 void favDelete(int idx);
+
+// Última selección en Tab Sonidos (persiste entre boots)
+bool favSaveLastSel(uint8_t msb, uint8_t lsb, uint8_t pc);
+bool favLoadLastSel(uint8_t& msb, uint8_t& lsb, uint8_t& pc);
