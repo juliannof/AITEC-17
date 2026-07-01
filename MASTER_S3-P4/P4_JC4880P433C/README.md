@@ -85,6 +85,54 @@ El color del texto y de los dots sigue el modo activo (`COL_MODE_KAOSS` rojo por
 | 2 | L8 | L9 | L10 | L11 | R8 | R9 | R10 | R11 |
 | 3 | L12 | L13 | L14 | L15 | R12 | R13 | R14 | R15 |
 
+### Referencia secuencial — numeración física 1-32 (izquierda→derecha, arriba→abajo)
+
+> Numeración derivada de `key = fila×4 + col` (convención de la librería Adafruit NeoTrellis,
+> documentada en el comentario de cabecera de `NeoTrellis.cpp`) — **no verificada contra
+> serigrafía física de la placa**, solo contra el código fuente.
+
+**Panel izquierdo — 0x2F (botones 1-16):**
+
+| Nº físico | Índice interno | Fila | Columna | Función Kaoss actual |
+|---|---|---|---|---|
+| 1 | L0 | 0 | 0 | HOLD |
+| 2 | L1 | 0 | 1 | PANIC |
+| 3 | L2 | 0 | 2 | SCALE |
+| 4 | L3 | 0 | 3 | — |
+| 5 | L4 | 1 | 0 | SYNTH |
+| 6 | L5 | 1 | 1 | — |
+| 7 | L6 | 1 | 2 | — |
+| 8 | L7 | 1 | 3 | — |
+| 9 | L8 | 2 | 0 | — |
+| 10 | L9 | 2 | 1 | — |
+| 11 | L10 | 2 | 2 | — |
+| 12 | L11 | 2 | 3 | — |
+| 13 | L12 | 3 | 0 | — |
+| 14 | L13 | 3 | 1 | — |
+| 15 | L14 | 3 | 2 | — |
+| 16 | L15 | 3 | 3 | — |
+
+**Panel derecho — 0x2E (botones 17-32):**
+
+| Nº físico | Índice interno | Fila | Columna | Función Kaoss actual |
+|---|---|---|---|---|
+| 17 | R0 | 0 | 4 | Preset 0 |
+| 18 | R1 | 0 | 5 | Preset 1 |
+| 19 | R2 | 0 | 6 | Preset 2 |
+| 20 | R3 | 0 | 7 | Preset 3 |
+| 21 | R4 | 1 | 4 | — |
+| 22 | R5 | 1 | 5 | — |
+| 23 | R6 | 1 | 6 | — |
+| 24 | R7 | 1 | 7 | — |
+| 25 | R8 | 2 | 4 | — |
+| 26 | R9 | 2 | 5 | — |
+| 27 | R10 | 2 | 6 | — |
+| 28 | R11 | 2 | 7 | — |
+| 29 | R12 | 3 | 4 | — |
+| 30 | R13 | 3 | 5 | — |
+| 31 | R14 | 3 | 6 | — |
+| 32 | R15 | 3 | 7 | — |
+
 ### Modo Kaoss (por defecto, Bank cerrado)
 
 | Fila | Panel izquierdo (col 0-3) | Panel derecho (col 4-7) |
