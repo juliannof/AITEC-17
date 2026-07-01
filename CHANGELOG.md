@@ -15,6 +15,41 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 | 🟡 Media | **P4: pop-up V-Pot — no refrescar el fondo con el modal abierto (2026-06-12 19:47)** | Fix listo, SIN aplicar: en `main.cpp` loop CONNECTED, si `uiVPotPopupIsOpen()` → solo `uiVPotPopupUpdate()`, saltar `uiHeaderUpdate`/página/`handleVUMeterDecay`. El overlay tapa toda la pantalla (1024×600), no hace falta repintar detrás. |
 | 🟡 Media | **P4: pop-up V-Pot — botón "Cerrar" demasiado grande (2026-06-12 19:47)** | Reducir el `lv_button` (actual 160×56) en `UIVPotPopup.cpp::uiVPotPopupOpen()`. |
 | 🟡 Media | **P4: portar fixes de calibración de S3 cuando RS485 bus A esté activo (2026-06-14)** | Dos fixes aplicados en S3 deben replicarse en P4 cuando implemente calibración de sus 9 slaves (bus A): (1) `_handleResponse()`: rechazar `CALIB_DONE` con `MIN=0 MAX=0` e incrementar `calibRetries` — igual que `RS485.cpp:311` de S3. (2) Si P4 usa `buildResponse()` propio en S2 por bus A: verificar que `pendingNewCalib` guard está presente. Commits de referencia: `fd50ed0` (S2 fix) + `432e2c5` (S3 fix). |
+| 🟡 Media | **ExPressif: implementar mapeo NeoTrellis modo Bank (2026-07-01 21:45)** | Diseño documentado en `MASTER_S3-P4/P4_JC4880P433C/README.md` sección "NeoTrellis — Matriz 4×8" (fila superior=subir página, inferior=bajar página, 16 centrales=selección directa de slot) — **código sin actualizar**. Actualmente `NeoTrellis.cpp` solo mapea 12 teclas sueltas del panel izquierdo a Bank y no suspende HOLD/PANIC/SCALE/SYNTH/preset mientras `UIBank` está abierto. |
+| 🟢 Baja | **ExPressif: persistir página+pestaña activa de UIBank (2026-07-01 21:45)** | Pedido explícito del usuario, sin implementar (interrumpido por el tema NeoTrellis). `uiBankShow()` siempre fuerza Tab FAV; Tab Sonidos siempre abre en página 0 aunque el último sonido seleccionado (ya persistido vía `favSaveLastSel`) esté en otra página. Falta: guardar `g_bankTab` en NVS + saltar el tileview de Sonidos a `s_son_last_pc / UIBANK_SON_PER_PAGE` al abrir. |
+
+---
+
+### SESIÓN 2026-07-01 — ExPressif (P4_JC4880P433C): lazy-build, favoritos, canal persistente
+
+**Commit:** `18a34ad`
+**MCU afectada:** solo P4_JC4880P433C (ExPressif).
+
+#### Tab Sonidos
+
+| Cambio | Detalle |
+|---|---|
+| Combo "BANCO:NNN Nombre" | Una sola fila, `montserrat_18` (bajado desde 20 a petición del usuario). Fix del bug de 2 filas: `LV_LABEL_LONG_DOT` necesita **alto fijo** además de ancho fijo, si no se comporta como `LONG_WRAP`. |
+| Orden de filas invertido | Los sonidos salían de abajo a arriba (`row = i % ROWS`). Causa: `screen_y = 479 − LVGL_x`, a más `LVGL_x` más arriba en pantalla. Fix: `row = (ROWS-1) - (i % ROWS)`. |
+| Círculo naranja de favorito | Movido de arriba (offset eje corto) a la izquierda del texto (offset eje largo, primera vez que se usa ese eje en este layout rotado — **sin validar en hardware**). Texto reserva 20px (`UIBANK_SON_FAV_RESERVE`) para no solaparse. |
+| Ciclo de 3 pulsaciones | 1ª pulsación = seleccionar/recall. Pulsación sobre el ya seleccionado: si no es favorito → lo guarda; si ya lo es → lo quita (`favFindIndex`+`favDelete`, sin reconstruir la página — el círculo se borra vía puntero guardado en `lv_obj_set_user_data`). |
+| Lazy-build del tileview | Antes se construían las 13 páginas del banco de golpe (~260-390 widgets rotados vivos simultáneos) → tacto lento (motivo: cada `rot_label()` usa una ruta de render más cara, y el bucle de LVGL corre cada 10ms para toda la app). Ahora solo la página activa ±1 (`son_populate_page`/`son_depopulate_page`/`son_update_page_window`, enganchado a `LV_EVENT_SCROLL_END`). |
+
+#### Tab Favoritos
+
+Mismo patrón lazy-build (`fav_populate_page`/`fav_depopulate_page`/`fav_update_page_window`) y mismo fix de orden de filas (`row = (ROWS-1) - (i % ROWS)`) portados desde Sonidos — mismo `lv_tileview`, mismo bug de origen.
+
+#### FavStore (`src/nvs/FavStore.cpp/h`)
+
+| Función | Uso |
+|---|---|
+| `favMarkBank()` | Chequeo masivo — un solo escaneo NVS por reconstrucción de grid (evita 10-16 escaneos, uno por botón) |
+| `favFindIndex()` | Chequeo puntual — localizar el slot NVS a borrar al quitar un favorito |
+| `favSaveMidiChannel()` / `favLoadMidiChannel()` | Canal MIDI activo persiste entre reinicios (clave NVS `"mc"`, namespace `"favs"`) — antes siempre arrancaba en canal 1 |
+
+#### README (`MASTER_S3-P4/P4_JC4880P433C/README.md`)
+
+Nueva sección "NeoTrellis — Matriz 4×8": mapa físico de índices (L0-15/R0-15), mapeo modo Kaoss (ya vigente en código) y diseño del modo Bank (fila superior=subir, inferior=bajar, centro=selección directa de slot) — documentado como **diseño objetivo pendiente de implementar**, motivado porque las funciones Kaoss (HOLD/PANIC/SCALE/SYNTH/preset) seguían activas sobre las 32 teclas mientras `UIBank` estaba abierto, sin sentido en ese contexto.
 
 ---
 
