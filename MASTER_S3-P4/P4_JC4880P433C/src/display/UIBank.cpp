@@ -37,10 +37,16 @@ static lv_obj_t* s_son_selected_btn = NULL;   // botón patch activo (nullptr = 
 static uint8_t   s_son_last_msb     = 0xFF;   // último patch seleccionado (NVS)
 static uint8_t   s_son_last_lsb     = 0xFF;
 static uint8_t   s_son_last_pc      = 0xFF;
+static lv_obj_t* s_son_tiles[UIBANK_SON_MAX_PAGES]     = {};   // contenedores de página (siempre vivos)
+static bool      s_son_pageBuilt[UIBANK_SON_MAX_PAGES] = {};   // lazy-build: ¿tiene botones vivos?
+static bool      s_son_bankFav[UIBANK_SON_PATCHES_BANK] = {};  // cache favoritos del banco activo
+static uint8_t   s_son_cur_page     = 0;
 
 // ── FAV selection state (Tab 0) ───────────────────────────────────────────
 static lv_obj_t* s_fav_selected_btn = NULL;
 static uint8_t   s_fav_last_slot    = 0xFF;
+static lv_obj_t* s_fav_tiles[UIBANK_FAV_MAX_PAGES]     = {};   // contenedores de página (siempre vivos)
+static bool      s_fav_pageBuilt[UIBANK_FAV_MAX_PAGES] = {};   // lazy-build: ¿tiene botones vivos?
 
 struct BankDef { uint8_t msb, lsb; const char* label; };
 static const BankDef kBanks[6] = {
@@ -91,23 +97,36 @@ static void fav_btn_cb(lv_event_t* e) {
     sendBankPC(entry.ch, entry.msb, entry.lsb, entry.pc);
 }
 
-// ── Callback scroll tileview (actualiza página activa) ───────────────────
+// ── Forward declarations ──────────────────────────────────────────────────
+static void fav_update_page_window(int active);
+
+// ── Callback scroll tileview (actualiza página activa + ventana lazy-build) ─
 static void tv_scroll_cb(lv_event_t* e) {
     if (!s_tileview) return;
     lv_obj_t* tile = lv_tileview_get_tile_active(s_tileview);
-    if (tile) s_cur_page = (uint8_t)lv_obj_get_index(tile);
+    if (!tile) return;
+    s_cur_page = (uint8_t)lv_obj_get_index(tile);
+    fav_update_page_window(s_cur_page);
 }
 
 // ── Callback ∧ canal ─────────────────────────────────────────────────────
 static void cb_ch_up(lv_event_t* e) {
     if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
-    if (g_midiChannel < 16) { g_midiChannel = g_midiChannel + 1; ch_refresh(); }
+    if (g_midiChannel < 16) {
+        g_midiChannel = g_midiChannel + 1;
+        favSaveMidiChannel(g_midiChannel);
+        ch_refresh();
+    }
 }
 
 // ── Callback ∨ canal ─────────────────────────────────────────────────────
 static void cb_ch_dn(lv_event_t* e) {
     if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
-    if (g_midiChannel > 1) { g_midiChannel = g_midiChannel - 1; ch_refresh(); }
+    if (g_midiChannel > 1) {
+        g_midiChannel = g_midiChannel - 1;
+        favSaveMidiChannel(g_midiChannel);
+        ch_refresh();
+    }
 }
 
 // ── Callback cerrar ──────────────────────────────────────────────────────
@@ -121,7 +140,96 @@ static void close_cb(lv_event_t* e) {
 // LVGL portrait: cada botón (60 × 340) → físico 340px ancho × 60px alto.
 // Col 0: LVGL y = 0-340  (físico x: 120-460)
 // Col 1: LVGL y = 340-680 (físico x: 460-800)
-// Filas: LVGL x = 0,60,120,...,420 → fila 0-7
+// Filas: LVGL x = 0,60,120,...,420 → fila 0-7 (invertido, ver fav_populate_page)
+//
+// Lazy-build: igual que Tab Sonidos (2026-07-01) — solo se construye el
+// contenido de la página activa ± UIBANK_FAV_PAGE_KEEP, no las 8 de golpe.
+
+// Construye el contenido (16 botones) de UNA página, si no lo estaba ya.
+static void fav_populate_page(int p) {
+    if (p < 0 || p >= UIBANK_FAV_MAX_PAGES || s_fav_pageBuilt[p] || !s_fav_tiles[p]) return;
+    lv_obj_t* tile = s_fav_tiles[p];
+    s_fav_pageBuilt[p] = true;
+
+    for (int i = 0; i < UIBANK_FAV_PER_PAGE; i++) {
+        int slot = p * UIBANK_FAV_PER_PAGE + i;
+        // screen_y = 479 − LVGL_x → invertido para que i=0 quede arriba (mismo fix que Sonidos).
+        int row = (UIBANK_FAV_ROWS - 1) - (i % UIBANK_FAV_ROWS);
+        int col = i / UIBANK_FAV_ROWS;
+
+        FavEntry e;
+        bool valid = favLoad(slot, e);
+        bool is_sel = (slot == (int)s_fav_last_slot && valid);
+
+        lv_obj_t* btn = lv_btn_create(tile);
+        lv_obj_set_size(btn, 58, 338);
+        lv_obj_set_pos(btn, row * 60 + 1, col * 340 + 1);
+        lv_obj_set_style_radius(btn, 3, 0);
+        lv_obj_set_style_border_width(btn, 0, 0);
+        lv_obj_set_style_pad_all(btn, 0, 0);
+        lv_obj_set_style_shadow_width(btn, 0, 0);
+
+        if (valid) {
+            lv_obj_set_style_bg_color(btn, lv_color_hex(is_sel ? 0x003366 : COL_BTN_BG), 0);
+            lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+            lv_obj_set_style_bg_color(btn, lv_color_hex(COL_BTN_ACTIVE), LV_STATE_PRESSED);
+            if (is_sel) s_fav_selected_btn = btn;
+            lv_obj_add_event_cb(btn, fav_btn_cb, LV_EVENT_CLICKED,
+                                (void*)(uintptr_t)slot);
+
+            char numstr[4];
+            snprintf(numstr, sizeof(numstr), "%02d", slot + 1);
+            lv_obj_t* lbl_n = lv_label_create(btn);
+            lv_label_set_text(lbl_n, numstr);
+            lv_obj_set_style_text_font(lbl_n, &lv_font_montserrat_10, 0);
+            lv_obj_set_style_text_color(lbl_n, lv_color_hex(COL_TEXT_DIM), 0);
+            lv_obj_align(lbl_n, LV_ALIGN_CENTER, -18, 0);
+            rot_label(lbl_n);
+
+            lv_obj_t* lbl = lv_label_create(btn);
+            lv_label_set_text(lbl, e.name);
+            lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
+            lv_obj_set_style_text_color(lbl, lv_color_hex(COL_TEXT), 0);
+            lv_obj_align(lbl, LV_ALIGN_CENTER, 6, 0);
+            lv_label_set_long_mode(lbl, LV_LABEL_LONG_CLIP);
+            lv_obj_set_width(lbl, 44);
+            rot_label(lbl);
+        } else {
+            lv_obj_set_style_bg_color(btn, lv_color_hex(0x060A10), 0);
+            lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+            lv_obj_clear_flag(btn, LV_OBJ_FLAG_CLICKABLE);
+
+            char numstr[4];
+            snprintf(numstr, sizeof(numstr), "%02d", slot + 1);
+            lv_obj_t* lbl = lv_label_create(btn);
+            lv_label_set_text(lbl, numstr);
+            lv_obj_set_style_text_font(lbl, &lv_font_montserrat_10, 0);
+            lv_obj_set_style_text_color(lbl, lv_color_hex(0x1A2030), 0);
+            lv_obj_align(lbl, LV_ALIGN_CENTER, 0, 0);
+            rot_label(lbl);
+        }
+    }
+}
+
+// Borra el contenido de una página ya construida (el tile en sí queda vacío,
+// necesario para que el scroll-snap del tileview conozca todas las páginas).
+static void fav_depopulate_page(int p) {
+    if (p < 0 || p >= UIBANK_FAV_MAX_PAGES || !s_fav_pageBuilt[p] || !s_fav_tiles[p]) return;
+    if (s_fav_selected_btn && lv_obj_get_parent(s_fav_selected_btn) == s_fav_tiles[p])
+        s_fav_selected_btn = NULL;   // iba a quedar colgante tras el lv_obj_clean
+    lv_obj_clean(s_fav_tiles[p]);
+    s_fav_pageBuilt[p] = false;
+}
+
+// Mantiene construida solo la página activa ± UIBANK_FAV_PAGE_KEEP; libera el resto.
+static void fav_update_page_window(int active) {
+    for (int p = 0; p < UIBANK_FAV_MAX_PAGES; p++) {
+        bool keep = (p >= active - UIBANK_FAV_PAGE_KEEP && p <= active + UIBANK_FAV_PAGE_KEEP);
+        if (keep) fav_populate_page(p);
+        else      fav_depopulate_page(p);
+    }
+}
+
 static void fav_build_tiles() {
     if (s_tileview) {
         lv_obj_delete(s_tileview);
@@ -129,6 +237,7 @@ static void fav_build_tiles() {
     }
 
     s_fav_selected_btn = NULL;   // punteros anteriores ya inválidos
+    for (int p = 0; p < UIBANK_FAV_MAX_PAGES; p++) { s_fav_tiles[p] = NULL; s_fav_pageBuilt[p] = false; }
 
     s_tileview = lv_tileview_create(s_tab_fav);
     lv_obj_set_size(s_tileview, LV_PCT(100), LV_PCT(100));
@@ -137,73 +246,20 @@ static void fav_build_tiles() {
     lv_obj_add_event_cb(s_tileview, tv_scroll_cb, LV_EVENT_SCROLL_END, NULL);
 
     int count = favCount();
-    int pages = (count + 15) / 16;
+    int pages = (count + UIBANK_FAV_PER_PAGE - 1) / UIBANK_FAV_PER_PAGE;
     if (pages < 1) pages = 1;
+    if (pages > UIBANK_FAV_MAX_PAGES) pages = UIBANK_FAV_MAX_PAGES;
 
     for (int p = 0; p < pages; p++) {
         lv_obj_t* tile = lv_tileview_add_tile(s_tileview, p, 0,
                          p == 0 ? LV_DIR_RIGHT : (p == pages-1 ? LV_DIR_LEFT : (lv_dir_t)(LV_DIR_LEFT | LV_DIR_RIGHT)));
         dark_bg(tile);
         lv_obj_clear_flag(tile, LV_OBJ_FLAG_SCROLLABLE);
-
-        for (int i = 0; i < 16; i++) {
-            int  slot = p * 16 + i;
-            int  row  = i % 8;
-            int  col  = i / 8;
-
-            FavEntry e;
-            bool valid = favLoad(slot, e);
-            bool is_sel = (slot == (int)s_fav_last_slot && valid);
-
-            lv_obj_t* btn = lv_btn_create(tile);
-            lv_obj_set_size(btn, 58, 338);
-            lv_obj_set_pos(btn, row * 60 + 1, col * 340 + 1);
-            lv_obj_set_style_radius(btn, 3, 0);
-            lv_obj_set_style_border_width(btn, 0, 0);
-            lv_obj_set_style_pad_all(btn, 0, 0);
-            lv_obj_set_style_shadow_width(btn, 0, 0);
-
-            if (valid) {
-                lv_obj_set_style_bg_color(btn, lv_color_hex(is_sel ? 0x003366 : COL_BTN_BG), 0);
-                lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
-                lv_obj_set_style_bg_color(btn, lv_color_hex(COL_BTN_ACTIVE), LV_STATE_PRESSED);
-                if (is_sel) s_fav_selected_btn = btn;
-                lv_obj_add_event_cb(btn, fav_btn_cb, LV_EVENT_CLICKED,
-                                    (void*)(uintptr_t)slot);
-
-                char numstr[4];
-                snprintf(numstr, sizeof(numstr), "%02d", slot + 1);
-                lv_obj_t* lbl_n = lv_label_create(btn);
-                lv_label_set_text(lbl_n, numstr);
-                lv_obj_set_style_text_font(lbl_n, &lv_font_montserrat_10, 0);
-                lv_obj_set_style_text_color(lbl_n, lv_color_hex(COL_TEXT_DIM), 0);
-                lv_obj_align(lbl_n, LV_ALIGN_CENTER, -18, 0);
-                rot_label(lbl_n);
-
-                lv_obj_t* lbl = lv_label_create(btn);
-                lv_label_set_text(lbl, e.name);
-                lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
-                lv_obj_set_style_text_color(lbl, lv_color_hex(COL_TEXT), 0);
-                lv_obj_align(lbl, LV_ALIGN_CENTER, 6, 0);
-                lv_label_set_long_mode(lbl, LV_LABEL_LONG_CLIP);
-                lv_obj_set_width(lbl, 44);
-                rot_label(lbl);
-            } else {
-                lv_obj_set_style_bg_color(btn, lv_color_hex(0x060A10), 0);
-                lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
-                lv_obj_clear_flag(btn, LV_OBJ_FLAG_CLICKABLE);
-
-                char numstr[4];
-                snprintf(numstr, sizeof(numstr), "%02d", slot + 1);
-                lv_obj_t* lbl = lv_label_create(btn);
-                lv_label_set_text(lbl, numstr);
-                lv_obj_set_style_text_font(lbl, &lv_font_montserrat_10, 0);
-                lv_obj_set_style_text_color(lbl, lv_color_hex(0x1A2030), 0);
-                lv_obj_align(lbl, LV_ALIGN_CENTER, 0, 0);
-                rot_label(lbl);
-            }
-        }
+        s_fav_tiles[p] = tile;
     }
+
+    s_cur_page = 0;
+    fav_update_page_window(0);
 }
 
 // ── Tab 0 — Favoritos ────────────────────────────────────────────────────
@@ -217,6 +273,12 @@ static void build_tab_fav(lv_obj_t* tab) {
 static void fav_build_tiles();
 
 // ── Sonidos helpers (Tab 1) ───────────────────────────────────────────────
+static const char* son_bank_label() {
+    for (int i = 0; i < 6; i++)
+        if (kBanks[i].msb == s_son_msb && kBanks[i].lsb == s_son_lsb) return kBanks[i].label;
+    return "";
+}
+
 static void son_bank_refresh_btns() {
     for (int i = 0; i < 6; i++) {
         if (!s_son_bank_btns[i]) continue;
@@ -226,9 +288,65 @@ static void son_bank_refresh_btns() {
     }
 }
 
+// Círculo naranja = favorito guardado (a la izquierda del texto, eje local-y = screen_x)
+static void son_add_fav_dot(lv_obj_t* btn) {
+    lv_obj_t* fav = lv_obj_create(btn);
+    lv_obj_set_size(fav, UIBANK_SON_FAV_DOT, UIBANK_SON_FAV_DOT);
+    lv_obj_set_style_radius(fav, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(fav, lv_color_hex(COL_FAV_STAR), 0);
+    lv_obj_set_style_bg_opa(fav, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(fav, 0, 0);
+    lv_obj_set_style_pad_all(fav, 0, 0);
+    lv_obj_set_style_shadow_width(fav, 0, 0);
+    lv_obj_clear_flag(fav, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_align(fav, LV_ALIGN_CENTER, 0, UIBANK_SON_FAV_DOT_OFS);
+    lv_obj_set_user_data(btn, fav);   // referencia para poder borrarlo sin reconstruir la página
+}
+
+// Quita el círculo de favorito de un botón (si lo tenía)
+static void son_remove_fav_dot(lv_obj_t* btn) {
+    lv_obj_t* fav = (lv_obj_t*)lv_obj_get_user_data(btn);
+    if (!fav) return;
+    lv_obj_delete(fav);
+    lv_obj_set_user_data(btn, NULL);
+}
+
+// Pulsación sobre un patch distinto → selección/recall normal.
+// Pulsación sobre el patch YA seleccionado → ciclo: sin favorito → favorito → sin favorito.
 static void son_patch_cb(lv_event_t* e) {
     if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
     uint8_t pc = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
+    bool already_selected = (pc == s_son_last_pc && s_son_msb == s_son_last_msb && s_son_lsb == s_son_last_lsb);
+
+    if (already_selected) {
+        lv_obj_t* btn = (lv_obj_t*)lv_event_get_target(e);
+        if (s_son_bankFav[pc]) {
+            // Ya era favorito → quitarlo
+            int idx = favFindIndex(g_currentSynth, (uint8_t)g_midiChannel, s_son_msb, s_son_lsb, pc);
+            if (idx >= 0) favDelete(idx);
+            s_son_bankFav[pc] = false;
+            son_remove_fav_dot(btn);
+            fav_build_tiles();   // actualiza Tab 0 (el slot queda vacío)
+            return;
+        }
+        int slot = favCount();
+        if (slot > 127) return;
+        FavEntry entry;
+        entry.synth = g_currentSynth;
+        entry.ch    = (uint8_t)g_midiChannel;
+        entry.msb   = s_son_msb;
+        entry.lsb   = s_son_lsb;
+        entry.pc    = pc;
+        const char* name = jvPatchName(s_son_msb, s_son_lsb, pc);
+        strncpy(entry.name, name ? name : "---", sizeof(entry.name) - 1);
+        entry.name[sizeof(entry.name) - 1] = '\0';
+        favSave(slot, entry);
+        s_son_bankFav[pc] = true;
+        son_add_fav_dot(btn);
+        fav_build_tiles();   // actualiza Tab 0 con el nuevo favorito
+        return;
+    }
+
     // Actualizar selección visual
     if (s_son_selected_btn)
         lv_obj_set_style_bg_color(s_son_selected_btn, lv_color_hex(COL_BTN_BG), 0);
@@ -241,96 +359,118 @@ static void son_patch_cb(lv_event_t* e) {
     sendBankPC(g_midiChannel, s_son_msb, s_son_lsb, pc);
 }
 
-// Long-press en patch → guardar en Tab 0 (FAV) como siguiente slot
-static void son_patch_long_cb(lv_event_t* e) {
-    if (lv_event_get_code(e) != LV_EVENT_LONG_PRESSED) return;
-    uint8_t pc = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
-    int slot = favCount();
-    if (slot > 127) return;
-    FavEntry entry;
-    entry.synth = g_currentSynth;
-    entry.ch    = (uint8_t)g_midiChannel;
-    entry.msb   = s_son_msb;
-    entry.lsb   = s_son_lsb;
-    entry.pc    = pc;
-    const char* name = jvPatchName(s_son_msb, s_son_lsb, pc);
-    strncpy(entry.name, name ? name : "---", sizeof(entry.name) - 1);
-    entry.name[sizeof(entry.name) - 1] = '\0';
-    favSave(slot, entry);
-    // Feedback visual: verde = guardado
-    lv_obj_set_style_bg_color((lv_obj_t*)lv_event_get_target(e), lv_color_hex(0x003300), 0);
-    fav_build_tiles();   // actualiza Tab 0 con el nuevo favorito
+// Construye el contenido (botones+labels+favorito) de UNA página, si no lo estaba ya.
+static void son_populate_page(int p) {
+    if (p < 0 || p >= UIBANK_SON_MAX_PAGES || s_son_pageBuilt[p] || !s_son_tiles[p]) return;
+    lv_obj_t* tile = s_son_tiles[p];
+    s_son_pageBuilt[p] = true;
+
+    const int PER_PAGE  = UIBANK_SON_PER_PAGE;
+    const int ROWS      = UIBANK_SON_ROWS;
+    const int ROW_PITCH = UIBANK_SON_ROW_PITCH;
+    int on_page = (p == UIBANK_SON_MAX_PAGES - 1) ? (UIBANK_SON_PATCHES_BANK - p * PER_PAGE) : PER_PAGE;
+
+    for (int i = 0; i < on_page; i++) {
+        uint8_t pc  = (uint8_t)(p * PER_PAGE + i);
+        // screen_y = 479 − LVGL_x → a más LVGL_x, más arriba en pantalla.
+        // Invertido para que i=0 (primer patch) quede arriba y descienda con i.
+        int row = (ROWS - 1) - (i % ROWS);   // 0-4 en LVGL x → físico y
+        int col = i / ROWS;                  // 0-1 en LVGL y → físico x
+
+        lv_obj_t* btn = lv_btn_create(tile);
+        lv_obj_set_size(btn, UIBANK_SON_BTN_W, UIBANK_SON_BTN_H);
+        lv_obj_set_pos(btn, row * ROW_PITCH + 1, col * UIBANK_SON_COL_PITCH + 1);
+        lv_obj_set_style_radius(btn, UIBANK_SON_BTN_RADIUS, 0);
+        lv_obj_set_style_border_width(btn, 0, 0);
+        lv_obj_set_style_pad_all(btn, 0, 0);
+        lv_obj_set_style_shadow_width(btn, 0, 0);
+        bool is_sel = (pc == s_son_last_pc && s_son_msb == s_son_last_msb && s_son_lsb == s_son_last_lsb);
+        lv_obj_set_style_bg_color(btn, lv_color_hex(is_sel ? 0x003366 : COL_BTN_BG), 0);
+        lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+        lv_obj_set_style_bg_color(btn, lv_color_hex(COL_BTN_ACTIVE), LV_STATE_PRESSED);
+        if (is_sel) s_son_selected_btn = btn;
+        lv_obj_add_event_cb(btn, son_patch_cb, LV_EVENT_CLICKED, (void*)(uintptr_t)pc);
+
+        // Combo "BANCO:NNN Nombre" (estilo JV-2080, p.ej. "PR-C:023 Mary-AnneVox")
+        const char* name = jvPatchName(s_son_msb, s_son_lsb, pc);
+        char combo[40];
+        snprintf(combo, sizeof(combo), "%s:%03d %s", son_bank_label(), (int)pc + 1, name ? name : "---");
+        lv_obj_t* lbl = lv_label_create(btn);
+        lv_label_set_text(lbl, combo);
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_18, 0);
+        lv_obj_set_style_text_color(lbl, lv_color_hex(COL_TEXT), 0);
+        lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, 0);
+        // Desplazado a la derecha (eje local-y = screen_x) para dejar sitio al círculo de favorito
+        lv_obj_align(lbl, LV_ALIGN_CENTER, 0, UIBANK_SON_LBL_OFS);
+        lv_label_set_long_mode(lbl, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(lbl, UIBANK_SON_LBL_W2);
+        lv_obj_set_height(lbl, lv_font_get_line_height(&lv_font_montserrat_18));
+        rot_label(lbl);
+
+        if (s_son_bankFav[pc]) son_add_fav_dot(btn);
+    }
+}
+
+// Borra el contenido de una página ya construida (el tile en sí queda vacío,
+// necesario para que el scroll-snap del tileview conozca todas las páginas).
+static void son_depopulate_page(int p) {
+    if (p < 0 || p >= UIBANK_SON_MAX_PAGES || !s_son_pageBuilt[p] || !s_son_tiles[p]) return;
+    if (s_son_selected_btn && lv_obj_get_parent(s_son_selected_btn) == s_son_tiles[p])
+        s_son_selected_btn = NULL;   // iba a quedar colgante tras el lv_obj_clean
+    lv_obj_clean(s_son_tiles[p]);
+    s_son_pageBuilt[p] = false;
+}
+
+// Mantiene construida solo la página activa ± UIBANK_SON_PAGE_KEEP; libera el resto.
+// Evita tener ~260-390 widgets rotados vivos a la vez (tacto lento, 2026-07-01).
+static void son_update_page_window(int active) {
+    for (int p = 0; p < UIBANK_SON_MAX_PAGES; p++) {
+        bool keep = (p >= active - UIBANK_SON_PAGE_KEEP && p <= active + UIBANK_SON_PAGE_KEEP);
+        if (keep) son_populate_page(p);
+        else      son_depopulate_page(p);
+    }
+}
+
+static void son_tv_scroll_cb(lv_event_t* e) {
+    if (!s_son_tileview) return;
+    lv_obj_t* tile = lv_tileview_get_tile_active(s_son_tileview);
+    if (!tile) return;
+    s_son_cur_page = (uint8_t)lv_obj_get_index(tile);
+    son_update_page_window(s_son_cur_page);
 }
 
 static void son_build_tiles() {
     if (s_son_tileview) { lv_obj_delete(s_son_tileview); s_son_tileview = NULL; }
     s_son_selected_btn = NULL;   // punteros del tileview anterior ya son inválidos
+    for (int p = 0; p < UIBANK_SON_MAX_PAGES; p++) { s_son_tiles[p] = NULL; s_son_pageBuilt[p] = false; }
     if (!s_son_tab_ref) return;
 
-    // Tileview: LVGL x=60..480 (420px), y=100% (680px)
-    // Grid 5 filas × 2 cols = 10/página. Botón 82px LVGL x → label width=76 →
-    // montserrat_16 ~10px/char → 7-8 chars visibles. Nombres cortos completos;
-    // largos muestran "NombreXX..." (LONG_DOT). Balance grid denso + tipo legible.
+    // Tileview: LVGL x=UIBANK_SON_TILE_X..P4_W, y=100%
+    // Grid UIBANK_SON_ROWS filas × 2 cols = UIBANK_SON_PER_PAGE/página.
+    // Solo se construyen los botones de la página activa ± UIBANK_SON_PAGE_KEEP
+    // (son_update_page_window); las UIBANK_SON_MAX_PAGES páginas existen como
+    // tiles vacíos para el scroll-snap, pero no todas tienen contenido vivo a la vez.
     s_son_tileview = lv_tileview_create(s_son_tab_ref);
-    lv_obj_set_size(s_son_tileview, 420, LV_PCT(100));
-    lv_obj_set_pos(s_son_tileview, 60, 0);
+    lv_obj_set_size(s_son_tileview, UIBANK_SON_TILE_W, LV_PCT(100));
+    lv_obj_set_pos(s_son_tileview, UIBANK_SON_TILE_X, 0);
     dark_bg(s_son_tileview);
+    lv_obj_add_event_cb(s_son_tileview, son_tv_scroll_cb, LV_EVENT_SCROLL_END, NULL);
 
-    const int PER_PAGE  = 10;   // 5 filas × 2 cols
-    const int ROWS      = 5;
-    const int ROW_PITCH = 84;   // 5×84 = 420 = tileview LVGL x
-    int pages = (128 + PER_PAGE - 1) / PER_PAGE;   // 13
+    // Un solo escaneo de NVS para todo el banco (en vez de uno por botón)
+    memset(s_son_bankFav, 0, sizeof(s_son_bankFav));
+    favMarkBank(g_currentSynth, (uint8_t)g_midiChannel, s_son_msb, s_son_lsb, s_son_bankFav, UIBANK_SON_PATCHES_BANK);
 
-    for (int p = 0; p < pages; p++) {
+    for (int p = 0; p < UIBANK_SON_MAX_PAGES; p++) {
         lv_obj_t* tile = lv_tileview_add_tile(s_son_tileview, p, 0,
             p == 0 ? LV_DIR_RIGHT :
-            (p == pages-1 ? LV_DIR_LEFT : (lv_dir_t)(LV_DIR_LEFT | LV_DIR_RIGHT)));
+            (p == UIBANK_SON_MAX_PAGES-1 ? LV_DIR_LEFT : (lv_dir_t)(LV_DIR_LEFT | LV_DIR_RIGHT)));
         dark_bg(tile);
         lv_obj_clear_flag(tile, LV_OBJ_FLAG_SCROLLABLE);
-
-        int on_page = (p == pages-1) ? (128 - p * PER_PAGE) : PER_PAGE;
-        for (int i = 0; i < on_page; i++) {
-            uint8_t pc  = (uint8_t)(p * PER_PAGE + i);
-            int row = i % ROWS;   // 0-4 en LVGL x → físico y
-            int col = i / ROWS;   // 0-1 en LVGL y → físico x
-
-            lv_obj_t* btn = lv_btn_create(tile);
-            lv_obj_set_size(btn, 82, 338);
-            lv_obj_set_pos(btn, row * ROW_PITCH + 1, col * 340 + 1);
-            lv_obj_set_style_radius(btn, 3, 0);
-            lv_obj_set_style_border_width(btn, 0, 0);
-            lv_obj_set_style_pad_all(btn, 0, 0);
-            lv_obj_set_style_shadow_width(btn, 0, 0);
-            bool is_sel = (pc == s_son_last_pc && s_son_msb == s_son_last_msb && s_son_lsb == s_son_last_lsb);
-            lv_obj_set_style_bg_color(btn, lv_color_hex(is_sel ? 0x003366 : COL_BTN_BG), 0);
-            lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
-            lv_obj_set_style_bg_color(btn, lv_color_hex(COL_BTN_ACTIVE), LV_STATE_PRESSED);
-            if (is_sel) s_son_selected_btn = btn;
-            lv_obj_add_event_cb(btn, son_patch_cb,      LV_EVENT_CLICKED,      (void*)(uintptr_t)pc);
-            lv_obj_add_event_cb(btn, son_patch_long_cb, LV_EVENT_LONG_PRESSED, (void*)(uintptr_t)pc);
-
-            // Número PC (arriba físico = +x_ofs LVGL)
-            char numstr[4];
-            snprintf(numstr, sizeof(numstr), "%d", (int)pc + 1);
-            lv_obj_t* lbl_n = lv_label_create(btn);
-            lv_label_set_text(lbl_n, numstr);
-            lv_obj_set_style_text_font(lbl_n, &lv_font_montserrat_10, 0);
-            lv_obj_set_style_text_color(lbl_n, lv_color_hex(COL_TEXT_DIM), 0);
-            lv_obj_align(lbl_n, LV_ALIGN_CENTER, 28, 0);
-            rot_label(lbl_n);
-
-            // Nombre: width=76 LVGL x → ~7-8 chars montserrat_16
-            const char* name = jvPatchName(s_son_msb, s_son_lsb, pc);
-            lv_obj_t* lbl = lv_label_create(btn);
-            lv_label_set_text(lbl, name ? name : "---");
-            lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
-            lv_obj_set_style_text_color(lbl, lv_color_hex(COL_TEXT), 0);
-            lv_obj_align(lbl, LV_ALIGN_CENTER, -8, 0);
-            lv_label_set_long_mode(lbl, LV_LABEL_LONG_DOT);
-            lv_obj_set_width(lbl, 76);
-            rot_label(lbl);
-        }
+        s_son_tiles[p] = tile;
     }
+
+    s_son_cur_page = 0;
+    son_update_page_window(0);
 }
 
 static void son_bank_cb(lv_event_t* e) {
@@ -547,6 +687,7 @@ void uiBankNeoKey(uint8_t k) {
         if (favLoad(slot, e)) sendBankPC(e.ch, e.msb, e.lsb, e.pc);
     } else if (tab == 2) {
         g_midiChannel = k + 1;
+        favSaveMidiChannel(g_midiChannel);
         ch_refresh();
     }
 }

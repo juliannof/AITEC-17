@@ -113,6 +113,33 @@ extern volatile uint8_t g_midiChannel;   // canal MIDI activo (1-16)
 extern volatile bool    g_bankOpen;      // UIBank visible
 extern volatile uint8_t g_bankTab;       // pestaña activa (0=FAV 1=SON 2=CH)
 
+// ── UIBank — Tab Sonidos (grid patches JV-2080) (2026-07-01) ──────────
+#define UIBANK_SON_TILE_X        60    // LVGL x donde empieza el tileview (tras tab bar)
+#define UIBANK_SON_TILE_W        420   // ancho tileview LVGL x (= P4_W - UIBANK_SON_TILE_X)
+#define UIBANK_SON_PATCHES_BANK  128   // patches por banco JV-2080
+#define UIBANK_SON_PER_PAGE      10    // 5 filas × 2 cols
+#define UIBANK_SON_ROWS          5
+#define UIBANK_SON_ROW_PITCH     84    // 5×84 = UIBANK_SON_TILE_W
+#define UIBANK_SON_COL_PITCH     340
+#define UIBANK_SON_BTN_W         82    // LVGL x (botón)
+#define UIBANK_SON_BTN_H         338   // LVGL y (botón)
+#define UIBANK_SON_BTN_RADIUS    3
+#define UIBANK_SON_LBL_W         (UIBANK_SON_BTN_H - 4)   // 334 — ancho combo "BANCO:NNN Nombre"
+#define COL_FAV_STAR             0xFF8800   // círculo naranja = patch guardado como favorito
+#define UIBANK_SON_FAV_DOT       12         // diámetro círculo favorito
+#define UIBANK_SON_FAV_RESERVE   20         // margen reservado a la izquierda del texto para el círculo (2026-07-01)
+#define UIBANK_SON_LBL_W2        (UIBANK_SON_LBL_W - UIBANK_SON_FAV_RESERVE)   // ancho texto con margen
+#define UIBANK_SON_LBL_OFS       (UIBANK_SON_FAV_RESERVE / 2)                  // desplaza el texto a la derecha
+#define UIBANK_SON_FAV_DOT_OFS   -((UIBANK_SON_BTN_H / 2) - (UIBANK_SON_FAV_DOT / 2) - 3)   // eje local-y (izquierda física)
+#define UIBANK_SON_MAX_PAGES     ((UIBANK_SON_PATCHES_BANK + UIBANK_SON_PER_PAGE - 1) / UIBANK_SON_PER_PAGE)  // 13
+#define UIBANK_SON_PAGE_KEEP     1          // páginas construidas alrededor de la activa (± N) — lazy-build (2026-07-01)
+
+// ── UIBank — Tab Favoritos (grid guardados) (2026-07-01) ──────────────
+#define UIBANK_FAV_PER_PAGE      16         // 2 cols × 8 filas
+#define UIBANK_FAV_ROWS          8
+#define UIBANK_FAV_MAX_PAGES     8          // ceil(128/16) — favSave rechaza slot > 127
+#define UIBANK_FAV_PAGE_KEEP     1          // páginas construidas alrededor de la activa (± N) — lazy-build
+
 // ── Sintetizador activo ───────────────────────────────────────────────
 enum class ExSynth : uint8_t { JV2080=0, TRITON=1, TG55=2, D110=3, WAVE=4 };
 #define NUM_SYNTHS       5

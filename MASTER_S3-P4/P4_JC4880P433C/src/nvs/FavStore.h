@@ -23,3 +23,14 @@ void favDelete(int idx);
 // Última selección en Tab Sonidos (persiste entre boots)
 bool favSaveLastSel(uint8_t msb, uint8_t lsb, uint8_t pc);
 bool favLoadLastSel(uint8_t& msb, uint8_t& lsb, uint8_t& pc);
+
+// Canal MIDI activo (persiste entre boots)
+bool favSaveMidiChannel(uint8_t ch);
+bool favLoadMidiChannel(uint8_t& ch);   // false si no había nada guardado (deja ch sin tocar)
+
+// Marca out[pc]=true para cada patch del banco (msb/lsb) guardado como favorito.
+// out debe tener ≥ outLen elementos (uso: grid Tab Sonidos, un solo escaneo de NVS por reconstrucción).
+void favMarkBank(ExSynth synth, uint8_t ch, uint8_t msb, uint8_t lsb, bool* out, int outLen);
+
+// Índice del slot que guarda este patch como favorito, o -1 si no está guardado.
+int favFindIndex(ExSynth synth, uint8_t ch, uint8_t msb, uint8_t lsb, uint8_t pc);

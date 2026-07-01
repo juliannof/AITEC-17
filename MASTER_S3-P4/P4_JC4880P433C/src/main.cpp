@@ -133,6 +133,9 @@ void setup() {
     if (!favInit()) log_e("FavStore FALLO");
     else            log_i("FavStore OK (%d favoritos)", favCount());
 
+    uint8_t savedCh;
+    if (favLoadMidiChannel(savedCh)) g_midiChannel = savedCh;
+
     initDisplay();
     displaySetBrightness(80);
     log_i("Display OK — 800x480 landscape");

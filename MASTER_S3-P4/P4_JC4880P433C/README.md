@@ -72,6 +72,57 @@ El color del texto y de los dots sigue el modo activo (`COL_MODE_KAOSS` rojo por
 
 ---
 
+## NeoTrellis — Matriz 4×8 (2026-07-01)
+
+2× Adafruit seesaw 4×4 RGB — panel izquierdo (I2C `0x2F`, columnas 0-3) + panel derecho (I2C `0x2E`, columnas 4-7). Numeración interna de cada panel: `key = fila×4 + col` (0-15).
+
+### Mapa físico de índices (Lx = panel izquierdo 0x2F, Rx = panel derecho 0x2E)
+
+| Fila | Col0 | Col1 | Col2 | Col3 | Col4 | Col5 | Col6 | Col7 |
+|---|---|---|---|---|---|---|---|---|
+| 0 | L0 | L1 | L2 | L3 | R0 | R1 | R2 | R3 |
+| 1 | L4 | L5 | L6 | L7 | R4 | R5 | R6 | R7 |
+| 2 | L8 | L9 | L10 | L11 | R8 | R9 | R10 | R11 |
+| 3 | L12 | L13 | L14 | L15 | R12 | R13 | R14 | R15 |
+
+### Modo Kaoss (por defecto, Bank cerrado)
+
+| Fila | Panel izquierdo (col 0-3) | Panel derecho (col 4-7) |
+|---|---|---|
+| 0 | **HOLD**(k0) · **PANIC**(k1) · **SCALE**(k2) · — | **Preset 0-3** (k0-k3) |
+| 1 | **SYNTH**(k4, tap=cicla sintetizador / long-press ≥600ms=abre Bank) · — · — · — | — · — · — · — |
+| 2-3 | apagadas | apagadas |
+
+- **HOLD** — toggle congelar XY del pad
+- **PANIC** — All Notes Off (CC 123)
+- **SCALE** — cicla preset de escala (`kaoss.nextPreset()`)
+- **SYNTH** — tap cicla sintetizador activo (`g_currentSynth`); long-press ≥600ms abre `UIBank`
+- **Preset 0-3** (panel derecho, fila 0) — selección directa de preset (`kaoss.setPreset()`)
+
+### Modo Bank (UIBank abierto) — diseño 2026-07-01, pendiente de implementar
+
+Mientras `g_bankOpen=true`, las 32 teclas quedan dedicadas a Bank — las funciones Kaoss (HOLD/PANIC/SCALE/SYNTH/preset) quedan **suspendidas** en las 32 teclas:
+
+| Fila | Teclas | Función |
+|---|---|---|
+| **0** (superior) | L0-3 + R0-3 (8 teclas) | **Subir** — página anterior (cualquiera de la fila) |
+| **1-2** (centro) | L4-11 + R4-11 (16 teclas) | **Selección directa** de slot en la página activa — Favoritos (16/página) = 1:1; Sonidos (10/página) = usa las 10 primeras |
+| **3** (inferior) | L12-15 + R12-15 (8 teclas) | **Bajar** — página siguiente (cualquiera de la fila) |
+
+**Mapa de índice de slot (filas centrales, orden lectura izq→der, arriba→abajo):**
+
+| Fila | Col0 | Col1 | Col2 | Col3 | Col4 | Col5 | Col6 | Col7 |
+|---|---|---|---|---|---|---|---|---|
+| 1 | L4→**slot 0** | L5→**slot 1** | L6→**slot 2** | L7→**slot 3** | R4→**slot 4** | R5→**slot 5** | R6→**slot 6** | R7→**slot 7** |
+| 2 | L8→**slot 8** | L9→**slot 9** | L10→**slot 10** | L11→**slot 11** | R8→**slot 12** | R9→**slot 13** | R10→**slot 14** | R11→**slot 15** |
+
+> Sonidos (10/página) usa solo **slot 0-9** (fila 1 completa + los 2 primeros de fila 2: L8, L9); slots 10-15 quedan apagados/sin función en esa pestaña.
+
+- LEDs en modo Bank reflejan estado de Bank (slot ocupado/vacío, banco activo) — no colores Kaoss.
+- **Estado actual del código (previo a este diseño):** solo 12 teclas sueltas del panel izquierdo (índices 3, 5-15) están mapeadas a `uiBankNeoKey()`; el panel derecho no participa. Este README documenta el diseño objetivo — `NeoTrellis.cpp` y `UIBank.cpp` se actualizarán para implementarlo.
+
+---
+
 ## MIDI Output
 
 | Mensaje | Valor | Condición |
