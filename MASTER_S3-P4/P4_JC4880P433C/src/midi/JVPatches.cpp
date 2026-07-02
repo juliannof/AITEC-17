@@ -75,7 +75,7 @@ static const char* const kPrA[128] = {
     "Power Trip",    "Crunch Split",  "Rezodrive",     "RockYurSocks",
 };
 
-// ── PR-B (MSB=0x51, LSB=1) — 126 patches (127-128 sin nombre) ────────────
+// ── PR-B (MSB=0x51, LSB=1) — 128 patches ────────────────────────────────
 static const char* const kPrB[128] = {
     "Dist Gtr 1",    "Dist Gtr 2",    "R&R Chunk",     "Phripphuzz",
     "Grungeroni",    "Black Widow",   "Velo-Wah Gtr",  "Mod-Wah Gtr",
@@ -87,7 +87,7 @@ static const char* const kPrB[128] = {
     "Noiz Bass",     "Super Jup Bs",  "Occitan Bass",  "Hugo Bass",
     "Multi Bass",    "Moist Bass",    "BritelowBass",  "Untamed Bass",
     "Rubber Bass",   "Stereoww Bs",   "Wonder Bass",   "Deep Bass",
-    "Super JX Bs",   "W<RED>-Bass",   "HI-Ring Bass",  "Euro Bass",
+    "Super JX Bs",   "W<RED>-Bass",   "Hi-Ring Bass",  "Euro Bass",
     "SinusoidRave",  "Alternative",   "Acid Line",     "Auto TB-303",
     "Hihat Tekno",   "Velo Tekno 1",  "Raggatronic",   "Blade Racer",
     "S&H Pad",       "Syncrosonix",   "Fooled Again",  "Alive",
@@ -108,7 +108,7 @@ static const char* const kPrB[128] = {
     "Baritone Sax",  "Take A Tenor",  "Sax Section",   "Bigband Sax",
     "Harmonica",     "Harmo Blues",   "BluesHarp",     "Hillbillys",
     "French Bags",   "Majestic Tpt",  "Voluntare",     "2Trumpets",
-    "Tpt Sect",      "Mute TP mod",   nullptr,         nullptr,
+    "Tpt Sect",      "Mute TP mod",   "VOX Flute",     "Air Lead",
 };
 
 // ── PR-C (MSB=0x51, LSB=2) — 128 patches ─────────────────────────────────
@@ -218,6 +218,49 @@ static const char* const kPrE[128] = {
     "Glistening",    "Sci-Fi Str",    "Shadows",       "Helium Queen",
     "Sci-Fi FX x4",  "Perky Noize",   "Droplet",       "Rain Forest",
 };
+
+// ── Performances (2026-07-02) — Fuente: JV-2080_OM.pdf p.175, verificado ──
+// Solo USER/PR-A/PR-B (32 c/u). CARD sin datos (tarjeta no instalada).
+static const char* const kUserPerf[32] = {
+    "Strobe Pad 1",  "HardRock Uni",  "Aggressive",    "Opening Orch",
+    "Cyber Sweep",   "TempleOf2080",  "Humming Pno",   "Horror Movie",
+    "Tekno Loop 1",  "FarEast Stak",  "Progresso",     "SH Split",
+    "Fr.Horn Sect",  "Sweep Pad",     "Reso Clav",     "LateAutumnSP",
+    "Orchestral",    "Rave Split",    "Flying Jazz",   "CeremonialFX",
+    "AcPiano+Pad",   "AcPiano+Pad2",  "EchoPianoStk",  "Pop Ballad",
+    "E.Pno Split",   "2080 Fantasy",  "FX Bell Pad",   "Chime FX",
+    "Multi Sax",     "Big Band",      "Pizz Brass",    "Step Brass",
+};
+
+static const char* const kPrAPerf[32] = {
+    "Seq:Template",  "Seq:Pop",       "Seq:LABallad",  "Seq:Fusion",
+    "Seq:FunkRock",  "Seq:HardRock",  "Seq:H.Metal",   "Seq:Blues",
+    "Seq:Cont.Jz",   "Seq:Ac.Jazz",   "Seq:Country",   "Seq:Folk",
+    "Seq:Dixie",     "Seq:BigBand",   "Seq:Latin",     "Seq:Africa",
+    "Seq:World",     "Seq:Zydeco",    "Seq:60's",      "Seq:Gospel",
+    "Seq:PopDance",  "Seq:TeknoPop",  "Seq:House",     "Seq:Hip Hop",
+    "Seq:HardCore",  "Seq:Acid",      "Seq:Ambient",   "Seq:New Age",
+    "Seq:Orch",      "Seq:Film",      "Seq:Chamber",   "Seq:Baroque",
+};
+
+static const char* const kPrBPerf[32] = {
+    "Dulcimar&Gtr",  "DulcitarStk",   "Tekno Loop 2",  "Rave Attack",
+    "SpaceCarrier",  "Terminator",    "Symphony JV",   "Nebular Vox",
+    "Humming Vox",   "Cosmic Dawn",   "Labyrinth",     "Sweeper",
+    "Stack Pad",     "Strobe Pad 2",  "Rhythmatic",    "Voyage",
+    "S&H Pad",       "Cyclic Pad",    "White Hole",    "EasternSplit",
+    "Tekno Asia",    "TeknoSplit 1",  "TeknoSplit 2",  "TknoPopSplit",
+    "ChildrenSplt",  "Purple Split",  "PulsingSplit",  "Pad / Lead",
+    "Organ / Lead",  "Bass / Lead",   "S&H / Pad",     "Drone / Pipe",
+};
+
+const char* jvPerfName(uint8_t msb, uint8_t lsb, uint8_t pc) {
+    if (pc >= 32) return nullptr;
+    if (msb == 0x50 && lsb == 0) return kUserPerf[pc];
+    if (msb == 0x51 && lsb == 0) return kPrAPerf[pc];
+    if (msb == 0x51 && lsb == 1) return kPrBPerf[pc];
+    return nullptr;   // CARD u otro banco sin datos verificados
+}
 
 // ── Lookup ────────────────────────────────────────────────────────────────
 const char* jvPatchName(uint8_t msb, uint8_t lsb, uint8_t pc) {

@@ -28,8 +28,8 @@
 #define TRELLIS_SCL_PIN    33
 #define TRELLIS_ADDR_L     0x2F
 #define TRELLIS_ADDR_R     0x2E
-#define TRELLIS_BRIGHTNESS   15   // 0-255: nivel max-canal LEDs activos
-#define TRELLIS_DIM_ABS       5   // 0-255: nivel max-canal LEDs en reposo
+#define TRELLIS_BRIGHTNESS   25   // 0-255: nivel max-canal LEDs activos
+#define TRELLIS_DIM_ABS       3   // 0-255: nivel max-canal LEDs en reposo
 
 // ── MIDI ──────────────────────────────────────────────────────────────
 #define MIDI_CH           1
@@ -134,6 +134,13 @@ extern volatile uint8_t g_bankTab;       // pestaña activa (0=FAV 1=SON 2=CH)
 #define UIBANK_SON_MAX_PAGES     ((UIBANK_SON_PATCHES_BANK + UIBANK_SON_PER_PAGE - 1) / UIBANK_SON_PER_PAGE)  // 13
 #define UIBANK_SON_PAGE_KEEP     1          // páginas construidas alrededor de la activa (± N) — lazy-build (2026-07-01)
 
+// ── UIBank — Tab Sonidos: modo Performance (2026-07-02) ────────────────
+// Toggle Patch↔Performance (toque simple en tab "SON") (2026-07-02 17:55).
+// Solo USER/PR-A/PR-B tienen Performances (32 c/u, JV-2080_OM.pdf p.175/184);
+// CARD no instalada.
+#define UIBANK_PERF_PATCHES_BANK 32
+#define UIBANK_PERF_MAX_PAGES    ((UIBANK_PERF_PATCHES_BANK + UIBANK_SON_PER_PAGE - 1) / UIBANK_SON_PER_PAGE)  // 4
+
 // ── UIBank — Tab Favoritos (grid guardados) (2026-07-01) ──────────────
 #define UIBANK_FAV_PER_PAGE      16         // 2 cols × 8 filas
 #define UIBANK_FAV_ROWS          8
@@ -142,6 +149,20 @@ extern volatile uint8_t g_bankTab;       // pestaña activa (0=FAV 1=SON 2=CH)
 
 // ── Sintetizador activo ───────────────────────────────────────────────
 enum class ExSynth : uint8_t { JV2080=0, TRITON=1, TG55=2, D110=3, WAVE=4 };
+// Modo de sonido activo en el JV-2080 (2026-07-02) — mismo valor que el byte
+// de datos del SysEx DT1 "Sound Mode" (JV-2080_OM.pdf p.187-188, verificado).
+enum class JVSoundMode : uint8_t { PERFORMANCE = 0, PATCH = 1 };
+// Canal MIDI de salida según Sound Mode activo (2026-07-02 17:55) — Patch y
+// Performance son tracks distintos en Logic Pro, cada uno con su propio canal.
+#define MIDI_CH_PATCH      12
+#define MIDI_CH_PERFORM     1
+// Device ID del JV-2080 para todo SysEx Roland (byte 3: F0 41 [dev] 6A...)
+// (2026-07-02 18:31). Configurable en el propio synth: panel SYSTEM →
+// [F3](MIDI) → Device ID, rango 10H-1FH. Si no coincide con el panel, el
+// JV-2080 ignora el SysEx en silencio (sin NAK) — CC/PC no llevan Device ID
+// y siguen funcionando igual, por eso el síntoma es "cambia en la interfaz
+// pero no en el synth". Valor de fábrica = 0x10.
+#define JV2080_DEVICE_ID   0x10
 #define NUM_SYNTHS       5
 #define COL_SYNTH_JV     0x0044FF
 #define COL_SYNTH_TRI    0x8800FF

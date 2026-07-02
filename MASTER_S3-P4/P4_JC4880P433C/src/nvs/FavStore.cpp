@@ -68,20 +68,20 @@ bool favLoadMidiChannel(uint8_t& ch) {
     return true;
 }
 
-void favMarkBank(ExSynth synth, uint8_t ch, uint8_t msb, uint8_t lsb, bool* out, int outLen) {
+void favMarkBank(ExSynth synth, uint8_t ch, uint8_t msb, uint8_t lsb, JVSoundMode mode, bool* out, int outLen) {
     for (int i = 0; i < s_count; i++) {
         FavEntry e;
         if (!favLoad(i, e)) continue;
-        if (e.synth == synth && e.ch == ch && e.msb == msb && e.lsb == lsb && e.pc < outLen)
+        if (e.synth == synth && e.ch == ch && e.msb == msb && e.lsb == lsb && e.mode == mode && e.pc < outLen)
             out[e.pc] = true;
     }
 }
 
-int favFindIndex(ExSynth synth, uint8_t ch, uint8_t msb, uint8_t lsb, uint8_t pc) {
+int favFindIndex(ExSynth synth, uint8_t ch, uint8_t msb, uint8_t lsb, uint8_t pc, JVSoundMode mode) {
     for (int i = 0; i < s_count; i++) {
         FavEntry e;
         if (!favLoad(i, e)) continue;
-        if (e.synth == synth && e.ch == ch && e.msb == msb && e.lsb == lsb && e.pc == pc) return i;
+        if (e.synth == synth && e.ch == ch && e.msb == msb && e.lsb == lsb && e.pc == pc && e.mode == mode) return i;
     }
     return -1;
 }

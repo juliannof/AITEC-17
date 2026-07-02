@@ -41,6 +41,10 @@ static lv_obj_t* s_son_tiles[UIBANK_SON_MAX_PAGES]     = {};   // contenedores d
 static bool      s_son_pageBuilt[UIBANK_SON_MAX_PAGES] = {};   // lazy-build: ¿tiene botones vivos?
 static bool      s_son_bankFav[UIBANK_SON_PATCHES_BANK] = {};  // cache favoritos del banco activo
 static uint8_t   s_son_cur_page     = 0;
+// Toggle Patch/Performance (2026-07-02 17:55, toque simple tab "SON"). Arrays
+// arriba ya dimensionados al máximo (Patch=128/13 páginas), de sobra para Performance (32/4).
+static bool      s_son_perfMode     = false;   // false=Patch("SON"), true=Performance("PERFORM")
+static bool      s_son_last_perfMode = false;  // modo del patch actualmente resaltado (highlight)
 
 // ── FAV selection state (Tab 0) ───────────────────────────────────────────
 static lv_obj_t* s_fav_selected_btn = NULL;
@@ -56,6 +60,13 @@ static const BankDef kBanks[6] = {
     {0x51, 2, "PR-C"},
     {0x51, 3, "GM"},
     {0x51, 4, "PR-E"},
+};
+// Performance solo tiene USER/PR-A/PR-B (CARD sin instalar) — mismos MSB/LSB
+// que los 3 primeros de kBanks, así que comparten label (2026-07-02).
+static const BankDef kBanksPerf[3] = {
+    {0x50, 0, "USER"},
+    {0x51, 0, "PR-A"},
+    {0x51, 1, "PR-B"},
 };
 
 // ── Helper rotación (mismo que UIKaoss) ──────────────────────────────────
@@ -82,6 +93,13 @@ static void ch_refresh() {
     lv_label_set_text(s_lbl_ch, buf);
 }
 
+// ── Forward declarations ──────────────────────────────────────────────────
+static void fav_update_page_window(int active);
+// Recall de un favorito: sincroniza Sound Mode (con SysEx si cambia) y banco
+// activo del tab Sonidos antes de mandar Bank Select + PC (2026-07-02).
+// Definida más abajo (necesita son_build_tiles/son_bank_refresh_btns).
+static void son_apply_recall(const FavEntry& e);
+
 // ── Callback favorito pulsado (recall) ───────────────────────────────────
 static void fav_btn_cb(lv_event_t* e) {
     if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
@@ -94,11 +112,8 @@ static void fav_btn_cb(lv_event_t* e) {
     s_fav_selected_btn = (lv_obj_t*)lv_event_get_target(e);
     lv_obj_set_style_bg_color(s_fav_selected_btn, lv_color_hex(0x003366), 0);
     s_fav_last_slot = slot;
-    sendBankPC(entry.ch, entry.msb, entry.lsb, entry.pc);
+    son_apply_recall(entry);
 }
-
-// ── Forward declarations ──────────────────────────────────────────────────
-static void fav_update_page_window(int active);
 
 // ── Callback scroll tileview (actualiza página activa + ventana lazy-build) ─
 static void tv_scroll_cb(lv_event_t* e) {
@@ -273,16 +288,35 @@ static void build_tab_fav(lv_obj_t* tab) {
 static void fav_build_tiles();
 
 // ── Sonidos helpers (Tab 1) ───────────────────────────────────────────────
+// Dispatchers Patch/Performance (2026-07-02) — los arrays de widgets/estado
+// siguen dimensionados al máximo (Patch), estos solo acotan cuánto se usa.
+static const BankDef* son_banks()     { return s_son_perfMode ? kBanksPerf : kBanks; }
+static int  son_bank_count()          { return s_son_perfMode ? 3 : 6; }
+static int  son_bank_size()           { return s_son_perfMode ? UIBANK_PERF_PATCHES_BANK : UIBANK_SON_PATCHES_BANK; }
+static int  son_max_pages()           { return s_son_perfMode ? UIBANK_PERF_MAX_PAGES : UIBANK_SON_MAX_PAGES; }
+static JVSoundMode son_mode()         { return s_son_perfMode ? JVSoundMode::PERFORMANCE : JVSoundMode::PATCH; }
+static const char* son_patch_name(uint8_t msb, uint8_t lsb, uint8_t pc) {
+    return s_son_perfMode ? jvPerfName(msb, lsb, pc) : jvPatchName(msb, lsb, pc);
+}
+
 static const char* son_bank_label() {
-    for (int i = 0; i < 6; i++)
-        if (kBanks[i].msb == s_son_msb && kBanks[i].lsb == s_son_lsb) return kBanks[i].label;
+    const BankDef* banks = son_banks();
+    int n = son_bank_count();
+    for (int i = 0; i < n; i++)
+        if (banks[i].msb == s_son_msb && banks[i].lsb == s_son_lsb) return banks[i].label;
     return "";
 }
 
+// Resalta el banco activo y oculta los botones que no existen en Performance
+// (índices 3-5: PR-C/GM/PR-E, solo Patch — 2026-07-02).
 static void son_bank_refresh_btns() {
+    const BankDef* banks = son_banks();
+    int n = son_bank_count();
     for (int i = 0; i < 6; i++) {
         if (!s_son_bank_btns[i]) continue;
-        bool active = (kBanks[i].msb == s_son_msb && kBanks[i].lsb == s_son_lsb);
+        if (i >= n) { lv_obj_add_flag(s_son_bank_btns[i], LV_OBJ_FLAG_HIDDEN); continue; }
+        lv_obj_clear_flag(s_son_bank_btns[i], LV_OBJ_FLAG_HIDDEN);
+        bool active = (banks[i].msb == s_son_msb && banks[i].lsb == s_son_lsb);
         lv_obj_set_style_bg_color(s_son_bank_btns[i],
             lv_color_hex(active ? 0x003366 : 0x0A0F18), 0);
     }
@@ -316,13 +350,14 @@ static void son_remove_fav_dot(lv_obj_t* btn) {
 static void son_patch_cb(lv_event_t* e) {
     if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
     uint8_t pc = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
-    bool already_selected = (pc == s_son_last_pc && s_son_msb == s_son_last_msb && s_son_lsb == s_son_last_lsb);
+    bool already_selected = (pc == s_son_last_pc && s_son_msb == s_son_last_msb && s_son_lsb == s_son_last_lsb
+                              && s_son_perfMode == s_son_last_perfMode);
 
     if (already_selected) {
         lv_obj_t* btn = (lv_obj_t*)lv_event_get_target(e);
         if (s_son_bankFav[pc]) {
             // Ya era favorito → quitarlo
-            int idx = favFindIndex(g_currentSynth, (uint8_t)g_midiChannel, s_son_msb, s_son_lsb, pc);
+            int idx = favFindIndex(g_currentSynth, (uint8_t)g_midiChannel, s_son_msb, s_son_lsb, pc, son_mode());
             if (idx >= 0) favDelete(idx);
             s_son_bankFav[pc] = false;
             son_remove_fav_dot(btn);
@@ -337,7 +372,8 @@ static void son_patch_cb(lv_event_t* e) {
         entry.msb   = s_son_msb;
         entry.lsb   = s_son_lsb;
         entry.pc    = pc;
-        const char* name = jvPatchName(s_son_msb, s_son_lsb, pc);
+        entry.mode  = son_mode();
+        const char* name = son_patch_name(s_son_msb, s_son_lsb, pc);
         strncpy(entry.name, name ? name : "---", sizeof(entry.name) - 1);
         entry.name[sizeof(entry.name) - 1] = '\0';
         favSave(slot, entry);
@@ -355,20 +391,25 @@ static void son_patch_cb(lv_event_t* e) {
     s_son_last_msb = s_son_msb;
     s_son_last_lsb = s_son_lsb;
     s_son_last_pc  = pc;
-    favSaveLastSel(s_son_msb, s_son_lsb, pc);
+    s_son_last_perfMode = s_son_perfMode;
+    // "Último banco" solo se persiste en Patch mode: UIBank siempre arranca
+    // en Patch, así que restaurar un banco Performance no tendría sentido
+    // sin antes reenviar el SysEx Sound Mode (2026-07-02).
+    if (!s_son_perfMode) favSaveLastSel(s_son_msb, s_son_lsb, pc);
     sendBankPC(g_midiChannel, s_son_msb, s_son_lsb, pc);
 }
 
 // Construye el contenido (botones+labels+favorito) de UNA página, si no lo estaba ya.
 static void son_populate_page(int p) {
-    if (p < 0 || p >= UIBANK_SON_MAX_PAGES || s_son_pageBuilt[p] || !s_son_tiles[p]) return;
+    int maxPages = son_max_pages();
+    if (p < 0 || p >= maxPages || s_son_pageBuilt[p] || !s_son_tiles[p]) return;
     lv_obj_t* tile = s_son_tiles[p];
     s_son_pageBuilt[p] = true;
 
     const int PER_PAGE  = UIBANK_SON_PER_PAGE;
     const int ROWS      = UIBANK_SON_ROWS;
     const int ROW_PITCH = UIBANK_SON_ROW_PITCH;
-    int on_page = (p == UIBANK_SON_MAX_PAGES - 1) ? (UIBANK_SON_PATCHES_BANK - p * PER_PAGE) : PER_PAGE;
+    int on_page = (p == maxPages - 1) ? (son_bank_size() - p * PER_PAGE) : PER_PAGE;
 
     for (int i = 0; i < on_page; i++) {
         uint8_t pc  = (uint8_t)(p * PER_PAGE + i);
@@ -384,7 +425,8 @@ static void son_populate_page(int p) {
         lv_obj_set_style_border_width(btn, 0, 0);
         lv_obj_set_style_pad_all(btn, 0, 0);
         lv_obj_set_style_shadow_width(btn, 0, 0);
-        bool is_sel = (pc == s_son_last_pc && s_son_msb == s_son_last_msb && s_son_lsb == s_son_last_lsb);
+        bool is_sel = (pc == s_son_last_pc && s_son_msb == s_son_last_msb && s_son_lsb == s_son_last_lsb
+                       && s_son_perfMode == s_son_last_perfMode);
         lv_obj_set_style_bg_color(btn, lv_color_hex(is_sel ? 0x003366 : COL_BTN_BG), 0);
         lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
         lv_obj_set_style_bg_color(btn, lv_color_hex(COL_BTN_ACTIVE), LV_STATE_PRESSED);
@@ -392,7 +434,7 @@ static void son_populate_page(int p) {
         lv_obj_add_event_cb(btn, son_patch_cb, LV_EVENT_CLICKED, (void*)(uintptr_t)pc);
 
         // Combo "BANCO:NNN Nombre" (estilo JV-2080, p.ej. "PR-C:023 Mary-AnneVox")
-        const char* name = jvPatchName(s_son_msb, s_son_lsb, pc);
+        const char* name = son_patch_name(s_son_msb, s_son_lsb, pc);
         char combo[40];
         snprintf(combo, sizeof(combo), "%s:%03d %s", son_bank_label(), (int)pc + 1, name ? name : "---");
         lv_obj_t* lbl = lv_label_create(btn);
@@ -414,7 +456,8 @@ static void son_populate_page(int p) {
 // Borra el contenido de una página ya construida (el tile en sí queda vacío,
 // necesario para que el scroll-snap del tileview conozca todas las páginas).
 static void son_depopulate_page(int p) {
-    if (p < 0 || p >= UIBANK_SON_MAX_PAGES || !s_son_pageBuilt[p] || !s_son_tiles[p]) return;
+    int maxPages = son_max_pages();
+    if (p < 0 || p >= maxPages || !s_son_pageBuilt[p] || !s_son_tiles[p]) return;
     if (s_son_selected_btn && lv_obj_get_parent(s_son_selected_btn) == s_son_tiles[p])
         s_son_selected_btn = NULL;   // iba a quedar colgante tras el lv_obj_clean
     lv_obj_clean(s_son_tiles[p]);
@@ -424,7 +467,8 @@ static void son_depopulate_page(int p) {
 // Mantiene construida solo la página activa ± UIBANK_SON_PAGE_KEEP; libera el resto.
 // Evita tener ~260-390 widgets rotados vivos a la vez (tacto lento, 2026-07-01).
 static void son_update_page_window(int active) {
-    for (int p = 0; p < UIBANK_SON_MAX_PAGES; p++) {
+    int maxPages = son_max_pages();
+    for (int p = 0; p < maxPages; p++) {
         bool keep = (p >= active - UIBANK_SON_PAGE_KEEP && p <= active + UIBANK_SON_PAGE_KEEP);
         if (keep) son_populate_page(p);
         else      son_depopulate_page(p);
@@ -458,12 +502,13 @@ static void son_build_tiles() {
 
     // Un solo escaneo de NVS para todo el banco (en vez de uno por botón)
     memset(s_son_bankFav, 0, sizeof(s_son_bankFav));
-    favMarkBank(g_currentSynth, (uint8_t)g_midiChannel, s_son_msb, s_son_lsb, s_son_bankFav, UIBANK_SON_PATCHES_BANK);
+    favMarkBank(g_currentSynth, (uint8_t)g_midiChannel, s_son_msb, s_son_lsb, son_mode(), s_son_bankFav, son_bank_size());
 
-    for (int p = 0; p < UIBANK_SON_MAX_PAGES; p++) {
+    int pages = son_max_pages();
+    for (int p = 0; p < pages; p++) {
         lv_obj_t* tile = lv_tileview_add_tile(s_son_tileview, p, 0,
             p == 0 ? LV_DIR_RIGHT :
-            (p == UIBANK_SON_MAX_PAGES-1 ? LV_DIR_LEFT : (lv_dir_t)(LV_DIR_LEFT | LV_DIR_RIGHT)));
+            (p == pages-1 ? LV_DIR_LEFT : (lv_dir_t)(LV_DIR_LEFT | LV_DIR_RIGHT)));
         dark_bg(tile);
         lv_obj_clear_flag(tile, LV_OBJ_FLAG_SCROLLABLE);
         s_son_tiles[p] = tile;
@@ -476,10 +521,75 @@ static void son_build_tiles() {
 static void son_bank_cb(lv_event_t* e) {
     if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
     uint8_t idx = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
-    s_son_msb = kBanks[idx].msb;
-    s_son_lsb = kBanks[idx].lsb;
+    if (idx >= (uint8_t)son_bank_count()) return;   // banco oculto en este modo (botón no debería ser visible)
+    const BankDef* banks = son_banks();
+    s_son_msb = banks[idx].msb;
+    s_son_lsb = banks[idx].lsb;
     son_bank_refresh_btns();
     son_build_tiles();
+}
+
+// Sincroniza el canal MIDI de salida con el Sound Mode activo (2026-07-02
+// 17:55) — Patch y Performance son tracks distintos en Logic Pro.
+static void son_sync_channel_to_mode() {
+    g_midiChannel = s_son_perfMode ? MIDI_CH_PERFORM : MIDI_CH_PATCH;
+    favSaveMidiChannel(g_midiChannel);
+    ch_refresh();
+}
+
+// Toggle Patch↔Performance (toque simple en el tab "SON") (2026-07-02 17:55).
+static void son_tab_long_press_cb(lv_event_t* e) {
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+    lv_obj_t* tbtn = (lv_obj_t*)lv_event_get_target(e);
+
+    s_son_perfMode = !s_son_perfMode;
+    son_sync_channel_to_mode();
+    sendSoundMode(son_mode());   // único mecanismo que distingue Patch/Performance en el JV-2080
+
+    lv_obj_t* lbl = lv_obj_get_child(tbtn, 0);
+    if (lbl) lv_label_set_text(lbl, s_son_perfMode ? "PERFORM" : "SON");
+
+    // Si el banco activo no existe en el nuevo modo (PR-C/GM/PR-E solo Patch), cae a USER.
+    const BankDef* banks = son_banks();
+    int n = son_bank_count();
+    bool valid = false;
+    for (int i = 0; i < n; i++)
+        if (banks[i].msb == s_son_msb && banks[i].lsb == s_son_lsb) { valid = true; break; }
+    if (!valid) { s_son_msb = banks[0].msb; s_son_lsb = banks[0].lsb; }
+
+    son_bank_refresh_btns();
+    son_build_tiles();
+}
+
+// Recall de un favorito (touchscreen Tab FAV o NeoTrellis): sincroniza Sound
+// Mode con SysEx si el favorito es de otro tipo, y el banco/página del tab
+// Sonidos, antes de mandar Bank Select + PC (2026-07-02).
+static void son_apply_recall(const FavEntry& e) {
+    bool wantPerf = (e.mode == JVSoundMode::PERFORMANCE);
+    if (wantPerf != s_son_perfMode) {
+        s_son_perfMode = wantPerf;
+        son_sync_channel_to_mode();
+        sendSoundMode(son_mode());
+        if (s_tabview) {
+            lv_obj_t* tabbar = lv_tabview_get_tab_bar(s_tabview);
+            lv_obj_t* tbtn = lv_obj_get_child(tabbar, 1);   // tab "SON"
+            lv_obj_t* lbl  = tbtn ? lv_obj_get_child(tbtn, 0) : NULL;
+            if (lbl) lv_label_set_text(lbl, s_son_perfMode ? "PERFORM" : "SON");
+        }
+    }
+    s_son_msb = e.msb;
+    s_son_lsb = e.lsb;
+    son_bank_refresh_btns();
+    son_build_tiles();
+
+    s_son_last_msb = e.msb;
+    s_son_last_lsb = e.lsb;
+    s_son_last_pc  = e.pc;
+    s_son_last_perfMode = s_son_perfMode;
+    if (!s_son_perfMode) favSaveLastSel(e.msb, e.lsb, e.pc);
+    // Canal del modo activo (12/1), no e.ch histórico — mantiene el PC
+    // sincronizado con el track de Logic tras son_sync_channel_to_mode() (2026-07-02 17:55).
+    sendBankPC(g_midiChannel, e.msb, e.lsb, e.pc);
 }
 
 // ── Tab 1 — Sonidos ───────────────────────────────────────────────────────
@@ -627,6 +737,8 @@ void uiBankCreate(lv_obj_t* parent) {
         // Rotar el label hijo
         lv_obj_t* lbl = lv_obj_get_child(tbtn, 0);
         if (lbl) rot_label(lbl);
+        // Tab "SON" (i==1): toque simple alterna Patch/Performance (2026-07-02 17:55)
+        if (i == 1) lv_obj_add_event_cb(tbtn, son_tab_long_press_cb, LV_EVENT_CLICKED, NULL);
     }
 
     // ── Contenido de cada tab ─────────────────────────────────────────────
@@ -684,7 +796,7 @@ void uiBankNeoKey(uint8_t k) {
     if (tab == 0) {
         uint8_t slot = s_cur_page * 16 + k;
         FavEntry e;
-        if (favLoad(slot, e)) sendBankPC(e.ch, e.msb, e.lsb, e.pc);
+        if (favLoad(slot, e)) son_apply_recall(e);
     } else if (tab == 2) {
         g_midiChannel = k + 1;
         favSaveMidiChannel(g_midiChannel);
@@ -699,6 +811,7 @@ void uiBankDestroy() {
     s_son_tileview = s_son_tab_ref = NULL;
     s_son_selected_btn = s_fav_selected_btn = NULL;
     for (int i = 0; i < 6; i++) s_son_bank_btns[i] = NULL;
+    s_son_perfMode = s_son_last_perfMode = false;
     s_open = false;
     g_bankOpen = false;
 }

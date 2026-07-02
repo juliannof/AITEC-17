@@ -18,3 +18,15 @@ const char* jvPatchName(uint8_t msb, uint8_t lsb, uint8_t pc);
 
 // Nombre corto del banco para display (max 5 chars).
 const char* jvBankLabel(uint8_t msb, uint8_t lsb);
+
+// Nombre de Performance para {msb, lsb, pc} — mismos MSB/LSB que Patch mode
+// (2026-07-02, JV-2080_OM.pdf p.175 nombres + p.184 Bank Select, verificado).
+// pc es 0-based (0-31). Devuelve nullptr si el banco es desconocido.
+//
+// Bancos soportados:
+//   USER  MSB=0x50 LSB=0
+//   PR-A  MSB=0x51 LSB=0
+//   PR-B  MSB=0x51 LSB=1
+// CARD (MSB=0x52 LSB=0) NO tiene datos — tarjeta no instalada en este rig,
+// no rellenar con nombres inventados.
+const char* jvPerfName(uint8_t msb, uint8_t lsb, uint8_t pc);
