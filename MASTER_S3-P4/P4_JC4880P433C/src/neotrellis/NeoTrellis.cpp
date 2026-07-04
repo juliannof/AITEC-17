@@ -43,6 +43,29 @@ static uint32_t bright(uint32_t col) { return scaleCol(col, TRELLIS_BRIGHTNESS);
 // LED en reposo: canal máximo = TRELLIS_DIM_ABS (independiente de BRIGHTNESS)
 static uint32_t dim(uint32_t col)    { return scaleCol(col, TRELLIS_DIM_ABS); }
 
+// ── Modo Bank — mapeo por tríos (2026-07-04) ──────────────────────────
+// Columna 0 (L0,L4,L8,L12) = página anterior; columna 7 (R3,R7,R11,R15) =
+// página siguiente. Columnas 1-3 (panel izq) y 4-6 (panel der) forman 8
+// "botones virtuales" (trío de 3 teclas contiguas = 1 sonido), fila×2 + lado:
+//   fila0: L1,L2,L3→slot0   R0,R1,R2→slot1
+//   fila1: L5,L6,L7→slot2   R4,R5,R6→slot3
+//   fila2: L9,L10,L11→slot4 R8,R9,R10→slot5
+//   fila3: L13,L14,L15→slot6 R12,R13,R14→slot7
+#define COL_BANK_SEL   0x0044FFu   // azul  — sonido seleccionado
+#define COL_BANK_FAV   0xFF8800u   // naranja — favorito
+#define COL_BANK_NAV   0x223344u   // tenue — columnas de página
+
+// col local 1-3 (panel izq) → slot izquierdo de su fila; col 0 no es slot.
+static int8_t leftTripletSlot(uint8_t k) {
+    int row = k / 4, col = k % 4;
+    return (col == 0) ? -1 : row * 2;
+}
+// col local 0-2 (panel der) → slot derecho de su fila; col 3 no es slot.
+static int8_t rightTripletSlot(uint8_t k) {
+    int row = k / 4, col = k % 4;
+    return (col == 3) ? -1 : row * 2 + 1;
+}
+
 static uint32_t synthColor() {
     switch (g_currentSynth) {
         case ExSynth::JV2080: return COL_SYNTH_JV;
@@ -87,6 +110,37 @@ static TrellisCallback cb_left(keyEvent evt) {
     uint8_t k    = evt.bit.NUM;
     bool pressed = (evt.bit.EDGE == SEESAW_KEYPAD_EDGE_RISING);
     log_d("[TR-L] k=%d %s", k, pressed ? "DN" : "UP");
+
+    if (k == 4) {
+        // SYNTH con Bank cerrado (tap=cicla synth) / atrás+abre-cierra con
+        // Bank abierto (tap=página anterior). Long-press SIEMPRE abre/cierra
+        // Bank, sea cual sea el estado — es el único mecanismo para cerrarlo
+        // desde el NeoTrellis (2026-07-04).
+        static uint32_t s_press_ms = 0;
+        if (pressed) {
+            s_press_ms = millis();
+            s_left.pixels.setPixelColor(4, bright(synthColor()));
+            s_left.pixels.show();
+        } else {
+            s_left.pixels.setPixelColor(4, dim(synthColor()));
+            s_left.pixels.show();
+            if (millis() - s_press_ms >= 600)     g_trellis_openBank  = true;
+            else if ((bool)g_bankOpen)            g_trellis_bankPrev  = true;
+            else                                   g_trellis_nextSynth = true;
+        }
+        return 0;
+    }
+
+    if ((bool)g_bankOpen) {
+        if (k == 0 || k == 8 || k == 12) {            // resto columna 0 — página anterior
+            if (pressed) g_trellis_bankPrev = true;
+            return 0;
+        }
+        int8_t slot = leftTripletSlot(k);
+        if (slot >= 0 && pressed) g_trellis_bankSlot = slot;
+        return 0;
+    }
+
     if (k == 0) {                                    // HOLD — toggle
         if (pressed) {
             g_trellis_holdToggle = true;
@@ -102,21 +156,6 @@ static TrellisCallback cb_left(keyEvent evt) {
         s_left.pixels.setPixelColor(2, pressed ? bright(0xFFFFFFu) : dim(0x00AA44u));
         s_left.pixels.show();
         if (pressed) g_trellis_nextPreset = true;
-    } else if (k == 4) {                             // SYNTH — cicla / long-press = Bank
-        static uint32_t s_press_ms = 0;
-        if (pressed) {
-            s_press_ms = millis();
-            s_left.pixels.setPixelColor(4, bright(synthColor()));
-            s_left.pixels.show();
-        } else {
-            s_left.pixels.setPixelColor(4, dim(synthColor()));
-            s_left.pixels.show();
-            if (millis() - s_press_ms >= 600) g_trellis_openBank  = true;
-            else                               g_trellis_nextSynth = true;
-        }
-    } else if (k < NEO_TRELLIS_NUM_KEYS && (bool)g_bankOpen) {
-        // En modo Bank todos los demás keys envían su índice al Core1
-        if (pressed) g_trellis_bankSlot = (int8_t)k;
     }
     return 0;
 }
@@ -125,6 +164,17 @@ static TrellisCallback cb_right(keyEvent evt) {
     uint8_t k    = evt.bit.NUM;
     bool pressed = (evt.bit.EDGE == SEESAW_KEYPAD_EDGE_RISING);
     log_d("[TR-R] k=%d %s", k, pressed ? "DN" : "UP");
+
+    if ((bool)g_bankOpen) {
+        if (k == 3 || k == 7 || k == 11 || k == 15) { // columna 7 — página siguiente
+            if (pressed) g_trellis_bankNext = true;
+            return 0;
+        }
+        int8_t slot = rightTripletSlot(k);
+        if (slot >= 0 && pressed) g_trellis_bankSlot = slot;
+        return 0;
+    }
+
     if (pressed && k < 4) {                          // selección directa de preset
         g_trellis_setPreset = (int8_t)k;
         uint32_t mc = modeColor();
@@ -133,6 +183,38 @@ static TrellisCallback cb_right(keyEvent evt) {
         s_right.pixels.show();
     }
     return 0;
+}
+
+// ── API Bank (llamado desde UIBank.cpp, Core1) ────────────────────────
+void neotrellisBankShowPage(const uint8_t* state, int count) {
+    uint32_t nav = dim(COL_BANK_NAV);
+    for (int row = 0; row < 4; row++) {
+        s_left.pixels.setPixelColor(row * 4 + 0, nav);    // L0,4,8,12  — atrás
+        s_right.pixels.setPixelColor(row * 4 + 3, nav);   // R3,7,11,15 — adelante
+    }
+    for (int slot = 0; slot < 8; slot++) {
+        uint8_t st = (slot < count) ? state[slot] : 0;
+        uint32_t col = (st == 1) ? bright(COL_BANK_SEL)
+                     : (st == 2) ? bright(COL_BANK_FAV)
+                                  : dim(0x111111u);
+        int row = slot / 2;
+        if ((slot % 2) == 0) {   // trío izquierdo (L1,L2,L3 de esa fila)
+            s_left.pixels.setPixelColor(row * 4 + 1, col);
+            s_left.pixels.setPixelColor(row * 4 + 2, col);
+            s_left.pixels.setPixelColor(row * 4 + 3, col);
+        } else {                 // trío derecho (R0,R1,R2 de esa fila)
+            s_right.pixels.setPixelColor(row * 4 + 0, col);
+            s_right.pixels.setPixelColor(row * 4 + 1, col);
+            s_right.pixels.setPixelColor(row * 4 + 2, col);
+        }
+    }
+    s_left.pixels.show();
+    s_right.pixels.show();
+}
+
+void neotrellisRestoreKaoss() {
+    refreshLeft();
+    refreshRight();
 }
 
 // ── API ────────────────────────────────────────────────────────────────

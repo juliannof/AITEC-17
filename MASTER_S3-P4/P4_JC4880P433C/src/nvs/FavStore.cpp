@@ -42,6 +42,19 @@ void favDelete(int idx) {
     s_prefs.remove(key);
 }
 
+// Bug (2026-07-04): favDelete() no decrementa s_count ni compacta — cada
+// ciclo marcar/desmarcar el mismo sonido durante pruebas dejaba un hueco
+// permanente y subía el contador, empujando los favoritos nuevos a páginas
+// cada vez más lejanas de UIBank (con solo ~8 ciclos ya salían de la página 0).
+// Fix: reutilizar el primer hueco antes de extender al final.
+int favFirstFreeSlot() {
+    for (int i = 0; i < s_count; i++) {
+        FavEntry tmp;
+        if (!favLoad(i, tmp)) return i;
+    }
+    return (s_count < 128) ? s_count : -1;
+}
+
 bool favSaveLastSel(uint8_t msb, uint8_t lsb, uint8_t pc) {
     s_prefs.putUChar("lm", msb);
     s_prefs.putUChar("ll", lsb);

@@ -12,3 +12,8 @@ void sendBankPC(uint8_t ch, uint8_t msb, uint8_t lsb, uint8_t pc);
 // mecanismo que distingue ambos modos ya que comparten los mismos MSB/LSB
 // de Bank Select (JV-2080_OM.pdf p.187-188, checksum verificado 2026-07-02).
 void sendSoundMode(JVSoundMode mode);
+
+// Cambia el modo Program/Combination del Triton — SysEx MODE CHANGE (Func 4E),
+// único mecanismo ya que Program y Combination comparten Bank Select
+// (TRITON_Rack_MIDIimp.TXT, verificado 2026-07-04). ch = canal MIDI (1-16).
+void sendTritonMode(uint8_t ch, bool programMode);

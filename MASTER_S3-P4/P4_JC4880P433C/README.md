@@ -147,27 +147,35 @@ El color del texto y de los dots sigue el modo activo (`COL_MODE_KAOSS` rojo por
 - **SYNTH** — tap cicla sintetizador activo (`g_currentSynth`); long-press ≥600ms abre `UIBank`
 - **Preset 0-3** (panel derecho, fila 0) — selección directa de preset (`kaoss.setPreset()`)
 
-### Modo Bank (UIBank abierto) — diseño 2026-07-01, pendiente de implementar
+### Modo Bank (UIBank abierto) — diseño por columnas + tríos (2026-07-04)
 
-Mientras `g_bankOpen=true`, las 32 teclas quedan dedicadas a Bank — las funciones Kaoss (HOLD/PANIC/SCALE/SYNTH/preset) quedan **suspendidas** en las 32 teclas:
+Sustituye el diseño por filas de 2026-07-01 (nunca implementado). Objetivo:
+aligerar la interfaz para touch operativo — grid 2 cols × 4 filas = 8
+ítems/página en pantalla (antes 16/10), y cada ítem corresponde a un **trío
+de 3 teclas contiguas** del NeoTrellis (botón físico grande, más fácil de
+acertar). Mientras `g_bankOpen=true`, las funciones Kaoss (HOLD/PANIC/SCALE/
+SYNTH-tap/preset) quedan **suspendidas** en las teclas reutilizadas.
 
-| Fila | Teclas | Función |
+| Columna | Teclas | Función |
 |---|---|---|
-| **0** (superior) | L0-3 + R0-3 (8 teclas) | **Subir** — página anterior (cualquiera de la fila) |
-| **1-2** (centro) | L4-11 + R4-11 (16 teclas) | **Selección directa** de slot en la página activa — Favoritos (16/página) = 1:1; Sonidos (10/página) = usa las 10 primeras |
-| **3** (inferior) | L12-15 + R12-15 (8 teclas) | **Bajar** — página siguiente (cualquiera de la fila) |
+| **0** (izquierda) | L0, L4, L8, L12 | **Página anterior** (cualquiera de las 4) |
+| **1-3** (panel izq.) | L1-3, L5-7, L9-11, L13-15 | Tríos de selección directa — **lado izquierdo** de cada fila |
+| **4-6** (panel der.) | R0-2, R4-6, R8-10, R12-14 | Tríos de selección directa — **lado derecho** de cada fila |
+| **7** (derecha) | R3, R7, R11, R15 | **Página siguiente** (cualquiera de las 4) |
 
-**Mapa de índice de slot (filas centrales, orden lectura izq→der, arriba→abajo):**
+**Mapa de slot (trío = 1 sonido; cualquier tecla del trío lo selecciona):**
 
-| Fila | Col0 | Col1 | Col2 | Col3 | Col4 | Col5 | Col6 | Col7 |
-|---|---|---|---|---|---|---|---|---|
-| 1 | L4→**slot 0** | L5→**slot 1** | L6→**slot 2** | L7→**slot 3** | R4→**slot 4** | R5→**slot 5** | R6→**slot 6** | R7→**slot 7** |
-| 2 | L8→**slot 8** | L9→**slot 9** | L10→**slot 10** | L11→**slot 11** | R8→**slot 12** | R9→**slot 13** | R10→**slot 14** | R11→**slot 15** |
+| Fila | Trío izquierdo (panel izq.) | Trío derecho (panel der.) |
+|---|---|---|
+| 0 | L1,L2,L3 → **slot 0** | R0,R1,R2 → **slot 1** |
+| 1 | L5,L6,L7 → **slot 2** | R4,R5,R6 → **slot 3** |
+| 2 | L9,L10,L11 → **slot 4** | R8,R9,R10 → **slot 5** |
+| 3 | L13,L14,L15 → **slot 6** | R12,R13,R14 → **slot 7** |
 
-> Sonidos (10/página) usa solo **slot 0-9** (fila 1 completa + los 2 primeros de fila 2: L8, L9); slots 10-15 quedan apagados/sin función en esa pestaña.
-
-- LEDs en modo Bank reflejan estado de Bank (slot ocupado/vacío, banco activo) — no colores Kaoss.
-- **Estado actual del código (previo a este diseño):** solo 12 teclas sueltas del panel izquierdo (índices 3, 5-15) están mapeadas a `uiBankNeoKey()`; el panel derecho no participa. Este README documenta el diseño objetivo — `NeoTrellis.cpp` y `UIBank.cpp` se actualizarán para implementarlo.
+- Las 3 LEDs de un trío se encienden **al unísono con el mismo color**, como si fueran un único botón ancho: **azul** = sonido seleccionado, **naranja** = favorito, tenue = vacío/normal. En Favoritos, todo slot con contenido ya es favorito por definición (solo azul/tenue).
+- Columnas 0 y 7 (página) se mantienen tenues mientras Bank está abierto, sin estado azul/naranja.
+- `k==4` (SYNTH) conserva su comportamiento dual: long-press ≥600ms abre/cierra Bank **siempre**; tap corto cicla sintetizador si Bank está cerrado, o página anterior si Bank está abierto (columna 0 reutiliza esta tecla).
+- Implementado en `NeoTrellis.cpp` (`leftTripletSlot`/`rightTripletSlot`, `neotrellisBankShowPage`) y `UIBank.cpp` (`uiBankNeoKey`/`uiBankNeoPage`).
 
 ---
 

@@ -34,6 +34,8 @@ volatile int8_t  g_trellis_setPreset  = -1;
 volatile bool    g_trellis_nextSynth  = false;
 volatile bool    g_trellis_openBank   = false;
 volatile int8_t  g_trellis_bankSlot   = -1;
+volatile bool    g_trellis_bankPrev   = false;   // columna 0 (2026-07-04)
+volatile bool    g_trellis_bankNext   = false;   // columna 7 (2026-07-04)
 
 // ── Sintetizador activo ───────────────────────────────────────────────
 volatile ExSynth g_currentSynth = ExSynth::JV2080;
@@ -82,6 +84,9 @@ void taskCore1(void* pv) {
             g_trellis_bankSlot = -1;
             uiBankNeoKey(k);
         }
+        // ── Página anterior/siguiente en modo Bank (2026-07-04) ──────────
+        if (g_trellis_bankPrev && uiReady) { g_trellis_bankPrev = false; uiBankNeoPage(-1); }
+        if (g_trellis_bankNext && uiReady) { g_trellis_bankNext = false; uiBankNeoPage(+1); }
 
         if (uiReady) {
             if (g_trellis_holdToggle) {
@@ -104,6 +109,7 @@ void taskCore1(void* pv) {
                 g_trellis_nextSynth = false;
                 g_currentSynth = (ExSynth)(((uint8_t)g_currentSynth + 1) % NUM_SYNTHS);
                 uiKaossUpdateSynth();
+                if (uiBankIsOpen()) uiBankSynthChanged();   // 2026-07-04: refresca Sonidos/Performances/Favoritos
             }
         }
 

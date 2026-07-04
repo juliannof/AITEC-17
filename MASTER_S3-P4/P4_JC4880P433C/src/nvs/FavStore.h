@@ -22,6 +22,11 @@ bool favLoad(int idx, FavEntry& out);   // false si slot vacío
 bool favSave(int idx, const FavEntry& e);
 void favDelete(int idx);
 
+// Primer slot libre para guardar un favorito nuevo — reutiliza huecos dejados
+// por favDelete() (que no decrementa el contador ni compacta) antes de
+// extender al final. -1 si no hay hueco y ya se llegó al tope (128) (2026-07-04).
+int favFirstFreeSlot();
+
 // Última selección en Tab Sonidos (persiste entre boots) — solo Patch mode;
 // Performance no se persiste como "último banco" porque UIBank siempre
 // arranca en Patch mode (2026-07-02, evita desincronizar el Sound Mode real

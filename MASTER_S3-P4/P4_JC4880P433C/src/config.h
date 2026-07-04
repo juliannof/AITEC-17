@@ -106,46 +106,52 @@ extern volatile bool   g_trellis_panic;       // CC reset a 64
 extern volatile int8_t g_trellis_setPreset;   // -1=none, 0-3=preset directo
 extern volatile bool   g_trellis_nextSynth;   // cicla sintetizador activo
 extern volatile bool   g_trellis_openBank;    // abre/cierra UIBank
-extern volatile int8_t g_trellis_bankSlot;    // slot NeoTrellis pulsado en modo Bank (-1=ninguno)
+extern volatile int8_t g_trellis_bankSlot;    // slot (0-7) pulsado en modo Bank (-1=ninguno) (2026-07-04: antes 0-15)
+extern volatile bool   g_trellis_bankPrev;    // columna 0 (L0,4,8,12) — página anterior (2026-07-04)
+extern volatile bool   g_trellis_bankNext;    // columna 7 (R3,7,11,15) — página siguiente (2026-07-04)
 
 // ── Bank / Canal MIDI ─────────────────────────────────────────────────────
-extern volatile uint8_t g_midiChannel;   // canal MIDI activo (1-16)
+extern volatile uint8_t g_midiChannel;   // canal MIDI activo (1-16), derivado del modo (Patch/Performance)
 extern volatile bool    g_bankOpen;      // UIBank visible
-extern volatile uint8_t g_bankTab;       // pestaña activa (0=FAV 1=SON 2=CH)
+extern volatile uint8_t g_bankTab;       // pestaña activa (0=FAV 1=SON 2=PERFORM) (2026-07-04: antes 2=CH)
 
-// ── UIBank — Tab Sonidos (grid patches JV-2080) (2026-07-01) ──────────
-#define UIBANK_SON_TILE_X        60    // LVGL x donde empieza el tileview (tras tab bar)
-#define UIBANK_SON_TILE_W        420   // ancho tileview LVGL x (= P4_W - UIBANK_SON_TILE_X)
-#define UIBANK_SON_PATCHES_BANK  128   // patches por banco JV-2080
-#define UIBANK_SON_PER_PAGE      10    // 5 filas × 2 cols
-#define UIBANK_SON_ROWS          5
-#define UIBANK_SON_ROW_PITCH     84    // 5×84 = UIBANK_SON_TILE_W
-#define UIBANK_SON_COL_PITCH     340
-#define UIBANK_SON_BTN_W         82    // LVGL x (botón)
-#define UIBANK_SON_BTN_H         338   // LVGL y (botón)
-#define UIBANK_SON_BTN_RADIUS    3
-#define UIBANK_SON_LBL_W         (UIBANK_SON_BTN_H - 4)   // 334 — ancho combo "BANCO:NNN Nombre"
-#define COL_FAV_STAR             0xFF8800   // círculo naranja = patch guardado como favorito
-#define UIBANK_SON_FAV_DOT       12         // diámetro círculo favorito
-#define UIBANK_SON_FAV_RESERVE   20         // margen reservado a la izquierda del texto para el círculo (2026-07-01)
-#define UIBANK_SON_LBL_W2        (UIBANK_SON_LBL_W - UIBANK_SON_FAV_RESERVE)   // ancho texto con margen
-#define UIBANK_SON_LBL_OFS       (UIBANK_SON_FAV_RESERVE / 2)                  // desplaza el texto a la derecha
-#define UIBANK_SON_FAV_DOT_OFS   -((UIBANK_SON_BTN_H / 2) - (UIBANK_SON_FAV_DOT / 2) - 3)   // eje local-y (izquierda física)
-#define UIBANK_SON_MAX_PAGES     ((UIBANK_SON_PATCHES_BANK + UIBANK_SON_PER_PAGE - 1) / UIBANK_SON_PER_PAGE)  // 13
-#define UIBANK_SON_PAGE_KEEP     1          // páginas construidas alrededor de la activa (± N) — lazy-build (2026-07-01)
+// ── UIBank — grid unificado 2 cols × 4 filas = 8 ítems/página (2026-07-04) ──
+// Reemplaza los grids independientes de FAV (16/pág) y Sonidos (10/pág): las
+// 3 tabs (Favoritos/Sonidos/Performances) comparten la misma geometría — menos
+// widgets vivos por página (antes hasta 16, hoy 8) para touch más ligero.
+// Cada ítem de Sonidos/Performances corresponde a un trío de teclas NeoTrellis
+// contiguas (ver NeoTrellis.cpp neotrellisBankShowPage) — botón físico grande.
+#define UIBANK_GRID_COLS         2
+#define UIBANK_GRID_ROWS         4
+#define UIBANK_GRID_PER_PAGE     (UIBANK_GRID_COLS * UIBANK_GRID_ROWS)   // 8
 
-// ── UIBank — Tab Sonidos: modo Performance (2026-07-02) ────────────────
-// Toggle Patch↔Performance (toque simple en tab "SON") (2026-07-02 17:55).
-// Solo USER/PR-A/PR-B tienen Performances (32 c/u, JV-2080_OM.pdf p.175/184);
-// CARD no instalada.
-#define UIBANK_PERF_PATCHES_BANK 32
-#define UIBANK_PERF_MAX_PAGES    ((UIBANK_PERF_PATCHES_BANK + UIBANK_SON_PER_PAGE - 1) / UIBANK_SON_PER_PAGE)  // 4
+#define UIBANK_FAV_SLOTS         128   // tope favSave (favLoad rechaza slot > 127)
+// Tamaño de banco (128, uniforme en JV-2080 y Triton — ver ctxBankSize() en
+// UIBank.cpp) y nº de páginas de Sonidos/Performances/Favoritos ya no son
+// constantes fijas: se calculan en vivo según el synth activo (2026-07-04,
+// integración multi-synth) — Favoritos además pagina sobre la lista ya
+// filtrada por g_currentSynth, no sobre el total de slots NVS.
 
-// ── UIBank — Tab Favoritos (grid guardados) (2026-07-01) ──────────────
-#define UIBANK_FAV_PER_PAGE      16         // 2 cols × 8 filas
-#define UIBANK_FAV_ROWS          8
-#define UIBANK_FAV_MAX_PAGES     8          // ceil(128/16) — favSave rechaza slot > 127
-#define UIBANK_FAV_PAGE_KEEP     1          // páginas construidas alrededor de la activa (± N) — lazy-build
+// Geometría física — Sonidos/Performances reservan franja de 58px para el
+// selector de banco (igual que antes); Favoritos usa el ancho completo.
+#define UIBANK_TILE_X            60    // LVGL x donde empieza el grid (tras franja de banco)
+#define UIBANK_TILE_W            420   // ancho grid LVGL x (= P4_W - UIBANK_TILE_X) — Sonidos/Performances
+#define UIBANK_ROW_PITCH_BANK    (UIBANK_TILE_W / UIBANK_GRID_ROWS)   // 105
+#define UIBANK_ROW_PITCH_FULL    (P4_W / UIBANK_GRID_ROWS)            // 120 — Favoritos (sin franja de banco)
+#define UIBANK_BTN_W_BANK        (UIBANK_ROW_PITCH_BANK - 2)          // 103
+#define UIBANK_BTN_W_FULL        (UIBANK_ROW_PITCH_FULL - 2)          // 118
+#define UIBANK_COL_PITCH         340
+#define UIBANK_BTN_H             338   // LVGL y (botón) — igual en las 3 tabs, ancho físico del combo
+#define UIBANK_BTN_RADIUS        3
+
+#define COL_FAV_STAR             0xFF8800   // círculo naranja = favorito
+#define UIBANK_FAV_DOT           20         // diámetro círculo favorito (2026-07-04: antes 12, muy pequeño)
+#define UIBANK_FAV_DOT_MARGIN    26         // distancia borde del botón → CENTRO del círculo (2026-07-04: antes ~9, quedaba pegado al borde)
+#define UIBANK_FAV_RESERVE       (UIBANK_FAV_DOT_MARGIN + UIBANK_FAV_DOT / 2 + 8)   // espacio reservado al texto (~44)
+#define UIBANK_LBL_W             (UIBANK_BTN_H - 4)                 // 334 — ancho combo "BANCO:NNN Nombre"
+#define UIBANK_LBL_W2            (UIBANK_LBL_W - UIBANK_FAV_RESERVE) // ancho texto con margen (Sonidos/Performances)
+#define UIBANK_LBL_OFS           (UIBANK_FAV_RESERVE / 2)            // desplaza el texto para dejar sitio al círculo
+#define UIBANK_FAV_DOT_OFS       -((UIBANK_BTN_H / 2) - UIBANK_FAV_DOT_MARGIN)      // eje local-y (izquierda física)
 
 // ── Sintetizador activo ───────────────────────────────────────────────
 enum class ExSynth : uint8_t { JV2080=0, TRITON=1, TG55=2, D110=3, WAVE=4 };
@@ -163,6 +169,17 @@ enum class JVSoundMode : uint8_t { PERFORMANCE = 0, PATCH = 1 };
 // y siguen funcionando igual, por eso el síntoma es "cambia en la interfaz
 // pero no en el synth". Valor de fábrica = 0x10.
 #define JV2080_DEVICE_ID   0x10
+
+// ── Triton (Korg) — SysEx MODE CHANGE (2026-07-04) ─────────────────────
+// F0 42 3g 50 4E 00 mm F7 (TRITON_Rack_MIDIimp.TXT Func 4E, nota *11,
+// verificado). g=canal, mm: 0=COMBI PLAY, 2=PROG PLAY — únicos modos que
+// nos interesan (resto: 1=COMBI EDIT, 3=PROG EDIT, 4=MULTI, 5=DEMO/SNG,
+// 6=SAMPLING, 7=GLOBAL, 8=DISK, no aplican al browser de patches).
+#define KORG_ID            0x42
+#define TRITON_MODEL_ID    0x50
+#define TRITON_MODE_COMBI  0x00
+#define TRITON_MODE_PROG   0x02
+
 #define NUM_SYNTHS       5
 #define COL_SYNTH_JV     0x0044FF
 #define COL_SYNTH_TRI    0x8800FF
