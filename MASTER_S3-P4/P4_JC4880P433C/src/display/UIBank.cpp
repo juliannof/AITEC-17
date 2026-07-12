@@ -26,6 +26,8 @@
 #include "../midi/MIDIOut.h"
 #include "../midi/JVPatches.h"
 #include "../midi/TritonPatches.h"
+#include "../midi/MotifPatches.h"
+#include "../midi/TG55Patches.h"
 #include "../nvs/FavStore.h"
 #include "../neotrellis/NeoTrellis.h"
 #include "lvgl.h"
@@ -79,30 +81,79 @@ static const BankDef kTritonCombiBanks[4] = {
     {0x00, 3, "INT-D"},
 };
 
-// ── Descriptor por synth (2026-07-04) ─────────────────────────────────────
+// ── MOTIF-RACK (Yamaha) ────────────────────────────────────────────────
+// Solo Normal Voice (docs/Yamaha_MOTIF-RACK_Normal_Voice_List.md) — sin Multi
+// verificado, por eso no hay combiBanks (tab Performance queda vacía).
+// MSB=0x3F (63 decimal, tabla "Available Bank Select/Program Change" de
+// MOTIFRACKE2.pdf p.46) — NO 0x63 (99 decimal, bug corregido 2026-07-12).
+static const BankDef kMotifBanks[8] = {
+    {0x3F, 0, "Preset1"},
+    {0x3F, 1, "Preset2"},
+    {0x3F, 2, "Preset3"},
+    {0x3F, 3, "Preset4"},
+    {0x3F, 4, "Preset5"},
+    {0x00, 0, "GM"},
+    {0x3F, 8, "User1"},
+    {0x3F, 9, "User2"},
+};
+
+// ── TG55 (Yamaha) ──────────────────────────────────────────────────────
+// Solo PRESET (64 voces) — sin Bank Select verificado (docs/Yamaha_TG55_
+// Brief_Implementacion.md §7), msb/lsb aquí son solo clave interna, nunca
+// se envían por MIDI (ver noBankSelect en SynthSoundDesc). Sin Performances
+// (Multi no verificado).
+static const BankDef kTG55Banks[1] = {
+    {0, 0, "Preset"},
+};
+
+// ── Descriptor por synth (2026-07-04, canal fijo desde 2026-07-12) ────────
 // Sonidos usa progBanks/progName ("Program"-como-Patch), Performances usa
-// combiBanks/combiName ("Combination"-como-Performance). chProg/chCombi=0
-// significa "no fuerces canal" (deja g_midiChannel como esté) — el JV-2080
-// sí fuerza (Patch=12/Performance=1, pedido explícito del usuario para
-// tracks de Logic); el Triton de momento no fuerza canal (sin requisito).
+// combiBanks/combiName ("Combination"-como-Performance). El canal MIDI ya no
+// lo decide el firmware — g_midiChannel es fijo en 1, Logic enruta por track
+// (revierte el forzado Patch=12/Performance=1 del JV-2080, 2026-07-12).
 struct SynthSoundDesc {
     const BankDef* progBanks;   uint8_t progBankCount;
     const BankDef* combiBanks;  uint8_t combiBankCount;
     const char* (*progName)(uint8_t msb, uint8_t lsb, uint8_t pc);
     const char* (*combiName)(uint8_t msb, uint8_t lsb, uint8_t pc);
     void (*setMode)(uint8_t ch, bool progMode);   // nullptr = sin SysEx de modo
-    uint8_t chProg;
-    uint8_t chCombi;
+    uint8_t progSize;    // patches por banco en Sonidos (2026-07-12)
+    uint8_t combiSize;   // patches por banco en Performances — JV-2080 Performance
+                          // es 32, no 128 (JVPatches.h:22, jvPerfName pc<32)
+    bool    noBankSelect; // true = sin Bank Select verificado, solo Program Change
+                           // (TG55 — docs/Yamaha_TG55_Brief_Implementacion.md §7)
+    bool    slowSend;     // true = CC0→delay→CC32→delay→PC en vez de ráfaga junta
+                           // (MOTIF-RACK — cadena MIDI THRU larga en el UMC1820,
+                           // diagnóstico 2026-07-12, ver UIBANK_SLOW_SEND_MS)
 };
 
 static const SynthSoundDesc kSynthDesc[NUM_SYNTHS] = {
-    /* JV2080 */ { kBanks, 6, kBanksPerf, 3, jvPatchName, jvPerfName, jvSetModeAdapter, MIDI_CH_PATCH, MIDI_CH_PERFORM },
-    /* TRITON */ { kTritonProgBanks, 5, kTritonCombiBanks, 4, tritonProgName, tritonCombiName, sendTritonMode, 0, 0 },
-    /* TG55   */ { nullptr, 0, nullptr, 0, nullptr, nullptr, nullptr, 0, 0 },
-    /* D110   */ { nullptr, 0, nullptr, 0, nullptr, nullptr, nullptr, 0, 0 },
-    /* WAVE   */ { nullptr, 0, nullptr, 0, nullptr, nullptr, nullptr, 0, 0 },
+    /* JV2080 */ { kBanks, 6, kBanksPerf, 3, jvPatchName, jvPerfName, jvSetModeAdapter, 128, 32, false, false },
+    /* TRITON */ { kTritonProgBanks, 5, kTritonCombiBanks, 4, tritonProgName, tritonCombiName, sendTritonMode, 128, 128, false, false },
+    /* TG55   */ { kTG55Banks, 1, nullptr, 0, tg55ProgName, nullptr, nullptr, 64, 128, true, false },
+    /* D110   */ { nullptr, 0, nullptr, 0, nullptr, nullptr, nullptr, 128, 128, false, false },
+    /* WAVE   */ { nullptr, 0, nullptr, 0, nullptr, nullptr, nullptr, 128, 128, false, false },
+    /* MOTIF  */ { kMotifBanks, 8, nullptr, 0, motifProgName, nullptr, nullptr, 128, 128, false, true },
 };
 static const SynthSoundDesc& activeDesc() { return kSynthDesc[(int)g_currentSynth]; }
+
+// Manda la selección de patch al synth activo — Bank Select + PC, salvo que
+// el descriptor marque noBankSelect (TG55, sin Bank Select verificado) o
+// slowSend (MOTIF, retardo entre mensajes — ver SynthSoundDesc).
+static void sendPatchSelect(uint8_t msb, uint8_t lsb, uint8_t pc) {
+    uint8_t ch = g_midiChannel;
+    if (activeDesc().noBankSelect) {
+        sendPC(ch, pc);
+    } else if (activeDesc().slowSend) {
+        sendCC(ch, 0, msb);
+        vTaskDelay(pdMS_TO_TICKS(UIBANK_SLOW_SEND_MS));
+        sendCC(ch, 32, lsb);
+        vTaskDelay(pdMS_TO_TICKS(UIBANK_SLOW_SEND_MS));
+        sendPC(ch, pc);
+    } else {
+        sendBankPC(ch, msb, lsb, pc);
+    }
+}
 
 // ── Helper rotación (mismo que UIKaoss) ──────────────────────────────────
 static void rot_label(lv_obj_t* lbl) {
@@ -140,7 +191,7 @@ static void fav_render_page(int page);
 static void ensure_tab_built(uint32_t tab);
 struct SoundTabCtx;
 static void soundtab_click_pc(SoundTabCtx& ctx, uint8_t pc);
-static void activate_sound_mode(bool perfMode, uint8_t forcedCh);
+static void activate_sound_mode(bool perfMode);
 
 // ══════════════════════════════════════════════════════════════════════
 // Tab 0 — Favoritos (filtra por g_currentSynth, 2026-07-04)
@@ -224,13 +275,15 @@ static void fav_render_page(int page) {
             snprintf(combo, sizeof(combo), "%02d %s", matchIdx + 1, e.name);
             lv_obj_t* lbl = lv_label_create(btn);
             lv_label_set_text(lbl, combo);
-            lv_obj_set_style_text_font(lbl, &lv_font_montserrat_18, 0);
+            // montserrat_16 (antes 18, 2026-07-04) — más caracteres visibles
+            // antes de truncar con "..." (el hueco de texto es fijo).
+            lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
             lv_obj_set_style_text_color(lbl, lv_color_hex(COL_TEXT), 0);
             lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, 0);
             lv_obj_align(lbl, LV_ALIGN_CENTER, 0, 0);
             lv_label_set_long_mode(lbl, LV_LABEL_LONG_DOT);
             lv_obj_set_width(lbl, UIBANK_LBL_W);
-            lv_obj_set_height(lbl, lv_font_get_line_height(&lv_font_montserrat_18));
+            lv_obj_set_height(lbl, lv_font_get_line_height(&lv_font_montserrat_16));
             rot_label(lbl);
         } else {
             lv_obj_set_style_bg_color(btn, lv_color_hex(0x060A10), 0);
@@ -262,15 +315,15 @@ struct SoundTabCtx {
     uint8_t         msb, lsb;
     lv_obj_t*       tabRef;
     lv_obj_t*       gridCont;
-    lv_obj_t*       bankBtns[6];
+    lv_obj_t*       bankBtns[UIBANK_MAX_BANKS];
     uint8_t         curPage;
     bool            built;
     bool            bankFav[128];   // de sobra para cualquier synth (máx. 128/banco)
     uint8_t         lastMsb, lastLsb, lastPc;
 };
 
-static SoundTabCtx s_son  = { false, 0, 0, nullptr, nullptr, {nullptr,nullptr,nullptr,nullptr,nullptr,nullptr}, 0, false, {}, 0xFF, 0xFF, 0xFF };
-static SoundTabCtx s_perf = { true,  0, 0, nullptr, nullptr, {nullptr,nullptr,nullptr,nullptr,nullptr,nullptr}, 0, false, {}, 0xFF, 0xFF, 0xFF };
+static SoundTabCtx s_son  = { false, 0, 0, nullptr, nullptr, {}, 0, false, {}, 0xFF, 0xFF, 0xFF };
+static SoundTabCtx s_perf = { true,  0, 0, nullptr, nullptr, {}, 0, false, {}, 0xFF, 0xFF, 0xFF };
 
 // El "modo" de favorito (JVSoundMode) se reutiliza como discriminador
 // genérico de rol (Sonidos/Program=PATCH, Performances/Combination=PERFORMANCE)
@@ -284,10 +337,12 @@ static const BankDef* ctxBanks(SoundTabCtx& ctx) {
 static int ctxBankCount(SoundTabCtx& ctx) {
     return ctx.perfMode ? activeDesc().combiBankCount : activeDesc().progBankCount;
 }
-// Todos los bancos de un mismo synth/rol tienen 128 patches (JV-2080 y
-// Triton verificado) — si algún synth futuro tuviera bancos de tamaño
-// distinto entre sí, esto habría que hacerlo por-banco, no por-synth.
-static int ctxBankSize(SoundTabCtx&) { return 128; }
+// Tamaño de banco por synth/rol (2026-07-12) — JV-2080 Performance es 32,
+// el resto 128. Si algún synth futuro tuviera bancos de tamaño distinto
+// entre sí (no solo entre Sonidos/Performances), habría que hacerlo por-banco.
+static int ctxBankSize(SoundTabCtx& ctx) {
+    return ctx.perfMode ? activeDesc().combiSize : activeDesc().progSize;
+}
 static int ctxMaxPages(SoundTabCtx& ctx) {
     int pages = (ctxBankSize(ctx) + UIBANK_GRID_PER_PAGE - 1) / UIBANK_GRID_PER_PAGE;
     return pages < 1 ? 1 : pages;
@@ -309,7 +364,7 @@ static const char* ctxBankLabel(SoundTabCtx& ctx) {
 static void ctxBankRefreshBtns(SoundTabCtx& ctx) {
     const BankDef* banks = ctxBanks(ctx);
     int count = ctxBankCount(ctx);
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < UIBANK_MAX_BANKS; i++) {
         if (!ctx.bankBtns[i]) continue;
         if (i >= count || !banks) { lv_obj_add_flag(ctx.bankBtns[i], LV_OBJ_FLAG_HIDDEN); continue; }
         lv_obj_clear_flag(ctx.bankBtns[i], LV_OBJ_FLAG_HIDDEN);
@@ -373,13 +428,15 @@ static void soundtab_render_page(SoundTabCtx& ctx, int page) {
         snprintf(combo, sizeof(combo), "%s:%03d %s", ctxBankLabel(ctx), (int)pc + 1, name ? name : "---");
         lv_obj_t* lbl = lv_label_create(btn);
         lv_label_set_text(lbl, combo);
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_18, 0);
+        // montserrat_16 (antes 18, 2026-07-04) — más caracteres visibles
+        // antes de truncar con "..." (nombres largos de Triton/JV-2080).
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
         lv_obj_set_style_text_color(lbl, lv_color_hex(COL_TEXT), 0);
         lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_align(lbl, LV_ALIGN_CENTER, 0, UIBANK_LBL_OFS);
         lv_label_set_long_mode(lbl, LV_LABEL_LONG_DOT);
         lv_obj_set_width(lbl, UIBANK_LBL_W2);
-        lv_obj_set_height(lbl, lv_font_get_line_height(&lv_font_montserrat_18));
+        lv_obj_set_height(lbl, lv_font_get_line_height(&lv_font_montserrat_16));
         rot_label(lbl);
 
         if (is_fav) bank_add_fav_dot(btn);
@@ -426,8 +483,8 @@ static void soundtab_click_pc(SoundTabCtx& ctx, uint8_t pc) {
     ctx.lastMsb = ctx.msb;
     ctx.lastLsb = ctx.lsb;
     ctx.lastPc  = pc;
-    if (!ctx.perfMode) favSaveLastSel(ctx.msb, ctx.lsb, pc);   // Performance no persiste "último banco"
-    sendBankPC(g_midiChannel, ctx.msb, ctx.lsb, pc);
+    if (!ctx.perfMode) favSaveLastSel(g_currentSynth, ctx.msb, ctx.lsb, pc);   // Performance no persiste "último banco"
+    sendPatchSelect(ctx.msb, ctx.lsb, pc);
     soundtab_render_page(ctx, ctx.curPage);
 }
 
@@ -459,8 +516,8 @@ static void build_sound_tab(SoundTabCtx& ctx, lv_obj_t* tab, lv_event_cb_t bankC
 
     const BankDef* banks = ctxBanks(ctx);
     int count = ctxBankCount(ctx);
-    const int BTN_H_STRIP = (P4_H - 120) / 6;
-    for (int i = 0; i < 6; i++) {
+    const int BTN_H_STRIP = (P4_H - 120) / UIBANK_MAX_BANKS;
+    for (int i = 0; i < UIBANK_MAX_BANKS; i++) {
         lv_obj_t* btn = lv_btn_create(tab);
         lv_obj_set_size(btn, 58, BTN_H_STRIP);
         lv_obj_set_pos(btn, 1, i * BTN_H_STRIP + 1);
@@ -502,7 +559,7 @@ static void apply_recall(const FavEntry& e) {
     ensure_tab_built(targetTab);
     // Explícito, no depende de que lv_tabview_set_active() dispare
     // LV_EVENT_VALUE_CHANGED de forma síncrona (idempotente si ya se envió).
-    activate_sound_mode(wantPerf, wantPerf ? activeDesc().chCombi : activeDesc().chProg);
+    activate_sound_mode(wantPerf);
 
     ctx.msb = e.msb;
     ctx.lsb = e.lsb;
@@ -513,10 +570,10 @@ static void apply_recall(const FavEntry& e) {
     ctx.lastMsb = e.msb;
     ctx.lastLsb = e.lsb;
     ctx.lastPc  = e.pc;
-    if (!wantPerf) favSaveLastSel(e.msb, e.lsb, e.pc);
+    if (!wantPerf) favSaveLastSel(e.synth, e.msb, e.lsb, e.pc);
 
     soundtab_render_page(ctx, e.pc / UIBANK_GRID_PER_PAGE);
-    sendBankPC(g_midiChannel, e.msb, e.lsb, e.pc);
+    sendPatchSelect(e.msb, e.lsb, e.pc);
     g_bankTab = (uint8_t)targetTab;
 }
 
@@ -525,18 +582,14 @@ static bool    s_modeSent      = false;
 static bool    s_lastSentPerf  = false;
 static ExSynth s_lastSentSynth = ExSynth::JV2080;
 
-static void activate_sound_mode(bool perfMode, uint8_t forcedCh) {
+static void activate_sound_mode(bool perfMode) {
     auto setFn = activeDesc().setMode;
     bool changed = !s_modeSent || s_lastSentPerf != perfMode || s_lastSentSynth != g_currentSynth;
     if (setFn && changed) {
-        setFn(forcedCh ? forcedCh : g_midiChannel, !perfMode);
+        setFn(g_midiChannel, !perfMode);
         s_lastSentPerf  = perfMode;
         s_lastSentSynth = g_currentSynth;
         s_modeSent = true;
-    }
-    if (forcedCh) {
-        g_midiChannel = forcedCh;
-        favSaveMidiChannel(g_midiChannel);
     }
 }
 
@@ -571,8 +624,8 @@ static void tabview_changed_cb(lv_event_t* e) {
     uint32_t tab = lv_tabview_get_tab_active(s_tabview);
     g_bankTab = (uint8_t)tab;
     ensure_tab_built(tab);
-    if (tab == 1)      activate_sound_mode(false, activeDesc().chProg);
-    else if (tab == 2) activate_sound_mode(true,  activeDesc().chCombi);
+    if (tab == 1)      activate_sound_mode(false);
+    else if (tab == 2) activate_sound_mode(true);
 }
 
 // ── Callback cerrar ──────────────────────────────────────────────────────
@@ -583,9 +636,12 @@ static void close_cb(lv_event_t* e) {
 
 // ── API pública ───────────────────────────────────────────────────────────
 void uiBankCreate(lv_obj_t* parent) {
-    // Cargar última selección de Sonidos desde NVS (rol Sonidos; Performances no se persiste)
-    favLoadLastSel(s_son.lastMsb, s_son.lastLsb, s_son.lastPc);
-    if (s_son.lastMsb != 0xFF) {
+    // Cargar última selección de Sonidos desde NVS (rol Sonidos; Performances no se persiste).
+    // Solo se aplica si pertenece al synth activo al arrancar (2026-07-05) —
+    // si no, msb/lsb de otro synth no significan nada en las tablas de este.
+    ExSynth lastSynth;
+    favLoadLastSel(lastSynth, s_son.lastMsb, s_son.lastLsb, s_son.lastPc);
+    if (s_son.lastMsb != 0xFF && lastSynth == g_currentSynth) {
         s_son.msb = s_son.lastMsb;
         s_son.lsb = s_son.lastLsb;
     } else if (ctxBanks(s_son)) {
@@ -688,16 +744,31 @@ void uiBankRefreshFavList() {
     if (s_fav_built) fav_render_page(s_fav_curPage);
 }
 
-// Se llama desde main.cpp cuando g_currentSynth cambia (tap de SYNTH en
-// NeoTrellis) mientras Bank está abierto — sin esto, Sonidos/Performances/
-// Favoritos seguirían mostrando el synth anterior hasta cerrar y reabrir.
+// Sincroniza msb/lsb de Sonidos/Performances con el primer banco del synth
+// activo — SIEMPRE, esté Bank abierto o no (2026-07-12). Sin esto, cambiar de
+// synth con Bank cerrado (selección directa L8-L14) deja msb/lsb del synth
+// anterior, y al abrir Sonidos después no encuentra nada (progName recibe
+// msb/lsb que no le pertenecen).
+static void syncBankSelToSynth() {
+    const BankDef* pb = ctxBanks(s_son);
+    if (pb) { s_son.msb = pb[0].msb; s_son.lsb = pb[0].lsb; }
+    s_son.lastMsb = s_son.lastLsb = s_son.lastPc = 0xFF;
+
+    const BankDef* cb = ctxBanks(s_perf);
+    if (cb) { s_perf.msb = cb[0].msb; s_perf.lsb = cb[0].lsb; }
+    s_perf.lastMsb = s_perf.lastLsb = s_perf.lastPc = 0xFF;
+}
+
+// Se llama desde main.cpp cuando g_currentSynth cambia (tap/selección directa
+// de SYNTH en NeoTrellis) — refresca los widgets visibles si Bank está
+// abierto; si está cerrado, syncBankSelToSynth() ya dejó los datos listos
+// para cuando se abra.
 void uiBankSynthChanged() {
+    syncBankSelToSynth();
     if (!s_open) return;
 
     if (s_son.built) {
         const BankDef* banks = ctxBanks(s_son);
-        if (banks) { s_son.msb = banks[0].msb; s_son.lsb = banks[0].lsb; }
-        s_son.lastMsb = s_son.lastLsb = s_son.lastPc = 0xFF;
         ctxBankRefreshBtns(s_son);
         memset(s_son.bankFav, 0, sizeof(s_son.bankFav));
         if (banks) favMarkBank(g_currentSynth, (uint8_t)g_midiChannel, s_son.msb, s_son.lsb, ctxRole(s_son), s_son.bankFav, ctxBankSize(s_son));
@@ -705,8 +776,6 @@ void uiBankSynthChanged() {
     }
     if (s_perf.built) {
         const BankDef* banks = ctxBanks(s_perf);
-        if (banks) { s_perf.msb = banks[0].msb; s_perf.lsb = banks[0].lsb; }
-        s_perf.lastMsb = s_perf.lastLsb = s_perf.lastPc = 0xFF;
         ctxBankRefreshBtns(s_perf);
         memset(s_perf.bankFav, 0, sizeof(s_perf.bankFav));
         if (banks) favMarkBank(g_currentSynth, (uint8_t)g_midiChannel, s_perf.msb, s_perf.lsb, ctxRole(s_perf), s_perf.bankFav, ctxBankSize(s_perf));
@@ -715,8 +784,8 @@ void uiBankSynthChanged() {
     if (s_fav_built) fav_render_page(0);   // repagina sobre los favoritos del nuevo synth
 
     uint32_t tab = lv_tabview_get_tab_active(s_tabview);
-    if (tab == 1)      activate_sound_mode(false, activeDesc().chProg);
-    else if (tab == 2) activate_sound_mode(true,  activeDesc().chCombi);
+    if (tab == 1)      activate_sound_mode(false);
+    else if (tab == 2) activate_sound_mode(true);
 }
 
 void uiBankNeoKey(uint8_t slot) {
@@ -753,7 +822,7 @@ static void resetCtxRuntime(SoundTabCtx& ctx) {
     const BankDef* banks = ctxBanks(ctx);
     if (banks) { ctx.msb = banks[0].msb; ctx.lsb = banks[0].lsb; }
     ctx.tabRef = ctx.gridCont = nullptr;
-    for (int i = 0; i < 6; i++) ctx.bankBtns[i] = nullptr;
+    for (int i = 0; i < UIBANK_MAX_BANKS; i++) ctx.bankBtns[i] = nullptr;
     ctx.curPage = 0;
     ctx.built = false;
     memset(ctx.bankFav, 0, sizeof(ctx.bankFav));

@@ -32,6 +32,7 @@ volatile bool    g_trellis_nextPreset = false;
 volatile bool    g_trellis_panic      = false;
 volatile int8_t  g_trellis_setPreset  = -1;
 volatile bool    g_trellis_nextSynth  = false;
+volatile int8_t  g_trellis_setSynth   = -1;
 volatile bool    g_trellis_openBank   = false;
 volatile int8_t  g_trellis_bankSlot   = -1;
 volatile bool    g_trellis_bankPrev   = false;   // columna 0 (2026-07-04)
@@ -41,6 +42,8 @@ volatile bool    g_trellis_bankNext   = false;   // columna 7 (2026-07-04)
 volatile ExSynth g_currentSynth = ExSynth::JV2080;
 
 // ── Canal MIDI y estado Bank ──────────────────────────────────────────
+// Canal fijo = 1 para todos los synths (2026-07-12) — Logic enruta por
+// track, no el firmware. Ver UIBank.cpp:activate_sound_mode().
 volatile uint8_t g_midiChannel = 1;
 volatile bool    g_bankOpen    = false;
 volatile uint8_t g_bankTab     = 0;
@@ -109,7 +112,13 @@ void taskCore1(void* pv) {
                 g_trellis_nextSynth = false;
                 g_currentSynth = (ExSynth)(((uint8_t)g_currentSynth + 1) % NUM_SYNTHS);
                 uiKaossUpdateSynth();
-                if (uiBankIsOpen()) uiBankSynthChanged();   // 2026-07-04: refresca Sonidos/Performances/Favoritos
+                uiBankSynthChanged();   // sincroniza banco (2026-07-04); refresca Sonidos/Performances/Favoritos si Bank está abierto (2026-07-12)
+            }
+            if (g_trellis_setSynth >= 0) {
+                g_currentSynth = (ExSynth)(uint8_t)g_trellis_setSynth;
+                g_trellis_setSynth = -1;
+                uiKaossUpdateSynth();
+                uiBankSynthChanged();   // selección directa L8,9,10,12,13,14 (2026-07-12)
             }
         }
 
@@ -138,9 +147,6 @@ void setup() {
 
     if (!favInit()) log_e("FavStore FALLO");
     else            log_i("FavStore OK (%d favoritos)", favCount());
-
-    uint8_t savedCh;
-    if (favLoadMidiChannel(savedCh)) g_midiChannel = savedCh;
 
     initDisplay();
     displaySetBrightness(80);

@@ -55,30 +55,20 @@ int favFirstFreeSlot() {
     return (s_count < 128) ? s_count : -1;
 }
 
-bool favSaveLastSel(uint8_t msb, uint8_t lsb, uint8_t pc) {
+bool favSaveLastSel(ExSynth synth, uint8_t msb, uint8_t lsb, uint8_t pc) {
+    s_prefs.putUChar("ls", (uint8_t)synth);
     s_prefs.putUChar("lm", msb);
     s_prefs.putUChar("ll", lsb);
     s_prefs.putUChar("lp", pc);
     return true;
 }
 
-bool favLoadLastSel(uint8_t& msb, uint8_t& lsb, uint8_t& pc) {
-    msb = s_prefs.getUChar("lm", 0xFF);
-    lsb = s_prefs.getUChar("ll", 0xFF);
-    pc  = s_prefs.getUChar("lp", 0xFF);
+bool favLoadLastSel(ExSynth& synth, uint8_t& msb, uint8_t& lsb, uint8_t& pc) {
+    synth = (ExSynth)s_prefs.getUChar("ls", 0xFF);
+    msb   = s_prefs.getUChar("lm", 0xFF);
+    lsb   = s_prefs.getUChar("ll", 0xFF);
+    pc    = s_prefs.getUChar("lp", 0xFF);
     return msb != 0xFF;
-}
-
-bool favSaveMidiChannel(uint8_t ch) {
-    s_prefs.putUChar("mc", ch);
-    return true;
-}
-
-bool favLoadMidiChannel(uint8_t& ch) {
-    uint8_t v = s_prefs.getUChar("mc", 0xFF);
-    if (v == 0xFF) return false;
-    ch = v;
-    return true;
 }
 
 void favMarkBank(ExSynth synth, uint8_t ch, uint8_t msb, uint8_t lsb, JVSoundMode mode, bool* out, int outLen) {

@@ -31,12 +31,11 @@ int favFirstFreeSlot();
 // Performance no se persiste como "último banco" porque UIBank siempre
 // arranca en Patch mode (2026-07-02, evita desincronizar el Sound Mode real
 // del JV-2080, que no se puede leer de vuelta).
-bool favSaveLastSel(uint8_t msb, uint8_t lsb, uint8_t pc);
-bool favLoadLastSel(uint8_t& msb, uint8_t& lsb, uint8_t& pc);
-
-// Canal MIDI activo (persiste entre boots)
-bool favSaveMidiChannel(uint8_t ch);
-bool favLoadMidiChannel(uint8_t& ch);   // false si no había nada guardado (deja ch sin tocar)
+// Guarda también el synth (2026-07-05) — sin esto, el último banco de un
+// synth se aplicaba como si fuera del synth activo al arrancar (por defecto
+// JV2080), produciendo msb/lsb inválidos para ese synth ("PR-A:001..." vacío).
+bool favSaveLastSel(ExSynth synth, uint8_t msb, uint8_t lsb, uint8_t pc);
+bool favLoadLastSel(ExSynth& synth, uint8_t& msb, uint8_t& lsb, uint8_t& pc);
 
 // Marca out[pc]=true para cada patch del banco (msb/lsb/mode) guardado como favorito.
 // out debe tener ≥ outLen elementos (uso: grid Tab Sonidos, un solo escaneo de NVS por reconstrucción).

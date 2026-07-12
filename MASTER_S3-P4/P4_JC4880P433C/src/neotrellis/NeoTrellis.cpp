@@ -66,14 +66,46 @@ static int8_t rightTripletSlot(uint8_t k) {
     return (col == 3) ? -1 : row * 2 + 1;
 }
 
-static uint32_t synthColor() {
-    switch (g_currentSynth) {
+static uint32_t colorForSynth(ExSynth s) {
+    switch (s) {
         case ExSynth::JV2080: return COL_SYNTH_JV;
         case ExSynth::TRITON: return COL_SYNTH_TRI;
         case ExSynth::TG55:   return COL_SYNTH_TG;
         case ExSynth::D110:   return COL_SYNTH_D110;
         case ExSynth::WAVE:   return COL_SYNTH_WAVE;
+        case ExSynth::MOTIF:  return COL_SYNTH_MOTIF;
         default:               return COL_ACCENT;
+    }
+}
+static uint32_t synthColor() { return colorForSynth(g_currentSynth); }
+
+// ── Selección directa de synth — L8,9,10,12,13,14, solo modo Kaoss (2026-07-12) ──
+// Fila2 izq (L8,L9,L10) y fila3 izq (L12,L13,L14); L11/L15 (col3) sin usar,
+// igual que col3 en fila0/1 hoy. Con Bank abierto estas mismas teclas son
+// tríos de contenido (ver leftTripletSlot) — por eso esta rama solo se evalúa
+// cuando g_bankOpen es false (estructural, ver cb_left).
+struct SynthKeyMap { uint8_t key; ExSynth synth; };
+static const SynthKeyMap kSynthKeys[6] = {
+    {8,  ExSynth::JV2080},
+    {9,  ExSynth::TRITON},
+    {10, ExSynth::TG55},
+    {12, ExSynth::D110},
+    {13, ExSynth::WAVE},
+    {14, ExSynth::MOTIF},
+};
+static int8_t synthForKey(uint8_t k) {
+    for (const auto& m : kSynthKeys) if (m.key == k) return (int8_t)m.synth;
+    return -1;
+}
+static void refreshSynthSelectKeys() {
+    bool active = (g_currentMode == ExMode::KAOSS_XY);
+    for (const auto& m : kSynthKeys) {
+        uint32_t col = 0;
+        if (active) {
+            uint32_t c = colorForSynth(m.synth);
+            col = (g_currentSynth == m.synth) ? bright(c) : dim(c);
+        }
+        s_left.pixels.setPixelColor(m.key, col);
     }
 }
 
@@ -93,6 +125,7 @@ static void refreshLeft() {
     s_left.pixels.setPixelColor(3, 0u);
     s_left.pixels.setPixelColor(4, dim(synthColor()));
     for (int i = 5; i < NEO_TRELLIS_NUM_KEYS; i++) s_left.pixels.setPixelColor(i, 0u);
+    refreshSynthSelectKeys();
     s_left.pixels.show();
 }
 
@@ -156,6 +189,12 @@ static TrellisCallback cb_left(keyEvent evt) {
         s_left.pixels.setPixelColor(2, pressed ? bright(0xFFFFFFu) : dim(0x00AA44u));
         s_left.pixels.show();
         if (pressed) g_trellis_nextPreset = true;
+    } else if (g_currentMode == ExMode::KAOSS_XY) {   // L8,9,10,12,13,14 — selección directa synth
+        int8_t syn = synthForKey(k);
+        if (syn >= 0 && pressed) {
+            if ((ExSynth)syn == g_currentSynth) g_trellis_openBank = true;  // ya activo → abre Bank
+            else                                 g_trellis_setSynth = syn;  // distinto → selecciona
+        }
     }
     return 0;
 }
@@ -267,6 +306,7 @@ void neotrellisUpdate() {
     if (curSynth != s_lastSynth) {
         s_lastSynth = curSynth;
         s_left.pixels.setPixelColor(4, dim(synthColor()));
+        refreshSynthSelectKeys();
         s_left.pixels.show();
     }
 }

@@ -90,6 +90,7 @@ static const char* synthName() {
         case ExSynth::TG55:   return "TG55";
         case ExSynth::D110:   return "D-110";
         case ExSynth::WAVE:   return "WAVE";
+        case ExSynth::MOTIF:  return "MOTIF";
         default:               return "?";
     }
 }
@@ -101,6 +102,7 @@ static uint32_t synthColor() {
         case ExSynth::TG55:   return COL_SYNTH_TG;
         case ExSynth::D110:   return COL_SYNTH_D110;
         case ExSynth::WAVE:   return COL_SYNTH_WAVE;
+        case ExSynth::MOTIF:  return COL_SYNTH_MOTIF;
         default:               return COL_ACCENT;
     }
 }

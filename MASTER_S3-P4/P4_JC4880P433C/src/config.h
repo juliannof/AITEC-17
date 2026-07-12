@@ -105,13 +105,14 @@ extern volatile bool   g_trellis_nextPreset;  // kaoss.nextPreset()
 extern volatile bool   g_trellis_panic;       // CC reset a 64
 extern volatile int8_t g_trellis_setPreset;   // -1=none, 0-3=preset directo
 extern volatile bool   g_trellis_nextSynth;   // cicla sintetizador activo
+extern volatile int8_t g_trellis_setSynth;    // -1=none, selección directa L8,9,10,12,13,14 (solo modo Kaoss, 2026-07-12)
 extern volatile bool   g_trellis_openBank;    // abre/cierra UIBank
 extern volatile int8_t g_trellis_bankSlot;    // slot (0-7) pulsado en modo Bank (-1=ninguno) (2026-07-04: antes 0-15)
 extern volatile bool   g_trellis_bankPrev;    // columna 0 (L0,4,8,12) — página anterior (2026-07-04)
 extern volatile bool   g_trellis_bankNext;    // columna 7 (R3,7,11,15) — página siguiente (2026-07-04)
 
 // ── Bank / Canal MIDI ─────────────────────────────────────────────────────
-extern volatile uint8_t g_midiChannel;   // canal MIDI activo (1-16), derivado del modo (Patch/Performance)
+extern volatile uint8_t g_midiChannel;   // canal MIDI activo — fijo en 1 (2026-07-12): Logic enruta por track, no el firmware
 extern volatile bool    g_bankOpen;      // UIBank visible
 extern volatile uint8_t g_bankTab;       // pestaña activa (0=FAV 1=SON 2=PERFORM) (2026-07-04: antes 2=CH)
 
@@ -143,25 +144,27 @@ extern volatile uint8_t g_bankTab;       // pestaña activa (0=FAV 1=SON 2=PERFO
 #define UIBANK_COL_PITCH         340
 #define UIBANK_BTN_H             338   // LVGL y (botón) — igual en las 3 tabs, ancho físico del combo
 #define UIBANK_BTN_RADIUS        3
+// Máximo de bancos en la franja de Sonidos/Performances (2026-07-12) — MOTIF-RACK
+// tiene 8 (Preset1-5, GM, User1, User2), el máximo actual entre todos los synths.
+#define UIBANK_MAX_BANKS         8
+// Retardo entre CC0/CC32/PC para synths con SynthSoundDesc.slowSend=true
+// (MOTIF-RACK, cadena MIDI THRU larga en el UMC1820 — diagnóstico 2026-07-12).
+#define UIBANK_SLOW_SEND_MS      5
 
 #define COL_FAV_STAR             0xFF8800   // círculo naranja = favorito
 #define UIBANK_FAV_DOT           20         // diámetro círculo favorito (2026-07-04: antes 12, muy pequeño)
-#define UIBANK_FAV_DOT_MARGIN    26         // distancia borde del botón → CENTRO del círculo (2026-07-04: antes ~9, quedaba pegado al borde)
-#define UIBANK_FAV_RESERVE       (UIBANK_FAV_DOT_MARGIN + UIBANK_FAV_DOT / 2 + 8)   // espacio reservado al texto (~44)
+#define UIBANK_FAV_DOT_MARGIN    38         // distancia borde del botón → CENTRO del círculo (2026-07-05: antes 26, borde del círculo quedaba a solo 16px del borde del botón)
+#define UIBANK_FAV_RESERVE       (UIBANK_FAV_DOT_MARGIN + UIBANK_FAV_DOT / 2 + 4)   // espacio reservado al texto (~40)
 #define UIBANK_LBL_W             (UIBANK_BTN_H - 4)                 // 334 — ancho combo "BANCO:NNN Nombre"
 #define UIBANK_LBL_W2            (UIBANK_LBL_W - UIBANK_FAV_RESERVE) // ancho texto con margen (Sonidos/Performances)
 #define UIBANK_LBL_OFS           (UIBANK_FAV_RESERVE / 2)            // desplaza el texto para dejar sitio al círculo
 #define UIBANK_FAV_DOT_OFS       -((UIBANK_BTN_H / 2) - UIBANK_FAV_DOT_MARGIN)      // eje local-y (izquierda física)
 
 // ── Sintetizador activo ───────────────────────────────────────────────
-enum class ExSynth : uint8_t { JV2080=0, TRITON=1, TG55=2, D110=3, WAVE=4 };
+enum class ExSynth : uint8_t { JV2080=0, TRITON=1, TG55=2, D110=3, WAVE=4, MOTIF=5 };
 // Modo de sonido activo en el JV-2080 (2026-07-02) — mismo valor que el byte
 // de datos del SysEx DT1 "Sound Mode" (JV-2080_OM.pdf p.187-188, verificado).
 enum class JVSoundMode : uint8_t { PERFORMANCE = 0, PATCH = 1 };
-// Canal MIDI de salida según Sound Mode activo (2026-07-02 17:55) — Patch y
-// Performance son tracks distintos en Logic Pro, cada uno con su propio canal.
-#define MIDI_CH_PATCH      12
-#define MIDI_CH_PERFORM     1
 // Device ID del JV-2080 para todo SysEx Roland (byte 3: F0 41 [dev] 6A...)
 // (2026-07-02 18:31). Configurable en el propio synth: panel SYSTEM →
 // [F3](MIDI) → Device ID, rango 10H-1FH. Si no coincide con el panel, el
@@ -180,10 +183,11 @@ enum class JVSoundMode : uint8_t { PERFORMANCE = 0, PATCH = 1 };
 #define TRITON_MODE_COMBI  0x00
 #define TRITON_MODE_PROG   0x02
 
-#define NUM_SYNTHS       5
+#define NUM_SYNTHS       6
 #define COL_SYNTH_JV     0x0044FF
 #define COL_SYNTH_TRI    0x8800FF
 #define COL_SYNTH_TG     0x00CC00
 #define COL_SYNTH_D110   0x00BBAA
 #define COL_SYNTH_WAVE   0xFF6600
+#define COL_SYNTH_MOTIF  0xFFDD00
 extern volatile ExSynth g_currentSynth;

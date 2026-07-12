@@ -23,6 +23,10 @@ void sendBankPC(uint8_t ch, uint8_t msb, uint8_t lsb, uint8_t pc) {
     MIDI.programChange(pc, ch);        // Program Change
 }
 
+void sendPC(uint8_t ch, uint8_t pc) {
+    MIDI.programChange(pc, ch);
+}
+
 // Trocea un SysEx de 12 bytes (múltiplo exacto de 3) en paquetes USB-MIDI
 // class-compliant: CIN 0x4 = SysEx continúa, CIN 0x7 = termina con 3 bytes.
 static void sendSysEx12(const uint8_t bytes[12]) {
