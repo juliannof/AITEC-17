@@ -2,8 +2,10 @@
 // Fuente verificada: docs/Korg_Triton_Patches_Verificado.md
 //   - TritonR_VNL_EFGJ1.pdf (Voice Name List oficial, PRELOAD.PCG) — nombres.
 //   - TRITON_Rack_MIDIimp.TXT (MIDI Implementation Rev 1.6) — Bank Select MSB/LSB.
-// Solo PRELOAD.PCG: INT-A..D (Program+Combination) + Bank G (GM). Sin EXB-x/INT-E/F
-// (placas de expansión no instaladas, no aparecen en el VNL de este equipo).
+// Solo PRELOAD.PCG: INT-A..D (Program+Combination) + Bank G (GM) + Bank g(d) (GM
+// Drums, 2026-07-13). Sin EXB-x/INT-E/F (placas de expansión no instaladas, no
+// aparecen en el VNL de este equipo). g(1)..g(9) (variaciones GM2) pendiente —
+// tabla dispersa con fallback a Bank G, requiere extracción exhaustiva del VNL.
 #include "TritonPatches.h"
 
 static const char* const kCombiA[128] = {
@@ -321,6 +323,23 @@ static const char* const kBankG[128] = {
     "Telephone Ring 1",  "Helicopter",        "Applause",          "Gun Shot",
 };
 
+// Bank g(d) (GM Drums) — solo 9 PC tienen nombre (kits GM2 estándar), el resto
+// del banco (hasta 128 PC posibles) no está poblado en PRELOAD.PCG. PC 0-based
+// (TritonR_VNL_EFGJ1.pdf p.24-25: g(d)001=STANDARD Kit ... g(d)057=SFX Kit,
+// numeración 1-based en el VNL → aquí -1).
+struct GdEntry { uint8_t pc; const char* name; };
+static const GdEntry kBankGd[9] = {
+    {0,  "STANDARD Kit"},
+    {8,  "ROOM Kit"},
+    {16, "POWER Kit"},
+    {24, "ELECTRONIC Kit"},
+    {25, "ANALOG Kit"},
+    {32, "JAZZ Kit"},
+    {40, "BRUSH Kit"},
+    {48, "ORCHESTRA Kit"},
+    {56, "SFX Kit"},
+};
+
 const char* tritonProgName(uint8_t msb, uint8_t lsb, uint8_t pc) {
     if (pc > 127) return nullptr;
     if (msb == 0x00) {
@@ -332,6 +351,10 @@ const char* tritonProgName(uint8_t msb, uint8_t lsb, uint8_t pc) {
         }
     } else if (msb == 0x79 && lsb == 0x00) {
         return kBankG[pc];
+    } else if (msb == 0x78 && lsb == 0x00) {
+        for (const auto& e : kBankGd)
+            if (e.pc == pc) return e.name;
+        return nullptr;
     }
     return nullptr;
 }

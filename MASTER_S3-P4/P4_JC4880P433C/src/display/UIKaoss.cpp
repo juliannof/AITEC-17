@@ -1,13 +1,13 @@
-// display/UIKaoss.cpp — ExPressif main screen  (AITEC 2026-06-29)
+// display/UIKaoss.cpp — ExPressif main screen  (AITEC 2026-06-29 → 2026-07-14: botón PRESET + editor)
 // LVGL portrait 480×800, hardware rota a landscape 800×480
 // Mapping: screen_x = LVGL_y,  screen_y = 479 − LVGL_x
 //
 // Layout LVGL portrait → pantalla landscape:
-//   HOLD  pos(240, 0)   BTN_W×BTN_H  → izq-arriba (screen x:0→150,   y:0→240)
-//   TAP   pos(0,   0)   BTN_W×BTN_H  → izq-abajo  (screen x:0→150,   y:240→480)
-//   PAD   pos(0,   150) P4_W×PAD_SIZE → centro     (screen x:150→650, y:0→480)
-//   SCALE pos(240, 650) BTN_W×BTN_H  → der-arriba (screen x:650→800, y:0→240)
-//   PANIC pos(0,   650) BTN_W×BTN_H  → der-abajo  (screen x:650→800, y:240→480)
+//   HOLD   pos(240, 0)   BTN_W×BTN_H  → izq-arriba (screen x:0→150,   y:0→240)
+//   TAP    pos(0,   0)   BTN_W×BTN_H  → izq-abajo  (screen x:0→150,   y:240→480)
+//   PAD    pos(0,   150) P4_W×PAD_SIZE → centro     (screen x:150→650, y:0→480)
+//   PRESET pos(240, 650) BTN_W×BTN_H  → der-arriba (screen x:650→800, y:0→240) — antes SCALE (2026-07-14)
+//   PANIC  pos(0,   650) BTN_W×BTN_H  → der-abajo  (screen x:650→800, y:240→480)
 //
 // LED behavior:
 //   Idle:   todos los dots apagados (0%)
@@ -17,10 +17,12 @@
 
 #include "UIKaoss.h"
 #include "UIBank.h"
+#include "UIKaosEdit.h"
 #include "../config.h"
 #include "../midi/MIDIOut.h"
 #include "../kaoss/KaossPad.h"
 #include "lvgl.h"
+#include <stdio.h>
 
 #define DOTS_N   8
 #define CELL_W   (P4_W    / DOTS_N)     // 60px
@@ -32,7 +34,7 @@
 static const uint8_t k_peak[4] = {255, 191, 89, 38};  // 100%, 75%, 35%, 15%
 
 static lv_obj_t*   s_pad              = NULL;
-static lv_obj_t*   s_lbl_scale        = NULL;
+static lv_obj_t*   s_lbl_preset       = NULL;
 static lv_obj_t*   s_lbl_hold         = NULL;
 static lv_obj_t*   s_lbl_synth        = NULL;
 static lv_obj_t*   s_btn[4]           = {};
@@ -107,13 +109,19 @@ static uint32_t synthColor() {
     }
 }
 
-static void mode_color(uint8_t* r, uint8_t* g, uint8_t* b) {
-    uint32_t col;
-    switch (g_currentMode) {
-        case ExMode::NOTE_GRID:   col = COL_MODE_GRID;  break;
-        case ExMode::ARPEGGIATOR: col = COL_MODE_ARP;   break;
-        default:                  col = COL_MODE_KAOSS; break;
-    }
+// Oscurece 'col' a 'pct'% de brillo — usado para la franja del botón PRESET
+// en reposo (2026-07-14), mismo criterio que dim()/bright() del NeoTrellis.
+static uint32_t darken(uint32_t col, uint8_t pct) {
+    uint8_t r = (uint8_t)(((col >> 16) & 0xFF) * pct / 100);
+    uint8_t g = (uint8_t)(((col >>  8) & 0xFF) * pct / 100);
+    uint8_t b = (uint8_t)(( col        & 0xFF) * pct / 100);
+    return ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
+}
+
+// Color de la rejilla de dots y el scroll — por synth activo desde 2026-07-14
+// (antes por modo KAOSS_XY/NOTE_GRID/ARPEGGIATOR, ver synthColor() arriba).
+static void synth_color_rgb(uint8_t* r, uint8_t* g, uint8_t* b) {
+    uint32_t col = synthColor();
     *r = (col >> 16) & 0xFF;
     *g = (col >>  8) & 0xFF;
     *b =  col        & 0xFF;
@@ -123,7 +131,7 @@ static void mode_color(uint8_t* r, uint8_t* g, uint8_t* b) {
 // Si pos_changed=true limpia primero los dots del radio anterior
 static void update_leds_draw(bool pos_changed = false) {
     uint8_t mr, mg, mb;
-    mode_color(&mr, &mg, &mb);
+    synth_color_rgb(&mr, &mg, &mb);
 
     // Si no hay nada que mostrar y no hubo cambio de posición: no hacer nada
     if (s_glow_t <= 0.0f && !s_pressing && !(bool)g_holdMode && !pos_changed) return;
@@ -175,7 +183,7 @@ static void update_leds_draw(bool pos_changed = false) {
 // Mapping filas: i=7→font_row 0 (top), i=1→font_row 6 (bottom), i=0=margen
 static void scroll_draw() {
     uint8_t mr, mg, mb;
-    mode_color(&mr, &mg, &mb);
+    synth_color_rgb(&mr, &mg, &mb);
 
     for (int j = 0; j < DOTS_N; j++) {
         int tc = s_scroll_tick + j - (DOTS_N - 1);  // columna de texto en este j
@@ -264,12 +272,15 @@ static void pad_event_cb(lv_event_t* e) {
         s_glow_t   = 1.0f;
         s_pressing = true;
 
-        uint8_t ccX = kaoss.mapXtoCC(pad_x);
-        uint8_t ccY = kaoss.mapYtoCC(pad_y);
-        sendCC(MIDI_CH, kaoss.getCCX(), ccX);
-        sendCC(MIDI_CH, kaoss.getCCY(), ccY);
-        g_lastCCX = ccX;
-        g_lastCCY = ccY;
+        if (kaoss.hasPreset()) {
+            uint8_t ccX = kaoss.mapXtoCC(pad_x);
+            uint8_t ccY = kaoss.mapYtoCC(pad_y);
+            uint8_t ch  = kaoss.getChannel();
+            sendCC(ch, kaoss.getCCX(), ccX);
+            sendCC(ch, kaoss.getCCY(), ccY);
+            g_lastCCX = ccX;
+            g_lastCCY = ccY;
+        }
         g_touched  = true;
         update_leds_draw();
 
@@ -281,13 +292,16 @@ static void pad_event_cb(lv_event_t* e) {
             s_glow_t = 1.0f;
             if (s_decay_tmr) lv_timer_resume(s_decay_tmr);
         }
-        uint8_t ccX = kaoss.mapXtoCC(pad_x);
-        uint8_t ccY = kaoss.mapYtoCC(pad_y);
-        if (ccX != (uint8_t)g_lastCCX || ccY != (uint8_t)g_lastCCY) {
-            sendCC(MIDI_CH, kaoss.getCCX(), ccX);
-            sendCC(MIDI_CH, kaoss.getCCY(), ccY);
-            g_lastCCX = ccX;
-            g_lastCCY = ccY;
+        if (kaoss.hasPreset()) {
+            uint8_t ccX = kaoss.mapXtoCC(pad_x);
+            uint8_t ccY = kaoss.mapYtoCC(pad_y);
+            if (ccX != (uint8_t)g_lastCCX || ccY != (uint8_t)g_lastCCY) {
+                uint8_t ch = kaoss.getChannel();
+                sendCC(ch, kaoss.getCCX(), ccX);
+                sendCC(ch, kaoss.getCCY(), ccY);
+                g_lastCCX = ccX;
+                g_lastCCY = ccY;
+            }
         }
         update_leds_draw(moved);
 
@@ -339,13 +353,15 @@ static void btn_event_cb(lv_event_t* e) {
                     g_holdMode = !g_holdMode;
                     uiKaossUpdateHold();
                     break;
-                case 2:
-                    kaoss.nextPreset();
-                    uiKaossUpdateScale();
+                case 2:                              // PRESET (antes SCALE) — abre editor (2026-07-14)
+                    uiKaosEditShow();
                     break;
                 case 3:
-                    sendCC(MIDI_CH, kaoss.getCCX(), 64);
-                    sendCC(MIDI_CH, kaoss.getCCY(), 64);
+                    if (kaoss.hasPreset()) {
+                        uint8_t ch = kaoss.getChannel();
+                        sendCC(ch, kaoss.getCCX(), 64);
+                        sendCC(ch, kaoss.getCCY(), 64);
+                    }
                     g_lastCCX  = 64;
                     g_lastCCY  = 64;
                     g_touched  = false;
@@ -370,6 +386,8 @@ static void btn_event_cb(lv_event_t* e) {
                 // press corto: cicla sintetizador
                 g_currentSynth = (ExSynth)(((uint8_t)g_currentSynth + 1) % NUM_SYNTHS);
                 uiKaossUpdateSynth();
+                uiBankSynthChanged();   // sincroniza banco/etiqueta de UIBank (2026-07-13) —
+                                        // faltaba en este camino táctil, solo lo hacía NeoTrellis
             }
             strip_set_lit(1, false);
             s_btn1_long_press = false;
@@ -475,15 +493,15 @@ void uiKaossCreate(lv_obj_t* parent) {
     lv_obj_align(s_lbl_hold, LV_ALIGN_CENTER, -15, 0);
     rot_label(s_lbl_hold);
 
-    s_btn[2] = make_btn(parent, BTN_W, PAD_START_Y + PAD_SIZE, "SCALE", 0x00AA44,       COL_BTN_SCALE, COL_BTN_BG,    2);
-    s_btn[3] = make_btn(parent, 0,     PAD_START_Y + PAD_SIZE, "PANIC", COL_FUNC_PANIC, COL_BTN_PANIC, COL_BTN_PANIC, 3);
+    s_btn[2] = make_btn(parent, BTN_W, PAD_START_Y + PAD_SIZE, "PRESET", synthColor(), darken(synthColor(), 20), COL_BTN_BG, 2);
+    s_btn[3] = make_btn(parent, 0,     PAD_START_Y + PAD_SIZE, "PANIC",  COL_FUNC_PANIC, COL_BTN_PANIC, COL_BTN_PANIC, 3);
 
-    s_lbl_scale = lv_label_create(s_btn[2]);
-    lv_label_set_text(s_lbl_scale, kaoss.presetName());
-    lv_obj_set_style_text_color(s_lbl_scale, lv_color_hex(COL_TEXT_DIM), 0);
-    lv_obj_set_style_text_font(s_lbl_scale, &lv_font_montserrat_14, 0);
-    lv_obj_align(s_lbl_scale, LV_ALIGN_CENTER, -15, 0);
-    rot_label(s_lbl_scale);
+    s_lbl_preset = lv_label_create(s_btn[2]);
+    lv_obj_set_style_text_color(s_lbl_preset, lv_color_hex(COL_TEXT_DIM), 0);
+    lv_obj_set_style_text_font(s_lbl_preset, &lv_font_montserrat_14, 0);
+    lv_obj_align(s_lbl_preset, LV_ALIGN_CENTER, -15, 0);
+    rot_label(s_lbl_preset);
+    uiKaossUpdatePreset();
 
     lv_obj_t* lbl_panic = lv_label_create(s_btn[3]);
     lv_label_set_text(lbl_panic, "ALL OFF");
@@ -497,11 +515,17 @@ void uiKaossCreate(lv_obj_t* parent) {
     lv_timer_pause(s_scroll_tmr);
 }
 
-void uiKaossUpdateScale() {
-    if (s_lbl_scale) lv_label_set_text(s_lbl_scale, kaoss.presetName());
+// Muestra el par de parámetros del slot activo (nombre, no número — 2026-07-14).
+static char s_preset_buf[40];
+void uiKaossUpdatePreset() {
+    if (!s_lbl_preset) return;
+    snprintf(s_preset_buf, sizeof(s_preset_buf), "%s\n%s", kaoss.nameX(), kaoss.nameY());
+    lv_label_set_text(s_lbl_preset, s_preset_buf);
 }
 
 void uiKaossUpdateSynth() {
+    kaoss.syncToSynth();   // recarga el slot activo con los datos del nuevo synth (2026-07-14)
+    uiKaossUpdatePreset();
     if (!s_btn[1] || !s_lbl_synth) return;
     uint32_t col = synthColor();
     lv_label_set_text(s_lbl_synth, synthName());
@@ -510,6 +534,14 @@ void uiKaossUpdateSynth() {
     s_dim_cols[1]    = COL_BTN_TAP;
     if (s_strips[1])
         lv_obj_set_style_bg_color(s_strips[1], lv_color_hex(COL_BTN_TAP), 0);
+
+    // Franja PRESET — color por synth también en reposo (2026-07-14)
+    s_accent_cols[2] = col;
+    s_dim_cols[2]    = darken(col, 20);
+    if (s_strips[2])
+        lv_obj_set_style_bg_color(s_strips[2], lv_color_hex(darken(col, 20)), 0);
+
+    uiKaossUpdateLeds();   // recolorea la rejilla si estaba brillando al cambiar de synth
 }
 
 void uiKaossUpdateHold() {
@@ -549,5 +581,5 @@ void uiKaossDestroy() {
     for (int i = 0; i < DOTS_N; i++)
         for (int j = 0; j < DOTS_N; j++)
             s_dots[i][j] = NULL;
-    s_lbl_scale = s_lbl_hold = s_lbl_synth = NULL;
+    s_lbl_preset = s_lbl_hold = s_lbl_synth = NULL;
 }

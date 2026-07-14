@@ -1,23 +1,44 @@
-// kaoss/KaossPad.cpp — ExPressif XY pad logic  (AITEC 2026-06-29)
+// kaoss/KaossPad.cpp — ExPressif XY pad logic  (AITEC 2026-06-29 → 2026-07-14: 20 slots NVS)
 #include "KaossPad.h"
+#include "KaosParams.h"
 
 KaossPad kaoss;
 
-// Presets CC: cada uno asigna un par de CCs al pad XY
-// NUM_SCALES = 4 (reutilizamos la constante)
-const CCPreset KaossPad::_presets[NUM_SCALES] = {
-    { 1,  2, "MOD "},   // mod wheel / controller 2  (Wavestation CC1/CC2)
-    {16, 17, "JOY "},   // joystick X / joystick Y   (Wavestation CC16/CC17)
-    {74, 71, "FILT"},   // cutoff / resonance
-    {91, 93, "FX  "},   // reverb / chorus
-};
-
-void KaossPad::nextPreset() {
-    _preset = (_preset + 1) % NUM_SCALES;
+void KaossPad::reloadInternal() {
+    if (!kaosLoad(g_currentSynth, _preset, _current))
+        _current = {0, 0, 0};
 }
 
 void KaossPad::setPreset(uint8_t n) {
-    if (n < NUM_SCALES) _preset = n;
+    if (n >= KAOS_SLOTS) return;
+    _preset = n;
+    reloadInternal();
+}
+
+void KaossPad::reloadChannel() {
+    _channel = kaosLoadChannel(g_currentSynth);
+}
+
+void KaossPad::syncToSynth() {
+    reloadInternal();   // mismo índice de slot, datos del nuevo synth
+    reloadChannel();    // canal es por synth, no por slot (2026-07-14)
+}
+
+void KaossPad::reload() {
+    reloadInternal();
+    reloadChannel();
+}
+
+const char* KaossPad::nameX() const {
+    if (!hasPreset()) return "—";
+    const char* n = kaosParamName(g_currentSynth, _current.ccX);
+    return n ? n : "—";
+}
+
+const char* KaossPad::nameY() const {
+    if (!hasPreset()) return "—";
+    const char* n = kaosParamName(g_currentSynth, _current.ccY);
+    return n ? n : "—";
 }
 
 uint8_t KaossPad::mapXtoCC(uint16_t pad_x) const {

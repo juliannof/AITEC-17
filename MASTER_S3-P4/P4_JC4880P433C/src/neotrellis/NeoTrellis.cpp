@@ -1,11 +1,20 @@
-// neotrellis/NeoTrellis.cpp — ExPressif NeoTrellis driver (AITEC 2026-06-30)
+// neotrellis/NeoTrellis.cpp — ExPressif NeoTrellis driver (AITEC 2026-06-30 → 2026-07-14: 20 presets)
 //
 // Layout (4 filas × 8 columnas):
 //   Panel izq 0x2F  │  Panel der 0x2E
 //   Col: 0  1  2  3 │  4  5  6  7
-//   Row0:HOLD PAN SCL -- │ MOD JOY FLT FX   ← función/presets
-//   Row1:SYNT --  --  -- │ --  --  --  --   ← sintetizador activo
-//   Rows2-3: apagadas
+//   Row0:HOLD PAN BR+ PRE│ PRE PRE PRE PRE   ← BR=brillo pantalla, PRE=preset directo
+//   Row1:SYNT --  BR- PRE│ PRE PRE PRE PRE
+//   Row2:SYNT SYNT SYNT PRE│ PRE PRE PRE PRE
+//   Row3:SYNT SYNT SYNT PRE│ PRE PRE PRE PRE
+//
+// Preset directo (2026-07-14) — 20 memorias, selección SIEMPRE directa (sin
+// ciclar, L2/SCALE retirado): L3,L7,L11,L15 (col3 panel izq, una por fila) +
+// R0-R15 completo (panel der) = 4 + 16 = 20. Fórmula: preset = fila×5 + (0 si
+// es Lx, o 1+col si es Rx).
+// L2/L6 (2026-07-14) — brillo de pantalla +/− (ver UIBrightnessPopup.cpp),
+// popup en pantalla con el número. L5 (2026-07-14) — metrónomo visual,
+// parpadea sincronizado al MIDI Clock USB entrante (ver metronomeUpdate()).
 //
 // Modelo de brillo (dos constantes independientes en config.h):
 //   TRELLIS_BRIGHTNESS = nivel max-canal para LEDs ACTIVOS  (0-255)
@@ -20,6 +29,7 @@
 #include <Adafruit_NeoTrellis.h>
 #include "../config.h"
 #include "../kaoss/KaossPad.h"
+#include "../midi/MIDIClock.h"
 
 static Adafruit_NeoTrellis s_left;   // 0x2F — col 0-3
 static Adafruit_NeoTrellis s_right;  // 0x2E — col 4-7
@@ -80,10 +90,10 @@ static uint32_t colorForSynth(ExSynth s) {
 static uint32_t synthColor() { return colorForSynth(g_currentSynth); }
 
 // ── Selección directa de synth — L8,9,10,12,13,14, solo modo Kaoss (2026-07-12) ──
-// Fila2 izq (L8,L9,L10) y fila3 izq (L12,L13,L14); L11/L15 (col3) sin usar,
-// igual que col3 en fila0/1 hoy. Con Bank abierto estas mismas teclas son
-// tríos de contenido (ver leftTripletSlot) — por eso esta rama solo se evalúa
-// cuando g_bankOpen es false (estructural, ver cb_left).
+// Fila2 izq (L8,L9,L10) y fila3 izq (L12,L13,L14); L11/L15 (col3) son preset
+// directo (ver presetIndexLeft, 2026-07-14), no synth-select. Con Bank abierto
+// estas mismas teclas son tríos de contenido (ver leftTripletSlot) — por eso
+// esta rama solo se evalúa cuando g_bankOpen es false (estructural, ver cb_left).
 struct SynthKeyMap { uint8_t key; ExSynth synth; };
 static const SynthKeyMap kSynthKeys[6] = {
     {8,  ExSynth::JV2080},
@@ -109,32 +119,41 @@ static void refreshSynthSelectKeys() {
     }
 }
 
-static uint32_t modeColor() {
-    switch (g_currentMode) {
-        case ExMode::NOTE_GRID:   return COL_MODE_GRID;
-        case ExMode::ARPEGGIATOR: return COL_MODE_ARP;
-        default:                   return COL_MODE_KAOSS;
-    }
+// ── Preset directo — mapeo físico → índice 0-19 (2026-07-14) ─────────────
+// Panel izq: solo col3 (L3,L7,L11,L15) es preset, una por fila → fila×5.
+// Panel der: las 16 teclas son preset → fila×5 + 1 + col.
+static int8_t presetIndexLeft(uint8_t k) {
+    return ((k % 4) == 3) ? (int8_t)((k / 4) * 5) : -1;
+}
+static int8_t presetIndexRight(uint8_t k) {
+    int row = k / 4, col = k % 4;
+    return (int8_t)(row * 5 + 1 + col);
 }
 
 // ── LED refresh ────────────────────────────────────────────────────────
 static void refreshLeft() {
     s_left.pixels.setPixelColor(0, (bool)g_holdMode ? bright(COL_FUNC_HOLD) : dim(COL_FUNC_HOLD));
     s_left.pixels.setPixelColor(1, dim(COL_FUNC_PANIC));
-    s_left.pixels.setPixelColor(2, dim(0x00AA44u));
-    s_left.pixels.setPixelColor(3, 0u);
+    s_left.pixels.setPixelColor(2, dim(COL_ACCENT));   // brillo pantalla + (2026-07-14, antes SCALE)
     s_left.pixels.setPixelColor(4, dim(synthColor()));
-    for (int i = 5; i < NEO_TRELLIS_NUM_KEYS; i++) s_left.pixels.setPixelColor(i, 0u);
-    refreshSynthSelectKeys();
+    s_left.pixels.setPixelColor(5, 0u);                 // metrónomo — apagado en reposo, ver metronomeUpdate()
+    s_left.pixels.setPixelColor(6, dim(COL_ACCENT));   // brillo pantalla − (2026-07-14)
+
+    uint8_t  preset = kaoss.getPreset();
+    uint32_t sc     = synthColor();   // color por synth (2026-07-14) — antes modeColor()
+    for (int row = 0; row < 4; row++) {
+        int k = row * 4 + 3;              // L3,L7,L11,L15
+        s_left.pixels.setPixelColor(k, (presetIndexLeft(k) == (int8_t)preset) ? bright(sc) : dim(sc));
+    }
+    refreshSynthSelectKeys();             // sobreescribe L8,9,10,12,13,14
     s_left.pixels.show();
 }
 
 static void refreshRight() {
     uint8_t  preset = kaoss.getPreset();
-    uint32_t mc     = modeColor();
-    for (int i = 0; i < 4; i++)
-        s_right.pixels.setPixelColor(i, (i == (int)preset) ? bright(mc) : dim(mc));
-    for (int i = 4; i < NEO_TRELLIS_NUM_KEYS; i++) s_right.pixels.setPixelColor(i, 0u);
+    uint32_t sc     = synthColor();   // color por synth (2026-07-14) — antes modeColor()
+    for (int k = 0; k < NEO_TRELLIS_NUM_KEYS; k++)
+        s_right.pixels.setPixelColor(k, (presetIndexRight(k) == (int8_t)preset) ? bright(sc) : dim(sc));
     s_right.pixels.show();
 }
 
@@ -185,10 +204,16 @@ static TrellisCallback cb_left(keyEvent evt) {
         s_left.pixels.setPixelColor(1, pressed ? bright(COL_FUNC_PANIC) : dim(COL_FUNC_PANIC));
         s_left.pixels.show();
         if (pressed) g_trellis_panic = true;
-    } else if (k == 2) {                             // SCALE — cicla presets
-        s_left.pixels.setPixelColor(2, pressed ? bright(0xFFFFFFu) : dim(0x00AA44u));
+    } else if (k == 2) {                              // brillo pantalla + (2026-07-14, antes SCALE)
+        s_left.pixels.setPixelColor(2, pressed ? bright(COL_ACCENT) : dim(COL_ACCENT));
         s_left.pixels.show();
-        if (pressed) g_trellis_nextPreset = true;
+        if (pressed) g_trellis_brightUp = true;
+    } else if (k == 6) {                              // brillo pantalla − (2026-07-14)
+        s_left.pixels.setPixelColor(6, pressed ? bright(COL_ACCENT) : dim(COL_ACCENT));
+        s_left.pixels.show();
+        if (pressed) g_trellis_brightDown = true;
+    } else if ((k % 4) == 3) {                        // L3,L7,L11,L15 — preset directo (2026-07-14)
+        if (pressed) g_trellis_setPreset = presetIndexLeft(k);
     } else if (g_currentMode == ExMode::KAOSS_XY) {   // L8,9,10,12,13,14 — selección directa synth
         int8_t syn = synthForKey(k);
         if (syn >= 0 && pressed) {
@@ -214,12 +239,8 @@ static TrellisCallback cb_right(keyEvent evt) {
         return 0;
     }
 
-    if (pressed && k < 4) {                          // selección directa de preset
-        g_trellis_setPreset = (int8_t)k;
-        uint32_t mc = modeColor();
-        for (int i = 0; i < 4; i++)
-            s_right.pixels.setPixelColor(i, (i == (int)k) ? bright(mc) : dim(mc));
-        s_right.pixels.show();
+    if (pressed) {                                   // R0-R15 — preset directo (2026-07-14)
+        g_trellis_setPreset = presetIndexRight(k);
     }
     return 0;
 }
@@ -283,6 +304,34 @@ void neotrellisInit() {
           TRELLIS_SDA_PIN, TRELLIS_SCL_PIN, TRELLIS_ADDR_L, TRELLIS_ADDR_R);
 }
 
+// ── Metrónomo visual — L5, sincronizado a MIDI Clock entrante (2026-07-14) ──
+// midiClockPoll() ya se llamó este ciclo (taskCore0, main.cpp) — aquí solo
+// se consume el beat y se dibuja el flash con decay, mismo patrón que
+// s_glow_t del pad XY (UIKaoss.cpp).
+static float s_metroGlow = 0.0f;
+
+static void metronomeUpdate() {
+    bool running = midiClockIsRunning();
+    if (running && midiClockConsumeBeat()) s_metroGlow = 1.0f;
+
+    if (!running) {
+        if (s_metroGlow != 0.0f) {
+            s_metroGlow = 0.0f;
+            s_left.pixels.setPixelColor(5, 0u);
+            s_left.pixels.show();
+        }
+        return;
+    }
+    if (s_metroGlow <= 0.0f) return;
+
+    uint8_t lvl = (uint8_t)((float)TRELLIS_BRIGHTNESS * s_metroGlow);
+    s_left.pixels.setPixelColor(5, scaleCol(COL_ACCENT, lvl));
+    s_left.pixels.show();
+
+    s_metroGlow -= 0.25f;   // ~4 ticks × 20ms = 80ms de flash
+    if (s_metroGlow < 0.0f) s_metroGlow = 0.0f;
+}
+
 void neotrellisUpdate() {
     s_left.read();
     s_right.read();
@@ -297,6 +346,7 @@ void neotrellisUpdate() {
     if (curPreset != s_lastPreset) {
         s_lastPreset = curPreset;
         refreshRight();
+        refreshLeft();   // L3,L7,L11,L15 también son preset directo (2026-07-14)
     }
     if (curHold != s_lastHold) {
         s_lastHold = curHold;
@@ -305,8 +355,15 @@ void neotrellisUpdate() {
     }
     if (curSynth != s_lastSynth) {
         s_lastSynth = curSynth;
-        s_left.pixels.setPixelColor(4, dim(synthColor()));
-        refreshSynthSelectKeys();
-        s_left.pixels.show();
+        // Bug (2026-07-14, reportado en vivo): esto solo refrescaba pixel 4 +
+        // selección de synth — las 20 teclas de preset (color por synth desde
+        // hoy) se quedaban con el color del synth ANTERIOR hasta el próximo
+        // cambio de preset. refreshLeft()/refreshRight() ya recalculan todo
+        // (incluye synthColor() en las 20 teclas), sea cual sea el camino que
+        // cambió g_currentSynth (botón táctil, cicla o selección directa).
+        refreshLeft();
+        refreshRight();
     }
+
+    metronomeUpdate();   // L5 — parpadeo sincronizado a MIDI Clock (2026-07-14)
 }

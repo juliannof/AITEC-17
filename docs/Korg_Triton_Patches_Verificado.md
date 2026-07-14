@@ -1,11 +1,15 @@
 # Korg Triton (Rack) — Listado de Programs/Combinations (Verificado)
 
-**Fuentes cruzadas (2026-07-04):**
+**Fuentes cruzadas (2026-07-04, ampliado 2026-07-13):**
 1. `TritonR_VNL_EFGJ1.pdf` (Korg Voice Name List oficial, PRELOAD.PCG) — nombres de Programs/Combinations, texto nativo.
 2. `TRITON_Rack_MIDIimp.TXT` (Korg TRITON-Rack MIDI Implementation, Rev 1.6, Jul.14.'03) — Bank Select MSB/LSB, Mode Change SysEx.
+3. `TritonR_PG_E3.pdf` (Korg TRITON-Rack Parameter Guide, p.109 "Bank Map") — confirma msb/lsb de Bank G / g(1)-g(9) / g(d).
 
-Solo bancos PRELOAD.PCG instalados en este equipo (INT-A/B/C/D + Bank G). No incluye EXB-A..H
-ni INT-E/F (placas de expansión, no instaladas — no aparecen en el VNL de este equipo).
+Solo bancos PRELOAD.PCG instalados en este equipo (INT-A/B/C/D + Bank G + Bank g(d)). No incluye
+EXB-A..H ni INT-E/F (placas de expansión, no instaladas — no aparecen en el VNL de este equipo).
+g(1)-g(9) (variaciones GM2 de Bank G) existen en el PRELOAD.PCG pero no están implementadas en
+firmware — tabla dispersa (no todos los PC tienen nombre propio, el resto cae a Bank G con "*"
+delante) que requiere extracción exhaustiva del VNL, pendiente.
 
 **Nombres extraídos programáticamente** del texto del VNL (`pdftotext -layout` + parser por
 columnas, con lista de categorías conocidas para separar nombre/categoría cuando el espaciado

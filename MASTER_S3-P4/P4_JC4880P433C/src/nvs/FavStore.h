@@ -43,3 +43,16 @@ void favMarkBank(ExSynth synth, uint8_t ch, uint8_t msb, uint8_t lsb, JVSoundMod
 
 // Índice del slot que guarda este patch como favorito, o -1 si no está guardado.
 int favFindIndex(ExSynth synth, uint8_t ch, uint8_t msb, uint8_t lsb, uint8_t pc, JVSoundMode mode);
+
+// Último PC seleccionado POR BANCO (2026-07-13) — a diferencia de
+// favSaveLastSel() (un solo "último banco" global, para restaurar al
+// arrancar), esto recuerda un PC por cada (synth,msb,lsb) visitado, para que
+// cambiar de banco salte al último sonido usado ahí en vez de a la página 0.
+// Solo Sonidos (Program), igual que favSaveLastSel() — Performance no se
+// persiste. bankLastSelSet() SOLO toca RAM (sin NVS) — evita el lag táctil
+// de escribir flash en cada tap (ver soundtab_click_pc). La escritura real
+// a NVS ocurre en bankLastSelFlushIfDirty(), llamada periódicamente (cada
+// ~60s si hay cambios) y al cerrar Bank — nunca en el camino del touch.
+void bankLastSelSet(ExSynth synth, uint8_t msb, uint8_t lsb, uint8_t pc);
+bool bankLastSelGet(ExSynth synth, uint8_t msb, uint8_t lsb, uint8_t& pc);
+void bankLastSelFlushIfDirty();

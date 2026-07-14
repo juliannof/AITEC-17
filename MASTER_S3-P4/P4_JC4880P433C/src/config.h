@@ -101,15 +101,19 @@ extern volatile bool    g_bootDone;
 
 // ── Flags cross-core NeoTrellis→LVGL (Core0→Core1) ───────────────────
 extern volatile bool   g_trellis_holdToggle;  // toggle g_holdMode
-extern volatile bool   g_trellis_nextPreset;  // kaoss.nextPreset()
 extern volatile bool   g_trellis_panic;       // CC reset a 64
-extern volatile int8_t g_trellis_setPreset;   // -1=none, 0-3=preset directo
+extern volatile int8_t g_trellis_setPreset;   // -1=none, 0-19=preset directo (2026-07-14, antes 0-3)
 extern volatile bool   g_trellis_nextSynth;   // cicla sintetizador activo
 extern volatile int8_t g_trellis_setSynth;    // -1=none, selección directa L8,9,10,12,13,14 (solo modo Kaoss, 2026-07-12)
 extern volatile bool   g_trellis_openBank;    // abre/cierra UIBank
 extern volatile int8_t g_trellis_bankSlot;    // slot (0-7) pulsado en modo Bank (-1=ninguno) (2026-07-04: antes 0-15)
 extern volatile bool   g_trellis_bankPrev;    // columna 0 (L0,4,8,12) — página anterior (2026-07-04)
 extern volatile bool   g_trellis_bankNext;    // columna 7 (R3,7,11,15) — página siguiente (2026-07-04)
+extern volatile bool   g_trellis_brightDown;  // L2 — brillo pantalla − (2026-07-14, antes SCALE)
+extern volatile bool   g_trellis_brightUp;    // L6 — brillo pantalla + (2026-07-14)
+
+// ── Brillo de pantalla ──────────────────────────────────────────────────
+extern volatile uint8_t g_displayBrightness;  // 10-100%, paso 10, ajustable con L2/L6 NeoTrellis (2026-07-14)
 
 // ── Bank / Canal MIDI ─────────────────────────────────────────────────────
 extern volatile uint8_t g_midiChannel;   // canal MIDI activo — fijo en 1 (2026-07-12): Logic enruta por track, no el firmware
@@ -135,12 +139,18 @@ extern volatile uint8_t g_bankTab;       // pestaña activa (0=FAV 1=SON 2=PERFO
 
 // Geometría física — Sonidos/Performances reservan franja de 58px para el
 // selector de banco (igual que antes); Favoritos usa el ancho completo.
+// UIBANK_TOPSTRIP_W (2026-07-13): franja del nombre de synth activo, extremo
+// LVGL x alto (= screen_y≈0, borde físico superior, misma banda que la X de
+// cerrar) — los 3 grids (Sonidos/Performances/Favoritos) recortan su ancho
+// para no invadirla (antes llegaban a P4_W sin margen y la franja nueva
+// tapaba el borde de la fila superior).
+#define UIBANK_TOPSTRIP_W        36
 #define UIBANK_TILE_X            60    // LVGL x donde empieza el grid (tras franja de banco)
-#define UIBANK_TILE_W            420   // ancho grid LVGL x (= P4_W - UIBANK_TILE_X) — Sonidos/Performances
-#define UIBANK_ROW_PITCH_BANK    (UIBANK_TILE_W / UIBANK_GRID_ROWS)   // 105
-#define UIBANK_ROW_PITCH_FULL    (P4_W / UIBANK_GRID_ROWS)            // 120 — Favoritos (sin franja de banco)
-#define UIBANK_BTN_W_BANK        (UIBANK_ROW_PITCH_BANK - 2)          // 103
-#define UIBANK_BTN_W_FULL        (UIBANK_ROW_PITCH_FULL - 2)          // 118
+#define UIBANK_TILE_W            (P4_W - UIBANK_TILE_X - UIBANK_TOPSTRIP_W)   // 384 — Sonidos/Performances
+#define UIBANK_ROW_PITCH_BANK    (UIBANK_TILE_W / UIBANK_GRID_ROWS)   // 96
+#define UIBANK_ROW_PITCH_FULL    ((P4_W - UIBANK_TOPSTRIP_W) / UIBANK_GRID_ROWS)   // 111 — Favoritos (sin franja de banco)
+#define UIBANK_BTN_W_BANK        (UIBANK_ROW_PITCH_BANK - 2)          // 94
+#define UIBANK_BTN_W_FULL        (UIBANK_ROW_PITCH_FULL - 2)          // 109
 #define UIBANK_COL_PITCH         340
 #define UIBANK_BTN_H             338   // LVGL y (botón) — igual en las 3 tabs, ancho físico del combo
 #define UIBANK_BTN_RADIUS        3

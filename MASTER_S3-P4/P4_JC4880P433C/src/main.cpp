@@ -5,13 +5,17 @@
 #include <LittleFS.h>
 #include "config.h"
 #include "midi/MIDIOut.h"
+#include "midi/MIDIClock.h"
 #include "display/Display.h"
 #include "display/UIBoot.h"
 #include "display/UIKaoss.h"
 #include "kaoss/KaossPad.h"
 #include "neotrellis/NeoTrellis.h"
 #include "display/UIBank.h"
+#include "display/UIKaosEdit.h"
+#include "display/UIBrightnessPopup.h"
 #include "nvs/FavStore.h"
+#include "nvs/KaosStore.h"
 
 USBMIDI MIDI;
 
@@ -28,15 +32,18 @@ volatile bool    g_bootDone      = false;
 
 // ── Flags NeoTrellis → LVGL (Core 0 → Core 1) ────────────────────────
 volatile bool    g_trellis_holdToggle = false;
-volatile bool    g_trellis_nextPreset = false;
 volatile bool    g_trellis_panic      = false;
-volatile int8_t  g_trellis_setPreset  = -1;
+volatile int8_t  g_trellis_setPreset  = -1;   // -1=none, 0-19=preset directo (2026-07-14)
 volatile bool    g_trellis_nextSynth  = false;
 volatile int8_t  g_trellis_setSynth   = -1;
 volatile bool    g_trellis_openBank   = false;
 volatile int8_t  g_trellis_bankSlot   = -1;
 volatile bool    g_trellis_bankPrev   = false;   // columna 0 (2026-07-04)
 volatile bool    g_trellis_bankNext   = false;   // columna 7 (2026-07-04)
+volatile bool    g_trellis_brightDown = false;   // L2 (2026-07-14)
+volatile bool    g_trellis_brightUp   = false;   // L6 (2026-07-14)
+
+volatile uint8_t g_displayBrightness  = 80;      // 10-100%, ajustable con L2/L6 (2026-07-14)
 
 // ── Sintetizador activo ───────────────────────────────────────────────
 volatile ExSynth g_currentSynth = ExSynth::JV2080;
@@ -54,6 +61,7 @@ TaskHandle_t taskCore1Handle = NULL;
 // ── Core 0 — periféricos ──────────────────────────────────────────────
 void taskCore0(void* pv) {
     for (;;) {
+        midiClockPoll();   // metrónomo visual L5 (2026-07-14) — único lector de MIDI entrante
         neotrellisUpdate();
         vTaskDelay(pdMS_TO_TICKS(20));
     }
@@ -62,13 +70,28 @@ void taskCore0(void* pv) {
 // ── Core 1 — UI LVGL ─────────────────────────────────────────────────
 void taskCore1(void* pv) {
     static bool uiReady = false;
+    static uint32_t s_lastBankFlush = 0;   // último PC por banco (2026-07-13) — flush periódico, no por tap
 
     for (;;) {
+        // Flush NVS de "último PC por banco" cada 60s SOLO si hay cambios
+        // (bankLastSelFlushIfDirty() comprueba el dirty flag internamente) —
+        // evita escribir flash en el camino del touch (ver FavStore.h).
+        // También se hace al cerrar Bank (uiBankHide()); esto es el respaldo
+        // por si la sesión de Bank se queda abierta mucho tiempo.
+        uint32_t now = millis();
+        if (now - s_lastBankFlush >= 60000) {
+            s_lastBankFlush = now;
+            bankLastSelFlushIfDirty();
+        }
+
         // ── Flags NeoTrellis (pueden llegar en cualquier momento) ────────
         if (g_trellis_panic) {
             g_trellis_panic = false;
-            sendCC(MIDI_CH, kaoss.getCCX(), 64);
-            sendCC(MIDI_CH, kaoss.getCCY(), 64);
+            if (kaoss.hasPreset()) {
+                uint8_t ch = kaoss.getChannel();
+                sendCC(ch, kaoss.getCCX(), 64);
+                sendCC(ch, kaoss.getCCY(), 64);
+            }
             g_lastCCX = 64;
             g_lastCCY = 64;
             g_touched = false;
@@ -97,16 +120,11 @@ void taskCore1(void* pv) {
                 g_holdMode = !g_holdMode;
                 uiKaossUpdateHold();
             }
-            if (g_trellis_nextPreset) {
-                g_trellis_nextPreset = false;
-                kaoss.nextPreset();
-                uiKaossUpdateScale();
-            }
             if (g_trellis_setPreset >= 0) {
                 uint8_t target = (uint8_t)g_trellis_setPreset;
                 g_trellis_setPreset = -1;
                 kaoss.setPreset(target);
-                uiKaossUpdateScale();
+                uiKaossUpdatePreset();
             }
             if (g_trellis_nextSynth) {
                 g_trellis_nextSynth = false;
@@ -120,6 +138,18 @@ void taskCore1(void* pv) {
                 uiKaossUpdateSynth();
                 uiBankSynthChanged();   // selección directa L8,9,10,12,13,14 (2026-07-12)
             }
+            if (g_trellis_brightDown) {   // L2 (2026-07-14)
+                g_trellis_brightDown = false;
+                g_displayBrightness = (g_displayBrightness > 20) ? (uint8_t)(g_displayBrightness - 10) : 10;
+                displaySetBrightness(g_displayBrightness);
+                uiBrightnessPopupShow(g_displayBrightness);
+            }
+            if (g_trellis_brightUp) {     // L6 (2026-07-14)
+                g_trellis_brightUp = false;
+                g_displayBrightness = (g_displayBrightness < 100) ? (uint8_t)(g_displayBrightness + 10) : 100;
+                displaySetBrightness(g_displayBrightness);
+                uiBrightnessPopupShow(g_displayBrightness);
+            }
         }
 
         if (!g_bootDone) {
@@ -127,7 +157,9 @@ void taskCore1(void* pv) {
         } else if (!uiReady) {
             uiBootDestroy();
             uiKaossCreate(displayGetRoot());
-            uiBankCreate(displayGetRoot());   // oculto por defecto
+            uiBankCreate(displayGetRoot());          // oculto por defecto
+            uiKaosEditCreate(displayGetRoot());      // oculto por defecto (2026-07-14)
+            uiBrightnessPopupCreate(displayGetRoot()); // topmost, oculto por defecto (2026-07-14)
             uiKaossStartScroll();
             uiReady = true;
         }
@@ -148,8 +180,13 @@ void setup() {
     if (!favInit()) log_e("FavStore FALLO");
     else            log_i("FavStore OK (%d favoritos)", favCount());
 
+    if (!kaosInit()) log_e("KaosStore FALLO");
+    else              log_i("KaosStore OK");
+    kaoss.reload();   // carga el slot 0 del synth por defecto (2026-07-14) — si no,
+                       // el botón PRESET arranca vacío hasta el primer toque NeoTrellis
+
     initDisplay();
-    displaySetBrightness(80);
+    displaySetBrightness(g_displayBrightness);
     log_i("Display OK — 800x480 landscape");
 
     neotrellisInit();

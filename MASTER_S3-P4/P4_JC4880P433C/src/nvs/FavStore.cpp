@@ -8,9 +8,12 @@
 static Preferences s_prefs;
 static int         s_count = 0;   // cache del total (máximo índice+1)
 
+static void bankLastSelLoad();   // definida más abajo, junto al resto de bankLastSel*
+
 bool favInit() {
     bool ok = s_prefs.begin("favs", false);
     s_count = (int)s_prefs.getInt("n", 0);
+    bankLastSelLoad();
     return ok;
 }
 
@@ -87,4 +90,60 @@ int favFindIndex(ExSynth synth, uint8_t ch, uint8_t msb, uint8_t lsb, uint8_t pc
         if (e.synth == synth && e.ch == ch && e.msb == msb && e.lsb == lsb && e.pc == pc && e.mode == mode) return i;
     }
     return -1;
+}
+
+// ── Último PC por banco (2026-07-13) ──────────────────────────────────
+// Cache RAM cargado una vez en favInit(). bankLastSelSet() nunca toca NVS
+// directamente — solo bankLastSelFlushIfDirty() escribe, y solo si hay
+// cambios (ver FavStore.h para el porqué).
+struct BankLastSel { ExSynth synth; uint8_t msb; uint8_t lsb; uint8_t pc; };
+#define BANK_LASTSEL_MAX 48   // 6 synths × hasta 8 bancos (MOTIF-RACK, el máximo actual)
+static BankLastSel s_bankLastSel[BANK_LASTSEL_MAX];
+static int  s_bankLastSelCount = 0;
+static bool s_bankLastSelDirty = false;
+
+static void bankLastSelLoad() {
+    int n = s_prefs.getInt("blsn", 0);
+    if (n < 0) n = 0;
+    if (n > BANK_LASTSEL_MAX) n = BANK_LASTSEL_MAX;
+    size_t want = sizeof(BankLastSel) * (size_t)n;
+    size_t got  = s_prefs.getBytes("bls", s_bankLastSel, want);
+    s_bankLastSelCount = (got == want) ? n : 0;   // corrupto/ausente → vacío, no reventar
+    s_bankLastSelDirty = false;
+}
+
+void bankLastSelSet(ExSynth synth, uint8_t msb, uint8_t lsb, uint8_t pc) {
+    for (int i = 0; i < s_bankLastSelCount; i++) {
+        if (s_bankLastSel[i].synth == synth && s_bankLastSel[i].msb == msb && s_bankLastSel[i].lsb == lsb) {
+            if (s_bankLastSel[i].pc == pc) return;   // sin cambio real, no marcar dirty
+            s_bankLastSel[i].pc = pc;
+            s_bankLastSelDirty = true;
+            return;
+        }
+    }
+    if (s_bankLastSelCount < BANK_LASTSEL_MAX) {
+        s_bankLastSel[s_bankLastSelCount++] = {synth, msb, lsb, pc};
+        s_bankLastSelDirty = true;
+    }
+    // Si se llena BANK_LASTSEL_MAX, se ignoran bancos nuevos en silencio —
+    // no debería pasar en la práctica (48 > cualquier combinación real hoy).
+}
+
+bool bankLastSelGet(ExSynth synth, uint8_t msb, uint8_t lsb, uint8_t& pc) {
+    for (int i = 0; i < s_bankLastSelCount; i++) {
+        if (s_bankLastSel[i].synth == synth && s_bankLastSel[i].msb == msb && s_bankLastSel[i].lsb == lsb) {
+            pc = s_bankLastSel[i].pc;
+            return true;
+        }
+    }
+    return false;
+}
+
+void bankLastSelFlushIfDirty() {
+    if (!s_bankLastSelDirty) return;
+    size_t sz = sizeof(BankLastSel) * (size_t)s_bankLastSelCount;
+    if (s_prefs.putBytes("bls", s_bankLastSel, sz) == sz) {
+        s_prefs.putInt("blsn", s_bankLastSelCount);
+        s_bankLastSelDirty = false;
+    }
 }

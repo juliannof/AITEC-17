@@ -40,9 +40,40 @@ static lv_obj_t* s_tabview  = NULL;
 static lv_obj_t* s_tab_fav  = NULL;
 static lv_obj_t* s_tab_son  = NULL;
 static lv_obj_t* s_tab_perf = NULL;
+static lv_obj_t* s_lbl_synth = NULL;   // nombre synth activo, franja top-right (2026-07-13)
+static lv_obj_t* s_box_synth = NULL;   // fondo de la franja — color por synth (2026-07-14)
 static bool      s_open     = false;
 
 struct BankDef { uint8_t msb, lsb; const char* label; };
+
+// Duplicado local del switch de UIKaoss.cpp::synthName() — sin header compartido,
+// mismo patrón ya usado en ese archivo (2026-07-13).
+static const char* synthLabelText() {
+    switch (g_currentSynth) {
+        case ExSynth::JV2080: return "JV-2080";
+        case ExSynth::TRITON: return "TRITON";
+        case ExSynth::TG55:   return "TG55";
+        case ExSynth::D110:   return "D-110";
+        case ExSynth::WAVE:   return "WAVE";
+        case ExSynth::MOTIF:  return "MOTIF";
+        default:              return "?";
+    }
+}
+
+// Duplicado local del switch de UIKaoss.cpp::synthColor() — mismo patrón que
+// synthLabelText() de arriba (2026-07-14, franja de synth pasa de blanco fijo
+// a color por synth, "extender este color" — petición del usuario).
+static uint32_t synthColorHex() {
+    switch (g_currentSynth) {
+        case ExSynth::JV2080: return COL_SYNTH_JV;
+        case ExSynth::TRITON: return COL_SYNTH_TRI;
+        case ExSynth::TG55:   return COL_SYNTH_TG;
+        case ExSynth::D110:   return COL_SYNTH_D110;
+        case ExSynth::WAVE:   return COL_SYNTH_WAVE;
+        case ExSynth::MOTIF:  return COL_SYNTH_MOTIF;
+        default:               return COL_ACCENT;
+    }
+}
 
 // ── JV-2080 ────────────────────────────────────────────────────────────
 static const BankDef kBanks[6] = {
@@ -67,12 +98,16 @@ static void jvSetModeAdapter(uint8_t ch, bool progMode) {
 
 // ── Triton (Rack) ──────────────────────────────────────────────────────
 // Program y Combination comparten MSB/LSB (docs/Korg_Triton_Patches_Verificado.md)
-static const BankDef kTritonProgBanks[5] = {
+// Bank g(d) (GM Drums, 2026-07-13) es Program-only, msb=0x78 — distinto de
+// Bank G (msb=0x79). Solo 9 PC tienen nombre (ver TritonPatches.cpp kBankGd),
+// el resto se muestra como "---" (mismo comportamiento que un banco vacío).
+static const BankDef kTritonProgBanks[6] = {
     {0x00, 0, "INT-A"},
     {0x00, 1, "INT-B"},
     {0x00, 2, "INT-C"},
     {0x00, 3, "INT-D"},
     {0x79, 0, "Bank G"},
+    {0x78, 0, "G-Drum"},
 };
 static const BankDef kTritonCombiBanks[4] = {
     {0x00, 0, "INT-A"},
@@ -129,7 +164,7 @@ struct SynthSoundDesc {
 
 static const SynthSoundDesc kSynthDesc[NUM_SYNTHS] = {
     /* JV2080 */ { kBanks, 6, kBanksPerf, 3, jvPatchName, jvPerfName, jvSetModeAdapter, 128, 32, false, false },
-    /* TRITON */ { kTritonProgBanks, 5, kTritonCombiBanks, 4, tritonProgName, tritonCombiName, sendTritonMode, 128, 128, false, false },
+    /* TRITON */ { kTritonProgBanks, 6, kTritonCombiBanks, 4, tritonProgName, tritonCombiName, sendTritonMode, 128, 128, false, false },
     /* TG55   */ { kTG55Banks, 1, nullptr, 0, tg55ProgName, nullptr, nullptr, 64, 128, true, false },
     /* D110   */ { nullptr, 0, nullptr, 0, nullptr, nullptr, nullptr, 128, 128, false, false },
     /* WAVE   */ { nullptr, 0, nullptr, 0, nullptr, nullptr, nullptr, 128, 128, false, false },
@@ -448,6 +483,40 @@ static void soundtab_render_page(SoundTabCtx& ctx, int page) {
         neotrellisBankShowPage(ledState, onPage);
 }
 
+// Cambia la selección visual (highlight) entre dos PC de la MISMA página ya
+// renderizada, sin lv_obj_clean ni recrear botones/labels — evita el coste
+// de reconstruir hasta 8 botones con texto rotado en cada tap (2026-07-13,
+// causa nº2 del lag táctil percibido en Sonidos/Performances; nº1 era la
+// escritura NVS síncrona, ya resuelta). oldPc puede no estar en la página
+// actual (ej. el usuario pasó de página sin tocar nada) — se ignora sin más,
+// el índice simplemente no coincide con ningún hijo del grid. Si newPc no
+// está en la página actual (no debería poder pasar: solo se puede tocar un
+// botón visible), hace fallback al render completo.
+static void soundtab_update_selection(SoundTabCtx& ctx, int oldPc, int newPc) {
+    if (!ctx.gridCont) return;
+    int base   = ctx.curPage * UIBANK_GRID_PER_PAGE;
+    int onPage = ctxBankSize(ctx) - base;
+    if (onPage > UIBANK_GRID_PER_PAGE) onPage = UIBANK_GRID_PER_PAGE;
+    if (onPage < 0) onPage = 0;
+
+    int newI = newPc - base;
+    if (newI < 0 || newI >= onPage) { soundtab_render_page(ctx, ctx.curPage); return; }
+    int oldI = oldPc - base;
+
+    uint8_t ledState[UIBANK_GRID_PER_PAGE] = {};
+    for (int i = 0; i < onPage; i++) {
+        uint8_t pc = (uint8_t)(base + i);
+        bool is_sel = (i == newI);
+        ledState[i] = is_sel ? 1 : (ctx.bankFav[pc] ? 2 : 0);
+        if (i != newI && i != oldI) continue;   // solo los botones que cambian de estado
+        lv_obj_t* btn = lv_obj_get_child(ctx.gridCont, i);
+        if (btn) lv_obj_set_style_bg_color(btn, lv_color_hex(is_sel ? 0x003366 : COL_BTN_BG), 0);
+    }
+    uint32_t myTab = ctx.perfMode ? 2 : 1;
+    if (lv_tabview_get_tab_active(s_tabview) == myTab)
+        neotrellisBankShowPage(ledState, onPage);
+}
+
 // Pulsación sobre un patch distinto → selección/recall. Pulsación sobre el
 // patch YA seleccionado → ciclo: sin favorito → favorito → sin favorito.
 static void soundtab_click_pc(SoundTabCtx& ctx, uint8_t pc) {
@@ -480,12 +549,23 @@ static void soundtab_click_pc(SoundTabCtx& ctx, uint8_t pc) {
         return;
     }
 
+    uint8_t oldPc = ctx.lastPc;
     ctx.lastMsb = ctx.msb;
     ctx.lastLsb = ctx.lsb;
     ctx.lastPc  = pc;
-    if (!ctx.perfMode) favSaveLastSel(g_currentSynth, ctx.msb, ctx.lsb, pc);   // Performance no persiste "último banco"
+    // favSaveLastSel() NO se llama aquí (2026-07-13) — era una escritura NVS
+    // síncrona (4× putUChar, FavStore.cpp) en el hilo de touch en CADA tap,
+    // causando lag perceptible. El estado vive en ctx.lastMsb/lastLsb/lastPc
+    // (RAM) durante la sesión; se persiste una sola vez en uiBankHide().
+    // bankLastSelSet() tampoco escribe NVS aquí — solo RAM, dirty flag
+    // (2026-07-13, ver FavStore.h) para que cambiar de banco luego salte a
+    // este PC en vez de a la página 0.
+    if (!ctx.perfMode) bankLastSelSet(g_currentSynth, ctx.msb, ctx.lsb, pc);
     sendPatchSelect(ctx.msb, ctx.lsb, pc);
-    soundtab_render_page(ctx, ctx.curPage);
+    // soundtab_update_selection() en vez de soundtab_render_page() completo
+    // (2026-07-13) — misma página, mismo banco: solo cambian 1-2 botones de
+    // estado, no hace falta destruir y recrear los 8.
+    soundtab_update_selection(ctx, oldPc, pc);
 }
 
 static void bank_select(SoundTabCtx& ctx, uint8_t idx) {
@@ -496,7 +576,21 @@ static void bank_select(SoundTabCtx& ctx, uint8_t idx) {
     ctxBankRefreshBtns(ctx);
     memset(ctx.bankFav, 0, sizeof(ctx.bankFav));
     favMarkBank(g_currentSynth, (uint8_t)g_midiChannel, ctx.msb, ctx.lsb, ctxRole(ctx), ctx.bankFav, ctxBankSize(ctx));
-    soundtab_render_page(ctx, 0);
+
+    // Salta al último sonido usado en este banco (PC 0 si es la primera vez)
+    // y lo envía por MIDI — el synth debe sonar lo mismo que se resalta en
+    // pantalla (2026-07-13). Solo Sonidos (Program); Performances se queda
+    // en página 0 sin auto-enviar, igual que favSaveLastSel().
+    uint8_t pc = 0;
+    if (!ctx.perfMode) bankLastSelGet(g_currentSynth, ctx.msb, ctx.lsb, pc);   // pc=0 si no hay memoria
+    ctx.lastMsb = ctx.msb;
+    ctx.lastLsb = ctx.lsb;
+    ctx.lastPc  = pc;
+    if (!ctx.perfMode) {
+        sendPatchSelect(ctx.msb, ctx.lsb, pc);
+        bankLastSelSet(g_currentSynth, ctx.msb, ctx.lsb, pc);   // primera vez → registra PC 0 como "último"
+    }
+    soundtab_render_page(ctx, pc / UIBANK_GRID_PER_PAGE);
 }
 
 static void son_bank_cb(lv_event_t* e) {
@@ -570,7 +664,10 @@ static void apply_recall(const FavEntry& e) {
     ctx.lastMsb = e.msb;
     ctx.lastLsb = e.lsb;
     ctx.lastPc  = e.pc;
-    if (!wantPerf) favSaveLastSel(e.synth, e.msb, e.lsb, e.pc);
+    // Igual que en soundtab_click_pc() (2026-07-13): sin favSaveLastSel() aquí,
+    // se persiste una sola vez en uiBankHide(). bankLastSelSet() sí, pero solo
+    // marca dirty en RAM (ver FavStore.h).
+    if (!wantPerf) bankLastSelSet(e.synth, e.msb, e.lsb, e.pc);
 
     soundtab_render_page(ctx, e.pc / UIBANK_GRID_PER_PAGE);
     sendPatchSelect(e.msb, e.lsb, e.pc);
@@ -701,6 +798,38 @@ void uiBankCreate(lv_obj_t* parent) {
     dark_bg(s_tab_son);  lv_obj_clear_flag(s_tab_son,  LV_OBJ_FLAG_SCROLLABLE);
     dark_bg(s_tab_perf); lv_obj_clear_flag(s_tab_perf, LV_OBJ_FLAG_SCROLLABLE);
 
+    // ── Nombre synth activo (misma franja física que la X, empieza a su
+    // izquierda; la X se queda en su posición actual) (2026-07-13) ────────
+    // y=130 (no 0): la franja de pestañas (tab_bar_size=120, línea ~727) vive
+    // en LVGL x=0..480 → screen_y=0..479 completo, con PERFORM en el extremo
+    // LVGL x alto = screen_y bajo (comentario top del archivo: "bottom→top:
+    // FAV/SON/PERFORM"). Empezar en y=0 tapaba PERFORM con la franja blanca.
+    // Probado mandar la franja al fondo (move_background) para llegar a y=0
+    // sin tapar PERFORM — descartado: s_tabview tiene fondo opaco a pantalla
+    // completa (dark_bg(s_tabview)), así que detrás de él la franja entera
+    // desaparece, no solo en la zona de pestañas. El hueco de 130px es la
+    // solución estable.
+    s_box_synth = lv_obj_create(s_cont);
+    lv_obj_t* box_synth = s_box_synth;
+    lv_obj_set_size(box_synth, UIBANK_TOPSTRIP_W, 745 - 130);   // hasta la X (y=745), tras la franja de pestañas
+    lv_obj_set_pos(box_synth, P4_W - UIBANK_TOPSTRIP_W, 130);
+    lv_obj_set_style_bg_color(box_synth, lv_color_hex(synthColorHex()), 0);   // color por synth (2026-07-14, antes blanco fijo)
+    lv_obj_set_style_bg_opa(box_synth, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(box_synth, 0, 0);
+    lv_obj_set_style_radius(box_synth, 0, 0);
+    lv_obj_set_style_pad_all(box_synth, 0, 0);
+    lv_obj_clear_flag(box_synth, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(box_synth, LV_OBJ_FLAG_CLICKABLE);
+    s_lbl_synth = lv_label_create(box_synth);
+    lv_label_set_text(s_lbl_synth, synthLabelText());
+    lv_obj_set_style_text_color(s_lbl_synth, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_text_font(s_lbl_synth, &lv_font_montserrat_18, 0);
+    // TOP_MID = principio de la faja (LVGL y≈0, ya empieza en 130 absoluto).
+    // offset x: screen_y = 479 - LVGL_x → subir 3px físico = +3 aquí (-6→-3).
+    // offset y: screen_x = LVGL_y → derecha 10px físico = +10 aquí (30→40).
+    lv_obj_align(s_lbl_synth, LV_ALIGN_TOP_MID, -3, 40);
+    rot_label(s_lbl_synth);
+
     // ── Botón cerrar (físico: top-right) ─────────────────────────────────
     lv_obj_t* btn_close = lv_btn_create(s_cont);
     lv_obj_set_size(btn_close, 36, 55);
@@ -732,6 +861,13 @@ void uiBankShow() {
 
 void uiBankHide() {
     if (!s_cont) return;
+    // Único punto de persistencia NVS de "última selección" (2026-07-13) —
+    // antes se escribía en cada tap (soundtab_click_pc/apply_recall), aquí se
+    // hace una sola vez al cerrar. Guard lastPc!=0xFF: evita persistir el
+    // placeholder "sin selección" si Bank se abre y cierra sin tocar nada.
+    if (s_son.lastPc != 0xFF)
+        favSaveLastSel(g_currentSynth, s_son.lastMsb, s_son.lastLsb, s_son.lastPc);
+    bankLastSelFlushIfDirty();   // último PC por banco (2026-07-13) — flush al cerrar además del periódico
     lv_obj_add_flag(s_cont, LV_OBJ_FLAG_HIDDEN);
     s_open = false;
     g_bankOpen = false;
@@ -765,6 +901,8 @@ static void syncBankSelToSynth() {
 // para cuando se abra.
 void uiBankSynthChanged() {
     syncBankSelToSynth();
+    if (s_lbl_synth) lv_label_set_text(s_lbl_synth, synthLabelText());
+    if (s_box_synth) lv_obj_set_style_bg_color(s_box_synth, lv_color_hex(synthColorHex()), 0);
     if (!s_open) return;
 
     if (s_son.built) {
@@ -832,6 +970,8 @@ static void resetCtxRuntime(SoundTabCtx& ctx) {
 void uiBankDestroy() {
     if (s_cont) { lv_obj_delete(s_cont); s_cont = NULL; }
     s_tabview = s_tab_fav = s_tab_son = s_tab_perf = NULL;
+    s_lbl_synth = NULL;
+    s_box_synth = NULL;
     s_fav_cont = NULL;
     s_fav_selected_btn = NULL;
     s_fav_last_slot = 0xFF;

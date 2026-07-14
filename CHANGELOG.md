@@ -19,6 +19,111 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 | 🟡 Media | **ExPressif: TG55/D110/WAVE sin descriptor de sonidos en UIBank (2026-07-04)** | Tras la integración multi-synth, `kSynthDesc[]` (`UIBank.cpp`) solo tiene datos reales para JV2080 y TRITON — los otros 3 sintetizadores del ciclo (`ExSynth`) quedan con descriptor vacío (Sonidos/Performances muestran grid vacío sin crashear, comportamiento defensivo intencional, no error). Pendiente si se necesitan: tabla de bancos + nombres + SysEx de modo para cada uno, siguiendo el patrón `TritonPatches.h/.cpp`. |
 | 🟢 Baja | **ExPressif: Triton no fuerza canal MIDI por modo Program/Combination (2026-07-04)** | A diferencia del JV-2080 (Patch=12/Performance=1, `MIDI_CH_PATCH/PERFORM`), el Triton usa `chProg=chCombi=0` en su `SynthSoundDesc` ("no forzar", usa `g_midiChannel` tal cual) — decisión explícita del usuario ("esto no es relevante ahora"), no un olvido. Si más adelante hace falta separar tracks de Logic para Program/Combination del Triton, añadir constantes `TRITON_CH_PROG/COMBI` en `config.h` y pasarlas en `kSynthDesc[]`. |
 | 🟢 Baja | **ExPressif: persistir página+pestaña activa de UIBank (2026-07-01, mecanismo cambiado 2026-07-04)** | Sigue sin implementar. Con el rediseño de paginación (grid 2×4, NeoTrellis-only, sin `lv_tileview`) el mecanismo sería: guardar `g_bankTab` + página activa de cada tab en NVS, y en `ensure_tab_built()` saltar a esa página en vez de forzar página 0. |
+| 🟡 Media | **ExPressif: `UIKaosEdit.cpp` — geometría sin terminar de validar en hardware (2026-07-14)** | Pantalla nueva (editor de memoria Kaos). Ya corregidos en vivo: caja/tamaño del canal, y un error de ejes que apilaba canal+Guardar+Cancelar en el mismo borde físico (ver sesión 2026-07-14). Sigue pendiente confirmar en pantalla real las listas EJE X/EJE Y (posición, si el nº de filas cabe sin solapar con el título/canal). |
+| 🟡 Media | **ExPressif: NeoTrellis sigue activo con `UIKaosEdit` abierto (2026-07-14)** | A diferencia de `UIBank` (que suspende HOLD/PANIC/preset/synth en el NeoTrellis mientras está abierto, `g_bankOpen`), el editor de memoria Kaos no tiene un gate equivalente — con el editor táctil abierto, las teclas físicas (preset, synth, brillo, panic) se siguen procesando por debajo y pueden cambiar `g_currentSynth`/preset activo mientras se edita otro. No corrompe datos (Guardar usa el synth/slot capturados al abrir), pero es confuso. Pendiente: mismo patrón que `g_bankOpen` para el editor, o aceptar el comportamiento si no molesta en uso real. |
+| 🟡 Media | **ExPressif: TRITON Grupo B (efectos vía D-mod) y JV-2080 LFO Depth sin implementar (2026-07-14)** | Bloqueados en `aitec_kaos_brief_2026-07-13.md` §3: falta decidir si el `:Src` del D-mod se preconfigura una vez en el patch (`needs_route=false`) o Code lo reenvía por SysEx cada vez que se selecciona la memoria (`needs_route=true`, con el payload exacto). No se ha tocado el modelo NVS (`KaosSlot`) para soportar `needs_route`/`route_payload` todavía — el catálogo actual (`KaosParams.cpp`) solo cubre memorias sin bloqueo. |
+
+---
+
+### SESIÓN 2026-07-14 — ExPressif (P4_JC4880P433C): sistema de memorias Kaos configurables (20 slots NVS, canal por synth, editor en pantalla) + color por synth extendido + brillo pantalla + metrónomo visual
+
+**Commit:** ver commit de esta sesión.
+**MCU afectada:** solo P4_JC4880P433C (ExPressif).
+**Origen:** `aitec_kaos_brief_2026-07-13.md` (catálogo verificado por synth, modelo NVS §2) + una serie larga de decisiones y correcciones del usuario en vivo, muchas mientras probaba en hardware real entre cambios (ver "Iteración" y "Fixes en vivo" abajo).
+
+#### Sistema de memorias Kaos
+
+| Cambio | Detalle |
+|---|---|
+| **Catálogo de parámetros nombrados** — `kaoss/KaosParams.h/.cpp` (nuevo) | Lista fija en flash, por synth, de `{cc, nombre}` **individuales** (Cutoff, Resonance, Tone1 Lvl, LFO1 Speed...) — no memorias pre-empaquetadas. Decisión explícita del usuario ("PARAMETROS COMPLETAMENTE CONFIGURABLES OPCION B"): el usuario compone la pareja X/Y libremente desde el editor. JV-2080 (6 parámetros), TRITON (6), MOTIF (2), WAVE (8, sin cambios respecto al array previo), TG55/D-110 (0, sin catálogo verificado). |
+| **Almacén NVS** — `nvs/KaosStore.h/.cpp` (nuevo) | `kaos_slot[synth_id][slot 0-19] = {ccX, ccY, configured}`, namespace `"kaos"`, mismo patrón de bytes crudos que `FavStore.cpp`. Canal MIDI **separado**: `kaos_channel[synth_id] = ch` (clave `"c<synth>"`), un valor por synth — ver corrección de arquitectura abajo. `kaosInit()` siembra el catálogo de parámetros una sola vez (flag `"seeded"`) — después es editable sin reflashear. |
+| **`KaossPad` reescrito** — `kaoss/KaossPad.h/.cpp` | Sin catálogos `const` en flash (se probaron y descartaron dos diseños intermedios, ver "Iteración" abajo) — cachea en RAM el slot activo (`_current`, recarga en `setPreset()`) y el canal del synth activo (`_channel`, recarga en `syncToSynth()`/`reload()`, **no** en `setPreset()`). |
+| **NeoTrellis — 20 teclas de selección directa** — `neotrellis/NeoTrellis.cpp` | Sustituye el sistema de 2026-06-29 (SCALE cicla en L2 + 4 presets directos R0-R3). Mapeo: `L3,L7,L11,L15` (panel izq.) + `R0-R15` completo (panel der.) = 20 memorias, `preset = fila×5 + (0 si Lx, 1+col si Rx)`. Selección siempre directa, sin ciclar. |
+| **Editor en pantalla** — `display/UIKaosEdit.h/.cpp` (nuevo) | Botón PRESET (antes SCALE) abre un overlay a pantalla completa: dos listas ("EJE X"/"EJE Y") de parámetros nombrados — tocar uno asigna ese eje — más canal MIDI (+/−, 1-16, justo debajo del título) y GUARDAR/CANCELAR. **Al Guardar, el canal se aplica a los 20 slots del synth**, no solo al slot que se estaba editando (es una propiedad del synth). TG55/D-110 (sin catálogo) muestran "Sin parámetros verificados" sin botón Guardar. |
+
+#### Corrección de arquitectura en vivo — canal MIDI por synth, no por slot
+
+El diseño inicial (implementado, documentado y luego corregido en la misma
+sesión) guardaba el canal MIDI **dentro de cada slot** (`KaosSlot.ch`, un
+valor de 1-16 por cada una de las 20 memorias). El usuario corrigió:
+*"el canal midi es unico para el sinte, no por preset"* — cada sintetizador
+físico del rack escucha en un canal fijo, independiente de qué memoria Kaos
+esté activa. Refactor: `KaosSlot` pasa de `{ccX,ccY,ch}` a `{ccX,ccY,configured}`
+(bytes bloqueados por la falta del campo `ch`); nueva pareja
+`kaosLoadChannel()`/`kaosSaveChannel()` en `KaosStore` con clave propia por
+synth; `KaossPad::getChannel()` deja de leer el slot y pasa a cachear
+`_channel` recargado solo al cambiar de synth. El editor mueve el control de
+canal de la franja inferior (pensada para "controles del slot") a justo
+debajo del título (pensado para "controles del synth") — pedido explícito:
+*"necesito ver el canal midi justo debajo del nombre del sinte"*.
+
+#### Color por synth extendido a toda la UI
+
+| Elemento | Antes | Ahora |
+|---|---|---|
+| 20 teclas de preset (NeoTrellis) | `modeColor()` (rojo KAOSS_XY fijo) — `modeColor()` eliminado de `NeoTrellis.cpp`, sin uso | `synthColor()` |
+| Rejilla 8×8 de dots + scroll "ExPressive" (`UIKaoss.cpp`) | `mode_color()` (mismo rojo fijo) | `synth_color_rgb()` |
+| Franja del botón PRESET | Verde fijo `0x00AA44`, sin cambiar ni en reposo | `synthColor()` con `darken()` (20%) en reposo |
+| Franja blanca con nombre de synth (`UIBank.cpp`) | Blanco fijo `0xFFFFFF` | `synthColorHex()` (duplicado local, mismo patrón que `synthLabelText()`) |
+
+Fix en vivo — reportado por el usuario: *"la seleccion por boton del sinte
+DEBE cambiar el color de los [20] botones"*. `neotrellisUpdate()` solo
+refrescaba el pixel del botón SYNTH + las teclas de selección de synth al
+detectar `g_currentSynth` cambiado — las 20 teclas de preset (ahora coloreadas
+por synth) se quedaban con el color del synth ANTERIOR hasta el siguiente
+cambio de preset, sea cual sea la vía que cambió el synth (botón táctil,
+cicla NeoTrellis o selección directa). Fix: esa rama pasa a llamar
+`refreshLeft()`/`refreshRight()` completos en vez de actualizar pixels sueltos.
+
+#### Brillo de pantalla — L2/L6
+
+Las teclas NeoTrellis sin función tras retirar SCALE (L2) y sin usar desde el
+principio (L6) controlan `displaySetBrightness()` en pasos de 10% (10-100%,
+`g_displayBrightness`, solo RAM). Nuevo `display/UIBrightnessPopup.h/.cpp` —
+overlay independiente, topmost, muestra el número y se oculta sola tras
+~1.2s. **L2 = brillo +, L6 = brillo −** (invertido una vez respecto a la
+primera implementación, corrección explícita del usuario).
+
+#### Metrónomo visual — L5
+
+L5 (última tecla sin función) parpadea sincronizado al **MIDI Clock entrante
+por USB** (24 PPQN, realtime `0xF8`/`0xFA`/`0xFB`/`0xFC`) — confirmado con una
+captura real de MIDI Monitor mostrando Logic mandando Clock a "ExPressif V1".
+No hay BPM propio en el firmware. Nuevo `midi/MIDIClock.h/.cpp` — **primer y
+único punto del firmware que lee MIDI entrante** (`MIDI.readPacket()`); hasta
+ahora el proyecto solo enviaba MIDI. Sondeado en `taskCore0` cada ~20ms.
+`NeoTrellis.cpp::metronomeUpdate()` consume el beat y decae en ~80ms (mismo
+patrón que `s_glow_t` del pad XY).
+
+**Fix en vivo — L5 no parpadeaba:** `midiClockPoll()` filtraba paquetes por
+CIN (Code Index Number) del header USB-MIDI, esperando `0xF` ("Single Byte",
+la convención estándar para mensajes realtime). El usuario reportó "L5 no se
+ilumina" tras probarlo — distintos hosts/drivers USB-MIDI son inconsistentes
+históricamente empaquetando Clock/Start/Stop (algunos usan CIN `0x5`). Fix:
+se quitó el filtro por CIN — se compara `pkt.byte1` directamente contra
+`0xF8`/`0xFA`/`0xFB`/`0xFC`, seguro porque un byte de datos MIDI nunca vale
+≥0x80.
+
+#### Fixes en vivo — geometría `UIKaosEdit.cpp` (reportados por el usuario tras compilar)
+
+| Reporte | Causa | Fix |
+|---|---|---|
+| "CANAL SALE A LA IZQUIERDA Y MUY PEQUENO" | `s_lbl_ch` era una etiqueta suelta sin caja ni `set_size()` (font 18pt) | Caja del ancho de los botones −/+, fondo de color acento, texto centrado a 24pt |
+| "tanto el canal como guardar y cerrar estan muy pegados abajo" | **Error de ejes**: toda la franja inferior usaba `x=0` fijo variando solo `y` — en este layout rotado (`screen_x=LVGL_y`, `screen_y=479−LVGL_x`) eso apila TODO en el mismo borde físico, solo separado en horizontal | Layout rehecho verificando cada posición contra el botón cerrar de `UIBank.cpp` (ya probado en hardware) antes de escribir números — título arriba-izq., canal en fila horizontal debajo, EJE X/EJE Y por debajo, Guardar/Cancelar en el borde derecho bajo Cerrar |
+
+**Discrepancias detectadas entre el brief y el estado real del código, resueltas en conversación antes de implementar:**
+
+| Punto del brief | Estado real encontrado | Resolución |
+|---|---|---|
+| §3: canal MIDI derivado del modo Bank (JV-2080 Patch=12/Performance=1) | `UIBank.cpp:131` — revertido el 2026-07-12, canal fijo=1, "Logic enruta por track, no el firmware" (commit `6fb4ffe`) | No aplica al Kaos pad — el canal ahora es por synth (ver corrección de arquitectura arriba), independiente del canal de selección de patch en Bank |
+| §3: `value_mode` debía "corregir" el mapeo CC de `mapXtoCC`/`mapYtoCC` | Un CC MIDI siempre es un byte 0-127 — no hay fórmula distinta posible entre ABSOLUTE y RELATIVE_OFFSET_64 al nivel de bytes | Usuario confirmó: solo metadato, sin cambio de fórmula — irrelevante para el diseño final (Opción B eliminó el campo `value_mode` por completo) |
+| §4: "20 memorias" mencionado por el usuario, brief solo documenta hasta 10 por synth | El brief nunca habla de 20 memorias ni de mapeo NeoTrellis L3-R15 | Información nueva de esta sesión — arquitectura de selección física (20 teclas) y modelo "parámetros sueltos" (Opción B) decididos en vivo, brief §2/§4 quedan como referencia del catálogo verificado, no del mecanismo de selección |
+
+**Iteración de diseño dentro de la misma sesión (documentado porque cada paso quedó implementado y luego descartado — útil para no repetir el camino):**
+1. Catálogo `const CCPreset[]` por synth en flash, 3-4 memorias fijas (fiel al brief, sin NVS) — descartado al pedir el usuario 20 memorias.
+2. Catálogo `const CCPreset[20]` con slots vacíos, aún en flash — descartado al pedir el usuario edición desde pantalla (necesita NVS).
+3. NVS + catálogo de parámetros sueltos + editor táctil, **canal por slot** — descartado al corregir el usuario que el canal es por synth.
+4. **Diseño final:** NVS + parámetros sueltos + canal por synth + editor táctil, documentado arriba.
 
 ---
 
