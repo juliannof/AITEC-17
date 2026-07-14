@@ -328,20 +328,35 @@ L2/L6 se iluminan tenues en reposo (`COL_ACCENT`) y brillan al pulsar.
 
 L5 (última tecla NeoTrellis sin función) parpadea sincronizado al **MIDI
 Clock entrante por USB** (24 PPQN, mensajes realtime `0xF8` Clock/`0xFA`
-Start/`0xFB` Continue/`0xFC` Stop) — no hay BPM propio en este firmware, seguir
-el reloj que manda Logic/el DAW por USB era el requisito. Confirmado con
-captura real de MIDI Monitor mostrando Clock llegando a "ExPressif V1".
+Start/`0xFB` Continue/`0xFC` Stop) — no hay reloj propio en el firmware, se
+sigue el que manda Logic/el DAW por USB. Confirmado con captura real de MIDI
+Monitor mostrando Clock llegando a "ExPressif V1".
 
 - `midi/MIDIClock.h/.cpp` — único punto del firmware que lee `MIDI.readPacket()`
   (hasta ahora el proyecto solo enviaba MIDI, nunca recibía). Se sondea en
   `taskCore0` (`main.cpp`), cada ~20ms, drenando todos los paquetes pendientes.
-- Cuenta Clock 0-23 (24 por negra); en el pulso 0 marca un "beat" pendiente.
-  Start/Continue realinean la fase a 0 inmediatamente; Stop apaga el LED pero
-  el conteo de Clock sigue vivo (no se pierde la fase si vuelve a sonar sin
-  Start explícito).
+- No se filtra por CIN (Code Index Number) del header USB-MIDI — distintos
+  hosts empaquetan Clock/Start/Stop con CIN inconsistente entre sí
+  (comprobado en vivo: filtrar por CIN `0xF` dejaba L5 sin parpadear a pesar
+  de llegar Clock real). Se compara `pkt.byte1` directamente contra
+  `0xF8`/`0xFA`/`0xFB`/`0xFC`, seguro porque un byte de datos MIDI nunca vale ≥0x80.
+- Cuenta Clock 0-23 (24 por negra); en el pulso 0 marca un "beat" pendiente y
+  se asume transporte corriendo (no depende de haber visto `Start` antes —
+  llegar `Clock` ya es evidencia suficiente). Stop apaga el LED pero el
+  conteo de Clock sigue vivo (no se pierde la fase si vuelve a sonar sin
+  `Start` explícito).
 - `neotrellis/NeoTrellis.cpp::metronomeUpdate()` consume el beat, enciende L5
   a brillo pleno (`COL_ACCENT`) y decae en ~80ms (mismo patrón de decay que
   `s_glow_t` del pad XY en `UIKaoss.cpp`).
+
+**BPM** (`midiClockGetBPM()`) — calculado por el intervalo real entre negras
+consecutivas (`60000/ms`). **Persistente**: no se resetea a 0 al parar
+(`Stop`), mantiene el último tempo conocido hasta medir un intervalo nuevo
+(petición explícita del usuario). Mostrado en pantalla: overlay independiente
+en la esquina física superior-izquierda, encima del botón HOLD (`UIKaoss.cpp`,
+`s_box_bpm`/`s_lbl_bpm`, fondo semitransparente, fuente 24pt, refrescado cada
+50ms desde `decay_timer_cb`) — vacío mientras no se ha medido ningún tempo
+todavía (arranque, antes del segundo beat).
 
 ---
 

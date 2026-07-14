@@ -17,3 +17,9 @@ bool midiClockConsumeBeat();
 // Clock sigue actualizándose aunque esté parado (para no perder la fase),
 // pero el consumidor (NeoTrellis) debe ignorar los beats si esto es false.
 bool midiClockIsRunning();
+
+// BPM calculado por el intervalo entre negras consecutivas (2026-07-14).
+// Persistente — sigue devolviendo el último tempo conocido tras un Stop, no
+// se resetea a 0 (petición del usuario). 0 solo antes del primer intervalo
+// medido (arranque, o primer beat tras un Start sin referencia previa).
+uint16_t midiClockGetBPM();

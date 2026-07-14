@@ -20,6 +20,7 @@
 #include "UIKaosEdit.h"
 #include "../config.h"
 #include "../midi/MIDIOut.h"
+#include "../midi/MIDIClock.h"
 #include "../kaoss/KaossPad.h"
 #include "lvgl.h"
 #include <stdio.h>
@@ -34,6 +35,8 @@
 static const uint8_t k_peak[4] = {255, 191, 89, 38};  // 100%, 75%, 35%, 15%
 
 static lv_obj_t*   s_pad              = NULL;
+static lv_obj_t*   s_box_bpm          = NULL;   // overlay encima de HOLD (2026-07-14)
+static lv_obj_t*   s_lbl_bpm          = NULL;   // readout fijo, persistente (2026-07-14)
 static lv_obj_t*   s_lbl_preset       = NULL;
 static lv_obj_t*   s_lbl_hold         = NULL;
 static lv_obj_t*   s_lbl_synth        = NULL;
@@ -225,9 +228,23 @@ static void scroll_timer_cb(lv_timer_t* t) {
     }
 }
 
+// ── BPM — readout fijo, refrescado cada tick del decay timer (50ms) ────
+static void update_bpm_label() {
+    if (!s_lbl_bpm) return;
+    uint16_t bpm = midiClockGetBPM();
+    static char buf[8];
+    if (bpm == 0) {
+        lv_label_set_text(s_lbl_bpm, "");
+    } else {
+        snprintf(buf, sizeof(buf), "%u", (unsigned)bpm);
+        lv_label_set_text(s_lbl_bpm, buf);
+    }
+}
+
 // ── Timer: decay + idle counter ───────────────────────────────────────
 static void decay_timer_cb(lv_timer_t* t) {
     (void)t;
+    update_bpm_label();
     if (s_glow_t > 0.0f) {
         s_glow_t -= 0.07f;   // ~700ms para llegar a 0 (14 ticks × 50ms)
         if (s_glow_t < 0.0f) s_glow_t = 0.0f;
@@ -510,6 +527,30 @@ void uiKaossCreate(lv_obj_t* parent) {
     lv_obj_align(lbl_panic, LV_ALIGN_CENTER, -15, 0);
     rot_label(lbl_panic);
 
+    // BPM — overlay independiente sobre la esquina física superior-izquierda
+    // (encima del botón HOLD, 2026-07-14: "ponlo encima de hold... mover a
+    // la izquierda... no se ve es muy pequeno" — corrige el primer intento,
+    // que quedaba en la esquina del PAD, más a la derecha y con letra 14pt).
+    // Hijo directo de `parent` (no de s_pad ni de s_btn[0]) creado el último
+    // de todos → z-order más alto, se dibuja encima de HOLD sin taparlo del
+    // todo (fondo semitransparente).
+    s_box_bpm = lv_obj_create(parent);
+    lv_obj_set_pos(s_box_bpm, 420, 0);
+    lv_obj_set_size(s_box_bpm, 65, 110);
+    lv_obj_set_style_bg_color(s_box_bpm, lv_color_hex(COL_BG), 0);
+    lv_obj_set_style_bg_opa(s_box_bpm, LV_OPA_80, 0);
+    lv_obj_set_style_border_width(s_box_bpm, 0, 0);
+    lv_obj_set_style_radius(s_box_bpm, 4, 0);
+    lv_obj_set_style_pad_all(s_box_bpm, 0, 0);
+    lv_obj_clear_flag(s_box_bpm, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(s_box_bpm, LV_OBJ_FLAG_CLICKABLE);
+
+    s_lbl_bpm = lv_label_create(s_box_bpm);
+    lv_obj_set_style_text_color(s_lbl_bpm, lv_color_hex(COL_TEXT), 0);
+    lv_obj_set_style_text_font(s_lbl_bpm, &lv_font_montserrat_24, 0);
+    lv_obj_center(s_lbl_bpm);
+    rot_label(s_lbl_bpm);
+
     s_decay_tmr  = lv_timer_create(decay_timer_cb,  50,              NULL);
     s_scroll_tmr = lv_timer_create(scroll_timer_cb, SCROLL_STEP_MS,  NULL);
     lv_timer_pause(s_scroll_tmr);
@@ -574,6 +615,7 @@ void uiKaossDestroy() {
     if (s_scroll_tmr) { lv_timer_delete(s_scroll_tmr); s_scroll_tmr = NULL; }
     if (s_decay_tmr)  { lv_timer_delete(s_decay_tmr);  s_decay_tmr  = NULL; }
     if (s_pad) { lv_obj_delete(s_pad); s_pad = NULL; }
+    if (s_box_bpm) { lv_obj_delete(s_box_bpm); s_box_bpm = NULL; }
     for (int i = 0; i < 4; i++) {
         if (s_btn[i]) { lv_obj_delete(s_btn[i]); s_btn[i] = NULL; }
         s_strips[i] = NULL;
@@ -581,5 +623,5 @@ void uiKaossDestroy() {
     for (int i = 0; i < DOTS_N; i++)
         for (int j = 0; j < DOTS_N; j++)
             s_dots[i][j] = NULL;
-    s_lbl_preset = s_lbl_hold = s_lbl_synth = NULL;
+    s_lbl_preset = s_lbl_hold = s_lbl_synth = s_lbl_bpm = NULL;
 }

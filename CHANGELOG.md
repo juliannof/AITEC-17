@@ -25,7 +25,7 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 ---
 
-### SESIÓN 2026-07-14 — ExPressif (P4_JC4880P433C): sistema de memorias Kaos configurables (20 slots NVS, canal por synth, editor en pantalla) + color por synth extendido + brillo pantalla + metrónomo visual
+### SESIÓN 2026-07-14 — ExPressif (P4_JC4880P433C): sistema de memorias Kaos configurables (20 slots NVS, canal por synth, editor en pantalla) + color por synth extendido + brillo pantalla + metrónomo visual + BPM
 
 **Commit:** ver commit de esta sesión.
 **MCU afectada:** solo P4_JC4880P433C (ExPressif).
@@ -110,6 +110,16 @@ se quitó el filtro por CIN — se compara `pkt.byte1` directamente contra
 |---|---|---|
 | "CANAL SALE A LA IZQUIERDA Y MUY PEQUENO" | `s_lbl_ch` era una etiqueta suelta sin caja ni `set_size()` (font 18pt) | Caja del ancho de los botones −/+, fondo de color acento, texto centrado a 24pt |
 | "tanto el canal como guardar y cerrar estan muy pegados abajo" | **Error de ejes**: toda la franja inferior usaba `x=0` fijo variando solo `y` — en este layout rotado (`screen_x=LVGL_y`, `screen_y=479−LVGL_x`) eso apila TODO en el mismo borde físico, solo separado en horizontal | Layout rehecho verificando cada posición contra el botón cerrar de `UIBank.cpp` (ya probado en hardware) antes de escribir números — título arriba-izq., canal en fila horizontal debajo, EJE X/EJE Y por debajo, Guardar/Cancelar en el borde derecho bajo Cerrar |
+| "L2 debe subir el brillo y L6 bajarlo" | Se implementó al revés (L2=−, L6=+) | Invertido — `L2`=brillo +, `L6`=brillo − |
+| "la seleccion por boton del sinte DEBE cambiar el color de los [20] botones" | `neotrellisUpdate()` solo refrescaba el pixel del botón SYNTH + teclas de selección al detectar cambio de `g_currentSynth` — las 20 teclas de preset (color por synth desde esta sesión) se quedaban con el color del synth ANTERIOR hasta el siguiente cambio de preset | Esa rama pasa a llamar `refreshLeft()`/`refreshRight()` completos, no pixels sueltos |
+| "L5 no se ilumina" (metrónomo) | `midiClockPoll()` filtraba paquetes por CIN (`0xF`, "Single Byte") — distintos hosts/drivers USB-MIDI empaquetan Clock/Start/Stop con CIN inconsistente (algunos usan `0x5`) | Se quitó el filtro por CIN — se compara `pkt.byte1` directamente contra `0xF8`/`0xFA`/`0xFB`/`0xFC` (un byte de datos MIDI nunca vale ≥0x80, seguro sin mirar el CIN). De paso: `s_running` pasa a activarse con el primer `Clock` recibido, no solo con `Start`/`Continue` (evita depender de haber capturado ese mensaje concreto) |
+| "ahi no puede ir. ponlo encima de hold... no se ve es muy pequeno" (BPM) | Readout hijo de `s_pad`, quedaba pegado al borde del pad (no al borde real de pantalla) con fuente 14pt | Overlay independiente (`s_box_bpm`, hijo de `parent`), esquina física superior-izquierda real, encima de HOLD, fuente 24pt |
+| "y debe ser persistente" (BPM) | `midiClockGetBPM()` se reseteaba a 0 en `Stop` | Ya no se resetea — mantiene el último tempo conocido hasta medir un intervalo nuevo |
+
+**BPM** (`midiClockGetBPM()`, `midi/MIDIClock.h/.cpp`) — calculado por el
+intervalo real entre negras consecutivas (`60000/ms`), persistente tras
+`Stop`. Mostrado en pantalla (`UIKaoss.cpp`, overlay `s_box_bpm`/`s_lbl_bpm`)
+encima del botón HOLD, refrescado cada 50ms desde `decay_timer_cb`.
 
 **Discrepancias detectadas entre el brief y el estado real del código, resueltas en conversación antes de implementar:**
 
