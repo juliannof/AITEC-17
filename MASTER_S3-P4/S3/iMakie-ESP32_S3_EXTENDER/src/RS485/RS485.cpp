@@ -316,6 +316,10 @@ void RS485Master::_handleResponse() {
                 if (dataValida) {
                     _ch[_currentId].calibrated = true;
                     _ch[_currentId].dirty      = true;
+                    // Remapear target con el rango real recién calibrado — sin esto,
+                    // el fader queda con el mapeo teórico hasta el próximo PitchBend
+                    // de Logic, que puede no llegar si el track está parado. (2026-07-20)
+                    _recomputeFaderTarget(_currentId);
                     log_i("[CALIB] Slave %d ✓ CALIBRADO OK: MIN=%d MAX=%d",
                           _currentId, _ch[_currentId].calibratedMin, _ch[_currentId].calibratedMax);
                     // Cascade con wraparound — incluye slaves que fallaron antes (2026-05-26)
@@ -456,20 +460,27 @@ void RS485Master::setFlags(uint8_t id, uint8_t flags) {
 void RS485Master::setFaderTarget(uint8_t id, uint16_t value14bit) {
     if (id < 1 || id > _numSlaves) return;
     if (xSemaphoreTake(_mutex, pdMS_TO_TICKS(5)) == pdTRUE) {
-        // Mapeo: Logic 0-14848 → rango calibrado real de slave
-        uint16_t faderTarget;
-        if (_ch[id].calibratedMax > _ch[id].calibratedMin) {
-            // Slave calibrado: mapear a rango real
-            uint16_t span = _ch[id].calibratedMax - _ch[id].calibratedMin;
-            faderTarget = _ch[id].calibratedMin + ((uint32_t)value14bit * span / LOGIC_PITCHBEND_MAX);
-        } else {
-            // Slave no calibrado aún: usar rango teórico (0-27000)
-            faderTarget = (uint32_t)value14bit * 27000 / LOGIC_PITCHBEND_MAX;
-        }
-        _ch[id].faderTarget = faderTarget;
-        _ch[id].dirty       = true;
+        _ch[id].lastRawPitchBend = value14bit;
+        _recomputeFaderTarget(id);
         xSemaphoreGive(_mutex);
     }
+}
+
+// _recomputeFaderTarget — remapea lastRawPitchBend al rango ADC actual del canal.
+// ASSUMES: _mutex ya tomado por el caller (evita deadlock, ver _handleResponse). (2026-07-20)
+void RS485Master::_recomputeFaderTarget(uint8_t id) {
+    // Mapeo: Logic 0-16383 → rango calibrado real de slave
+    uint16_t faderTarget;
+    if (_ch[id].calibratedMax > _ch[id].calibratedMin) {
+        // Slave calibrado: mapear a rango real
+        uint16_t span = _ch[id].calibratedMax - _ch[id].calibratedMin;
+        faderTarget = _ch[id].calibratedMin + ((uint32_t)_ch[id].lastRawPitchBend * span / LOGIC_PITCHBEND_MAX);
+    } else {
+        // Slave no calibrado aún: usar rango teórico (0-27000)
+        faderTarget = (uint32_t)_ch[id].lastRawPitchBend * 27000 / LOGIC_PITCHBEND_MAX;
+    }
+    _ch[id].faderTarget = faderTarget;
+    _ch[id].dirty       = true;
 }
 
 void RS485Master::setVuLevel(uint8_t id, uint8_t value) {

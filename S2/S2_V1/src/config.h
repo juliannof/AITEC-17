@@ -107,7 +107,7 @@ enum class ConnectionState {
 #define MOTOR_EN     14
 
 
-// Motor — rango válido ADC (Logic 0-14848 mapea a ADS1115 0-27000)
+// Motor — rango válido ADC (Logic 0-16383 mapea a ADS1115 0-27000)
 static constexpr uint16_t MOTOR_ADC_MIN            = 20;      // mínimo esperado
 static constexpr uint16_t MOTOR_ADC_MAX            = 27000;   // máximo esperado
 
@@ -184,6 +184,19 @@ static constexpr uint32_t STALL_PROTECT_MS     = 400;   // ms motor HW activo si
 static bool               _motor_hw_active     = false; // true cuando _hwUp()/_hwDown() en curso
 static uint32_t           _stallProtectStart   = 0;
 static uint16_t           _stallProtectLastADC = 0;
+
+// Motor — cooldown tras STALL (2026-07-20)
+// WHY: STALL_PROTECT_MS solo corta el driver un instante — sin este cooldown,
+//      el siguiente paquete RS485 (~10-20ms después) re-arma MOVING_TO_TARGET
+//      y el motor vuelve a empujar a PWM alto contra el mismo obstáculo,
+//      en bucle indefinido. Riesgo térmico real (motor + DRV8833).
+static constexpr uint32_t STALL_COOLDOWN_MS    = 2000;  // ms de reposo obligatorio tras un STALL
+static uint32_t           _stallCooldownUntil  = 0;      // timestamp: no re-armar movimiento antes de esto
+// WHY: si el STALL fue por el usuario resistiendo al motor (AUTO_READ/OFF,
+//      "DAW absoluto"), en cuanto suelta ya no hay obstáculo — no tiene
+//      sentido esperar el cooldown completo. Si el STALL fue solo (tope
+//      físico real, nadie tocando), sí se respeta el cooldown completo. (2026-07-20)
+static bool               _stallCooldownFromTouch = false; // true si el STALL activo se originó con touch
 
 // Motor — detección movimiento manual (delta ADC acumulado en ventana de tiempo)
 static uint16_t   _motor_lastADCForDelta    = 0;   // ADC anterior (compatibilidad)

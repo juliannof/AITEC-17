@@ -19,6 +19,7 @@ struct ChannelData {
     char      trackName[8]  = {};
     uint8_t   flags         = 0;
     uint16_t  faderTarget   = 8192;
+    uint16_t  lastRawPitchBend = 0;  // último valor MIDI 14-bit crudo recibido (2026-07-20)
     uint8_t   vuLevel       = 0;
     uint8_t   vpotValue     = 0;
     bool      dirty         = true;
@@ -109,6 +110,7 @@ private:
     void _handleResponse          ();
     void _nextSlave               ();
     void _triggerNextCalibration  (uint8_t fromId);  // cascade + wraparound (2026-05-26)
+    void _recomputeFaderTarget    (uint8_t id);  // asume _mutex ya tomado (2026-07-20)
 };
 
 extern RS485Master rs485;

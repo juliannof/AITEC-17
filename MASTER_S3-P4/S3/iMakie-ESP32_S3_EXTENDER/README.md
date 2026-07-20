@@ -315,7 +315,7 @@ SysEx:
 ```
 Slave → S3:
   faderPos (ADC 0-27000) 
-    → PitchBend (Logic 0-14848)
+    → PitchBend (Logic 0-16383)
        if (pb != lastSentPb[id]) → solo si cambió
        msg: 0xE0 + ch, pb_low, pb_high
 

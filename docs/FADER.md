@@ -12,7 +12,7 @@ Documentación exhaustiva del subsistema de faders en iMakie. Incluye calibraci�
 
 ```
 Logic Pro (macOS)
-    │ PitchBend 0-14848 (signed 14-bit: -8192..+8191)
+    │ PitchBend 0-16383 (signed 14-bit: -8192..+8191)
     ▼
 S3 MidiProcessor::processPitchBend()
     │ Mapea: -8192..+8191 → 0..27000 (ADC range)
@@ -48,7 +48,7 @@ S2 Slave (×1 canal)
 S2 responde: SlavePacket.faderPos (0-27000) + touchState + flags
 
     ▼
-S3 mapea: faderPos * 14848 / 27000 → PitchBend 0-14848
+S3 mapea: faderPos * 16383 / 27000 → PitchBend 0-16383
 
     ▼
 Logic recibe PitchBend → sube/baja fader gráfico
@@ -285,11 +285,11 @@ FaderTouch::update() {
 
 ```cpp
 Motor::setTarget(uint16_t target) {
-    // target: 0-14848 (rango Logic)
+    // target: 0-16383 (rango Logic)
     // _adcMin/_adcMax: valores calibrados
     
     // Mapear Logic range → ADC range
-    uint16_t targetADC = _adcMin + (target * (_adcMax - _adcMin) / 14848);
+    uint16_t targetADC = _adcMin + (target * (_adcMax - _adcMin) / 16383);
     
     // Comparar con posición actual
     int16_t error = targetADC - _adcPos;  // -27000..+27000
@@ -540,8 +540,8 @@ Motor posiciona fader
 S2 Fader ADC: 24..26476 (raw 16-bit)
     ↓ [S2 envía SlavePacket.faderPos]
 S3 recibe: faderPos (0-27000)
-    ↓ [EMA filter + mapeo: × 14848 / 27000]
-S3 envia MIDI: PitchBend 0..14848
+    ↓ [EMA filter + mapeo: × 16383 / 27000]
+S3 envia MIDI: PitchBend 0..16383
     ↓ [USB-MIDI]
 Logic recibe PitchBend → fader sube/baja
 ```

@@ -67,7 +67,7 @@ struct __attribute__((packed)) MasterPacket {
     uint8_t  id;            // 1-17
     char     trackName[7];  // Mackie Scribble Strip (7 chars, sin null)
     uint8_t  flags;         // FLAG_REC | FLAG_SOLO | FLAG_MUTE | FLAG_SELECT
-    uint16_t faderTarget;   // PitchBend 0-14848 (signed -8192..+8191, S2 mapea a ADC 0-27000)
+    uint16_t faderTarget;   // PitchBend 0-16383 (14-bit MIDI completo, S2 mapea a ADC 0-27000)
     uint8_t  vuLevel;       // 0-127
     uint8_t  vpotValue;     // ← NUEVO: raw CC byte (bit6=center, 5-4=modo, 3-0=pos)
     uint8_t  connected;     // 1=CONNECTED, 0=DISCONNECTED

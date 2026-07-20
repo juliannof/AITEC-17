@@ -240,11 +240,11 @@ Motor::testUp(pwm) / testDown(pwm) / testOff()  // Test Manual SAT
 
 ```cpp
 Motor::setTarget(uint16_t target) {
-    // target: 0-14848 (rango Logic)
+    // target: 0-16383 (rango Logic, 14-bit MIDI completo)
     // _adcMin/_adcMax: valores calibrados
     
     // Mapear Logic range → ADC range
-    uint16_t targetADC = _adcMin + (target * (_adcMax - _adcMin) / 14848);
+    uint16_t targetADC = _adcMin + (target * (_adcMax - _adcMin) / 16383);
     
     // Comparar con posición actual
     int16_t error = targetADC - _adcPos;  // -27000..+27000

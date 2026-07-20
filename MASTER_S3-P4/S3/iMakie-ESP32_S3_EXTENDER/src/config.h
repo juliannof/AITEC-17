@@ -7,12 +7,12 @@
 #if defined(DEVICE_P4_MASTER)
     #define DEVICE_FAMILY       0x14
     #define VERSION_REPLY_CMD   0x14
-    #define NUM_SLAVES          9
+    #define NUM_SLAVES          1
 
 #elif defined(DEVICE_S3_EXTENDER)
     #define DEVICE_FAMILY       0x14
     #define VERSION_REPLY_CMD   0x14
-    #define NUM_SLAVES          6   // TESTING=6 | PRODUCCIÓN=8 — no cambiar aquí sin hardware real
+    #define NUM_SLAVES          1   // TESTING=6 | PRODUCCIÓN=8 — no cambiar aquí sin hardware real
 
 #else
     #error "DEBE DEFINIR: DEVICE_P4_MASTER o DEVICE_S3_EXTENDER en platformio.ini build_flags"
@@ -55,10 +55,12 @@ extern volatile ConnectionState logicConnectionState;
 #define MAX_CALIBRATION_RETRIES     5   // máx reintentos RS485 timeout durante calibración
 #define SLAVE_CALIB_SETTLE_RESPONSES 5  // respuestas estables antes de disparar auto-calib (2026-05-22)
 
-// --- Fader Logic PitchBend (2026-05-18, confirmado MIDI monitor canal 2) ---
-// signed: min=-8192 (raw 0), max=+6653 (raw 14845) → span = 6653 - (-8192) = 14845
-#define LOGIC_PITCHBEND_MAX  14845
-#define FADER_SYNC_DEADBAND    200   // PitchBend counts S2→Logic: ~1.3% escala full (0-14845)
+// --- Fader Logic PitchBend (2026-07-20, corregido — confirmado MIDI monitor: Logic manda hasta 16383) ---
+// Rango completo MIDI 14-bit: 0-16383. El valor previo (14845) subestimaba
+// el tope real de Logic — provocaba targets calculados más allá de
+// calibratedMax (motor persiguiendo una posición físicamente inalcanzable).
+#define LOGIC_PITCHBEND_MAX  16383
+#define FADER_SYNC_DEADBAND    200   // PitchBend counts S2→Logic: ~1.2% escala full (0-16383)
 #define MOTOR_SETTLE_THRESHOLD  80   // ADC counts: motor settled cuando |faderPos-target| <= este valor
 
 // --- NeoPixel Status LED (2026-05-16 19:40) ---

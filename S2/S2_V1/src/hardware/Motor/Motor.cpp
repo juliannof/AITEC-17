@@ -403,7 +403,9 @@ void update() {
                    millis() - _stallProtectStart > STALL_PROTECT_MS) {
             _hwOff();  // _motor_hw_active = false → no refire inmediato
             log_e("[MOTOR] STALL — tope físico, motor apagado (adc=%d)", _motor_adcPos);
-            _stallProtectStart = 0;  // evitar refire inmediato al reactivarse
+            _stallProtectStart  = 0;  // evitar refire inmediato al reactivarse
+            _stallCooldownUntil = millis() + STALL_COOLDOWN_MS;  // bloquear re-armado (2026-07-20)
+            _stallCooldownFromTouch = _motor_manualTouchDetected;  // origen: mano usuario vs tope físico solo (2026-07-20)
             if (_motor_state == MotorState::MOVING_TO_TARGET) {
                 _motor_state       = MotorState::AT_TARGET;
                 _atTargetStartTime = millis();
@@ -419,7 +421,8 @@ void update() {
 
     case MotorState::IDLE:
         // Esperando órdenes S3 o usuario.
-        if (!_connected && _motor_adcPos > (MOTOR_ADC_MIN + 10)) {
+        if (!_connected && _motor_adcPos > (MOTOR_ADC_MIN + 10) &&
+            millis() >= _stallCooldownUntil && !_motor_manualTouchDetected) {
             // Sin S3: fader debe estar en 0 — bajar (boot o desconexión S3)
             _goToMinStallStart = 0;
             _goToMinLastADC    = _motor_adcPos;
@@ -488,7 +491,8 @@ void update() {
         // En posición — fricción mecánica mantiene el fader, motor completamente apagado
         if (_motor_hw_active) _hwOff();
         // Umbral 80 > arrival threshold 60 — evita bucle AT_TARGET↔GOING_TO_MIN en tope físico
-        if (!_connected && _motor_adcPos > (MOTOR_ADC_MIN + 80)) {
+        if (!_connected && _motor_adcPos > (MOTOR_ADC_MIN + 80) &&
+            millis() >= _stallCooldownUntil && !_motor_manualTouchDetected) {
             _goToMinStallStart = 0;
             _goToMinLastADC    = _motor_adcPos;
             _motor_state       = MotorState::GOING_TO_MIN;
@@ -602,6 +606,12 @@ void setADCDelta(uint16_t currentADC) {
         // Sin delta: reset tras DEBOUNCE_MS de inactividad — FaderTouch eliminado (2026-05-19)
         if (millis() - _motor_manualTouchStartTime > MANUAL_TOUCH_DEBOUNCE_MS) {
             _motor_manualTouchDetected = false;
+            // Cancelar cooldown STALL si su origen fue esta misma sujeción —
+            // ya no hay obstáculo, el motor puede perseguir el target ya (2026-07-20)
+            if (_stallCooldownFromTouch) {
+                _stallCooldownUntil    = 0;
+                _stallCooldownFromTouch = false;
+            }
             log_i("[MOTOR] Usuario soltó fader en adc=%d", currentADC);
         }
     }
@@ -618,6 +628,10 @@ void off() {
     _hwOff();
     _motor_active = false;
     _motor_currentPWM = 0;
+    // Resetear estado — sin esto, si estaba en MOVING_TO_TARGET, el siguiente
+    // update() reengancha _positionTick() persiguiendo el target viejo de
+    // Logic en vez de respetar la desconexión (goToMin master absoluto). (2026-07-20)
+    _motor_state = MotorState::IDLE;
 }
 
 void stop() {
@@ -754,6 +768,15 @@ void setTargetFromS3(uint16_t adcTarget) {
         }
         return;
     }
+    if (millis() < _stallCooldownUntil) {
+        static unsigned long _lastCooldownLog = 0;
+        if (millis() - _lastCooldownLog > 1000) {
+            log_w("[MOTOR] setTargetFromS3: cooldown STALL activo, ignorando target=%d (%lu ms restantes)",
+                  adcTarget, _stallCooldownUntil - millis());
+            _lastCooldownLog = millis();
+        }
+        return;
+    }
     _motor_targetADC = adcTarget;
 
     // No reactivar si ya estamos en posición: fricción mantiene el fader sin motor
@@ -782,6 +805,15 @@ void setTargetForced(uint16_t adcTarget) {
         if (millis() - _lastNoCalForced > 2000) {
             log_w("[MOTOR] setTargetForced: no calibrado, ignorando target=%d", adcTarget);
             _lastNoCalForced = millis();
+        }
+        return;
+    }
+    if (millis() < _stallCooldownUntil) {
+        static unsigned long _lastCooldownLogForced = 0;
+        if (millis() - _lastCooldownLogForced > 1000) {
+            log_w("[MOTOR] setTargetForced: cooldown STALL activo, ignorando target=%d (%lu ms restantes)",
+                  adcTarget, _stallCooldownUntil - millis());
+            _lastCooldownLogForced = millis();
         }
         return;
     }
@@ -839,6 +871,10 @@ CalibState getCalibState() {
 
 bool isCalibrated() {
     return _motor_phase == CalibPhase::DONE && _motor_adcSpan > 100;
+}
+
+bool isPendingCalib() {
+    return _pendingCalib;
 }
 
 void testUp(uint8_t pwm) {

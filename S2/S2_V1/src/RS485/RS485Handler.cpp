@@ -304,8 +304,9 @@ SlavePacket buildResponse(FaderADC& faderADC, SatMenu& satMenu) {
     // Recalibración pedida pero pendiente: phase=DONE y motor bajando a 0 para recalibrar.
     // Suprimir CALIB_DONE hasta que la nueva calibración complete — evita que S3 marque
     // "calibrado" con MIN=0 MAX=0 antes de recibir los datos reales. (2026-06-14)
-    bool pendingNewCalib = (cs == Motor::CalibState::DONE &&
-                            Motor::getState() == Motor::MotorState::GOING_TO_MIN);
+    // Solo suprimir CALIB_DONE si el GOING_TO_MIN es por recalibración pedida —
+    // no por desconexión de Logic (Motor::goToMin() master absoluto). (2026-07-20)
+    bool pendingNewCalib = (cs == Motor::CalibState::DONE && Motor::isPendingCalib());
     if (pendingNewCalib && _calib_send_state > 0) {
         _calib_send_state = 0;  // Forzar reenvío de MIN+MAX tras nueva calibración
     }

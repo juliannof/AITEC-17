@@ -633,7 +633,7 @@ loop() {
 
 **Documentación exhaustiva:**
 - **Transport.md** — Botones transport (RW/FF/STOP/PLAY/REC), LEDs, MIDI feedback, handshake Mackie MCU familia 0x14, troubleshooting (2026-05-16)
-- **FADER.md (sección "Rango de Faders")** — Mapeo Logic 0-14848 ↔ ADC 0-27000, arquitectura bidireccional S3-S2 (2026-05-16)
+- **FADER.md (sección "Rango de Faders")** — Mapeo Logic 0-16383 ↔ ADC 0-27000, arquitectura bidireccional S3-S2 (2026-05-16)
 
 ---
 

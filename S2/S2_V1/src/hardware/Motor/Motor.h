@@ -48,6 +48,7 @@ namespace Motor {
     void       goToMin();  // Baja motor a posición 0 (mínimo), espera órdenes de S3
     CalibState getCalibState();
     bool       isCalibrated();
+    bool       isPendingCalib();  // true solo si GOING_TO_MIN es por recalibración pedida, no por desconexión (2026-07-20)
 
     // Máquina de estados v2 (2026-05-16) — S3 commands
     void       requestCalibration();          // FLAG_CALIB desde S3 → inicia calib o goToMin si necesario

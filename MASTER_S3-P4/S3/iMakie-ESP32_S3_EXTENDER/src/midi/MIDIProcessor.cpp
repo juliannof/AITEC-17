@@ -438,6 +438,10 @@ void processMackieSysEx(byte* payload, int len) {
             byte mode    = payload[6];
             if (channel < 8) {
                 g_channelAutoMode[channel] = mode;
+                // Reenviar al slave — sin esto, un cambio de modo que llegue por este
+                // SysEx (en vez de por notas 74-78) nunca sale de la caché local y el
+                // S2 se queda con el último modo que sí llegó por notas. (2026-07-20)
+                rs485.setAutoMode(channel + 1, (AutoMode)mode);
             }
             break;
         }
@@ -640,7 +644,7 @@ void processPitchBend(byte channel, int bendValue) {
     }
 
     if (channel < 9) {
-        // Logic raw 0-14848 (bajo=-8192 signed=0, alto=6653 signed=14848)
+        // Logic raw 0-16383 (14-bit MIDI completo, confirmado MIDI Monitor 2026-07-20)
         // setFaderTarget espera este rango y hace el mapeo a ADC internamente
         int bendClamped = (bendValue < 0) ? 0 : bendValue;
 
