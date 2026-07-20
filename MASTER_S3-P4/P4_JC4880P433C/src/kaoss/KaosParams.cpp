@@ -23,10 +23,15 @@ static const KaosParam kParamsTriton[] = {
     {77, "LFO1 Depth"},
 };
 
-// MOTIF-RACK — brief §4: solo Filtro verificado (1/10).
+// MOTIF-RACK — Data List oficial (MOTIFRACKE2.pdf §3-1-3), verificado 2026-07-14.
 static const KaosParam kParamsMotif[] = {
     {74, "Cutoff"},
     {71, "Resonance"},
+    {73, "EG Attack"},
+    {75, "EG Decay"},
+    {72, "EG Release"},
+    {91, "Reverb Snd"},
+    {93, "Chorus Snd"},
 };
 
 // WAVE (Wavestation VST) — presets originales del proyecto (2026-06-29),

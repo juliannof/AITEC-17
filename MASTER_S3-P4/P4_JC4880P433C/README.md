@@ -243,7 +243,7 @@ compone la pareja X/Y libremente desde el editor:
 |---|---|---|
 | JV-2080 | Cutoff(74), Resonance(71), Tone1 Lvl(80), Tone3 Lvl(82), Reverb Snd(91), Chorus Snd(93) | brief §4 — Sends solo funciona en modo Performance |
 | TRITON Rack | Cutoff(74), Resonance(71), Filter EG(79), Release(72), LFO1 Speed(76), LFO1 Depth(77) | brief §4 Grupo A (Grupo B vía D-mod bloqueado, pendiente decisión `:Src` preconfigurado vs SysEx en cada selección) |
-| MOTIF-RACK | Cutoff(74), Resonance(71) | brief §4 — resto sin explorar |
+| MOTIF-RACK | Cutoff(74), Resonance(71), EG Attack(73), EG Decay(75), EG Release(72), Reverb Snd(91), Chorus Snd(93) | Data List oficial `MOTIFRACKE2.pdf` §3-1-3, verificado 2026-07-14 (docs/Yamaha_MOTIF-RACK_Datos_Verificados.md) |
 | TG55 / D-110 | *(vacío)* | Sin CC de fábrica verificado — requeriría SysEx por frame, no CC (brief §4) |
 | WAVE (Wavestation VST) | Mod Wheel(1), Breath(2), Joy X(16), Joy Y(17), Cutoff(74), Resonance(71), Reverb Snd(91), Chorus Snd(93) | Presets originales del proyecto (2026-06-29), fuera del catálogo del brief (destino VST, no rack) |
 
