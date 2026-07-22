@@ -55,6 +55,7 @@ namespace Motor {
     void       setTargetFromS3(uint16_t adc); // setTarget desde S3 (ADC ya mapeado, respeta guard usuario)
     void       setTargetForced(uint16_t adc); // setTarget DAW absoluto — bypass guard usuario (AUTO_OFF/READ) (2026-05-30 09:35)
     void       setUserDropTarget(uint16_t adc); // Usuario soltó fader en posición ADC
+    void       setDawAbsolute(bool on);         // AUTO_OFF/READ: DAW manda en absoluto, usuario no puede fijar posición (2026-07-20)
     MotorState getState();                    // Consulta estado actual
 
     // Test mode — control directo (2026-05-10 19:54)

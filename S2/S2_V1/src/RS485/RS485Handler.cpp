@@ -52,6 +52,21 @@ uint32_t _touchDebounceForMode(AutoMode mode) {
 // ASSUMES: Motor calibrado. pkt validado por onMasterData() antes.
 //          Si cambio de modo: caller ya hizo reset de _rsLatchFrozen
 //          y _rsTouchActive (regla "reset total al cambiar modo").
+// Cache del último PitchBend de Logic y flanco de calibración (2026-07-20).
+// El S2 ahora mapea PB(0-16383)→ADC localmente con su rango calibrado.
+static uint16_t _rsLastPBTarget   = 0;
+static bool     _rsPBTargetValid  = false;
+static bool     _rsWasCalibrated  = false;
+static float    _rsFaderPosEMA    = 0.0f;
+
+static uint16_t _pbToADC(uint16_t pb) {
+    if (pb > 16383) pb = 16383;
+    uint16_t lo = Motor::getADCMin();
+    uint16_t hi = Motor::getADCMax();
+    if (hi <= lo) return lo;
+    return lo + (uint16_t)(((uint32_t)pb * (hi - lo)) / 16383);
+}
+
 void _applyFaderTarget(AutoMode mode, uint16_t target) {
     switch (mode) {
 
@@ -238,6 +253,8 @@ void onMasterData(const MasterPacket& pkt) {
         _rsTouchActive    = false;
         _rsLastTouchTime  = 0;
     }
+    // DAW absoluto: en OFF/READ el usuario no puede fijar la posición. (2026-07-20)
+    Motor::setDawAbsolute(pktMode == AUTO_OFF || pktMode == AUTO_READ);
 
     // Comparación type-safe: ambos lados AutoMode. setAutoMode() acepta uint8_t. (2026-06-14)
     if (pktMode != currentAutoMode) {
@@ -250,11 +267,29 @@ void onMasterData(const MasterPacket& pkt) {
     // Reevaluación en CADA paquete (regla: re-aplicar modo aunque target no cambie). (2026-05-30 09:35)
     // WHY: si entras en TOUCH y sueltas el fader, motor debe volver al target
     //      sin esperar a que Logic reenvíe un valor distinto.
-    float newFader = pkt.faderTarget / 27000.0f;
+    // faderTarget ahora es PitchBend crudo 0-16383 (el S3 ya no mapea). (2026-07-20)
+    Internal::_rsLastPBTarget  = pkt.faderTarget;
+    Internal::_rsPBTargetValid = true;
+
+    float newFader = pkt.faderTarget / 16383.0f;
     if (fabsf(faderPositions - newFader) > 0.001f) {
         faderPositions = newFader;  // solo redibujar display si cambia visualmente
     }
-    Internal::_applyFaderTarget(pktMode, pkt.faderTarget);  // enrutado por modo
+
+    // Flanco de calibración: en cuanto el motor pasa a calibrado, aplicar de inmediato
+    // el último valor de Logic — así el fader salta al valor correcto tras calibrar,
+    // sin depender de que Logic reenvíe nada. (2026-07-20)
+    bool calibNow = Motor::isCalibrated();
+    if (calibNow && !Internal::_rsWasCalibrated && Internal::_rsPBTargetValid) {
+        log_i("[CALIB] DONE → aplicando último PB=%d", Internal::_rsLastPBTarget);
+    }
+    Internal::_rsWasCalibrated = calibNow;
+
+    if (calibNow) {
+        Internal::_applyFaderTarget(pktMode, Internal::_pbToADC(pkt.faderTarget));  // enrutado por modo
+    }
+    // Si no está calibrado: no se enruta target (el motor lo ignoraría igual). El PB
+    // queda cacheado y se aplicará en el flanco de calibración.
 
     // ── VPot ──────────────────────────────────────────────────
     setVPotRaw(pkt.vpotValue);
@@ -264,9 +299,6 @@ void onMasterData(const MasterPacket& pkt) {
 //  buildResponse
 // =============================================================
 SlavePacket buildResponse(FaderADC& faderADC, SatMenu& satMenu) {
-    static uint8_t _calib_send_state = 0;  // 0=normal, 1=enviando min, 2=enviando max
-    static Motor::CalibState _last_cs = Motor::CalibState::IDLE;
-
     SlavePacket resp = {};
 
     // Durante calibración/goToMin el motor mueve el fader — nunca es toque de usuario (2026-05-27)
@@ -301,43 +333,30 @@ SlavePacket buildResponse(FaderADC& faderADC, SatMenu& satMenu) {
 
     Motor::CalibState cs = Motor::getCalibState();
 
-    // Recalibración pedida pero pendiente: phase=DONE y motor bajando a 0 para recalibrar.
-    // Suprimir CALIB_DONE hasta que la nueva calibración complete — evita que S3 marque
-    // "calibrado" con MIN=0 MAX=0 antes de recibir los datos reales. (2026-06-14)
-    // Solo suprimir CALIB_DONE si el GOING_TO_MIN es por recalibración pedida —
-    // no por desconexión de Logic (Motor::goToMin() master absoluto). (2026-07-20)
-    bool pendingNewCalib = (cs == Motor::CalibState::DONE && Motor::isPendingCalib());
-    if (pendingNewCalib && _calib_send_state > 0) {
-        _calib_send_state = 0;  // Forzar reenvío de MIN+MAX tras nueva calibración
-    }
+    // faderPos ahora se reporta en PitchBend 0-16383, mapeado localmente con el rango
+    // calibrado. El S3 ya no gestiona rangos ADC. (2026-07-20)
+    if (Motor::isCalibrated()) {
+        uint16_t lo  = Motor::getADCMin();
+        uint16_t hi  = Motor::getADCMax();
+        uint16_t raw = Motor::getRawADC();
+        if (raw < lo) raw = lo;
+        if (raw > hi) raw = hi;
+        uint16_t pb  = (hi > lo) ? (uint16_t)(((uint32_t)(raw - lo) * 16383) / (hi - lo)) : 0;
 
-    // Detección: si volvemos a calibración desde DONE, resetear estado de envío
-    if (cs != Motor::CalibState::DONE && _last_cs == Motor::CalibState::DONE) {
-        _calib_send_state = 0;  // Reset para próxima calibración
-    }
-    _last_cs = cs;
-
-    // Máquina de estado: enviar min/max tras calibración
-    if (cs == Motor::CalibState::DONE && _calib_send_state < 2 && !pendingNewCalib) {
-        if (_calib_send_state == 0) {
-            // Paquete 1: enviar MIN — sin CALIB_DONE (S3 espera MAX antes de declarar OK)
-            resp.faderPos = Motor::getADCMin();
-            resp.buttons |= SLAVE_FLAG_CALIB_SENDING | SLAVE_FLAG_CALIB_IS_MIN;
-            _calib_send_state = 1;
-        } else if (_calib_send_state == 1) {
-            // Paquete 2: enviar MAX
-            resp.faderPos = Motor::getADCMax();
-            resp.buttons |= SLAVE_FLAG_CALIB_DONE | SLAVE_FLAG_CALIB_SENDING;  // sin IS_MIN = es MAX
-            _calib_send_state = 2;
+        if (resp.touchState) {
+            // Usuario tocando: sin filtro — feedback inmediato a Logic.
+            Internal::_rsFaderPosEMA = (float)pb;
+            resp.faderPos  = pb;
+        } else {
+            Internal::_rsFaderPosEMA = Internal::_rsFaderPosEMA + ((float)pb - Internal::_rsFaderPosEMA) * FADER_EMA_ALPHA;
+            resp.faderPos  = (uint16_t)Internal::_rsFaderPosEMA;
         }
+        resp.buttons |= SLAVE_FLAG_CALIB_DONE;   // bit de estado: calibrado y operativo
     } else {
-        // Normal: enviar posición actual
-        resp.faderPos = Motor::getRawADC();
-        if (cs == Motor::CalibState::DONE && !pendingNewCalib) resp.buttons |= SLAVE_FLAG_CALIB_DONE;
+        resp.faderPos = 0;
     }
 
     if (cs == Motor::CalibState::ERROR) resp.buttons |= SLAVE_FLAG_CALIB_ERROR;
-    // NOT_CALIBRATED no se necesita — CALIB_DONE lo indica suficientemente
 
     return resp;
 }

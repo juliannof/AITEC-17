@@ -91,6 +91,13 @@
 | protocol.h | ✅ S2 version | ✅ S3 version | ✅ P4 version | 3 copias independientes |
 | NUM_SLAVES | ✅ Definido en config.h | ✅ Definido en config.h | ✅ Definido en config.h | Ver config.h, nunca asumir |
 
+**🎛️ CALIBRACIÓN Y MAPEO PB↔ADC — RESPONSABILIDAD EXCLUSIVA DEL S2 (2026-07-22 11:43):**
+- **El S2 es dueño único de la calibración (rango ADC min/max) y del mapeo PitchBend↔ADC.** S3 y P4 son **transparentes**: solo transportan `faderTarget`/`faderPos` como PitchBend crudo 0-16383 de punta a punta, sin mapear ni guardar rango calibrado por canal.
+- `MasterPacket.faderTarget` y `SlavePacket.faderPos` son PitchBend 0-16383 en **ambos sentidos** — nunca ADC. El S2 mapea con `RS485Handler::_pbToADC()` (entrante) y en `buildResponse()` (saliente, con su propio EMA).
+- El S2 se **autocalibra solo en su boot** (diferido en `loop()` hasta tener lecturas ADC reales — nunca en `setup()`, ver `FADER.md` §4.0). S3/P4 no orquestan cascada, no cuentan reintentos, no capturan min/max — solo pueden pedir una recalibración puntual vía `FLAG_CALIB` (`setCalibrate()`) y leer pasivamente `CALIB_DONE`/`CALIB_ERROR`.
+- **P4 está incompatible con este firmware de S2** hasta que se porte el mismo cambio (interpretará `faderPos` como ADC crudo) — no tocar P4 asumiendo que ya lo tiene.
+- Esta regla es VINCULANTE. Detalle completo de la migración: `CHANGELOG.md` sesión 2026-07-22, `docs/RS485.md`, `docs/FADER.md`, `docs/AUTOMODE.md`.
+
 **Protocolo de Informe (obligatorio para CADA sesión con cambios):**
 
 ```

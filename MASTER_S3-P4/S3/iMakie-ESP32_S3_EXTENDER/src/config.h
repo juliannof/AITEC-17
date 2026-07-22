@@ -61,7 +61,7 @@ extern volatile ConnectionState logicConnectionState;
 // calibratedMax (motor persiguiendo una posición físicamente inalcanzable).
 #define LOGIC_PITCHBEND_MAX  16383
 #define FADER_SYNC_DEADBAND    200   // PitchBend counts S2→Logic: ~1.2% escala full (0-16383)
-#define MOTOR_SETTLE_THRESHOLD  80   // ADC counts: motor settled cuando |faderPos-target| <= este valor
+#define MOTOR_SETTLE_THRESHOLD  60   // TODO BANCO: reescalado ADC→PB, verificar en V3 — motor settled cuando |faderPos-target| <= este valor (PitchBend 0-16383)
 
 // --- NeoPixel Status LED (2026-05-16 19:40) ---
 #define NEOPIXEL_PIN 48              // GPIO 48 (WS2812B RGB)

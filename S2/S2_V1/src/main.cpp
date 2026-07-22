@@ -197,8 +197,6 @@ void setup() {
         log_e("[BOOT] ADS1115 no encontrado — LED GPIO15 parpadeará");
     }
     log_i("Fader iniciado.");
-    
-
 
     initHardware();
     log_i("Hardware OK");
@@ -283,6 +281,23 @@ void loop() {
     faderADC.update();
     Motor::setADCDelta(faderADC.getFaderPos());  // Detecta movimiento manual (delta ADC rápido) — 2026-05-16
     Motor::setADC(faderADC.getFaderPos());  // Motor recibe ADC ANTES de SAT check
+
+    // Autocalibración de boot: diferida hasta tener lecturas reales del ADS1115.
+    // En setup() _motor_adcPos aún no refleja la posición física → requestCalibration()
+    // tomaría la rama equivocada (creería el fader en 0 esté donde esté). (2026-07-20)
+    // FaderADC no expone hasNewReading() públicamente — se usa Motor::getRawADC() > 0
+    // como proxy de "ya hay al menos una lectura real aplicada" (setADC() satura a
+    // MOTOR_ADC_MIN como mínimo una vez se llama, nunca deja el 0 inicial).
+    static bool  _bootCalibDone   = false;
+    static uint8_t _bootAdcSamples = 0;
+    if (!_bootCalibDone) {
+        if (Motor::getRawADC() > 0) _bootAdcSamples++;
+        if (_bootAdcSamples >= 10) {
+            Motor::requestCalibration();
+            _bootCalibDone = true;
+            log_i("[BOOT] autocalibración disparada (adc=%d)", Motor::getRawADC());
+        }
+    }
 
     // LOG ADC cada 5s (reducido para diagnóstico limpio — 2026-05-19)
     static uint32_t lastLog = 0;

@@ -93,20 +93,11 @@ static void processSlaveResponse(uint8_t slaveId) {
 
     // NO ENVIAR si slave está en calibración (CALIB_SENDING activo) — valores raw no son válidos para Logic
     if (!(ch.buttons & SLAVE_FLAG_CALIB_SENDING)) {
-        // Mapeo inverso exacto de setFaderTarget: usa rango calibrado real (2026-05-24)
-        uint16_t pb;
-        uint16_t span = ch.calibratedMax - ch.calibratedMin;
-        if (span > 0) {
-            // Snap a extremos calibrados — garantiza PB=0 (-inf) y PB=max (+6dB) (2026-05-27)
-            // SNAP_ZONE = DEAD_ZONE-1 = 79: asegura AT_TARGET sin hunting de motor
-            uint16_t fp = ch.faderPos;
-            if      (fp <= ch.calibratedMin + 79) fp = ch.calibratedMin;
-            else if (fp >= ch.calibratedMax - 79) fp = ch.calibratedMax;
-            int32_t shifted = (int32_t)fp - ch.calibratedMin;
-            pb = (uint16_t)constrain((int32_t)shifted * LOGIC_PITCHBEND_MAX / span, 0, LOGIC_PITCHBEND_MAX);
-        } else {
-            pb = (uint16_t)constrain((int32_t)ch.faderPos * LOGIC_PITCHBEND_MAX / 27000, 0, LOGIC_PITCHBEND_MAX);
-        }
+        // faderPos ya llega en PitchBend 0-16383 — el S2 mapea localmente con su rango
+        // calibrado (2026-07-20). El S3 solo transporta, sin recalcular nada. El snap a
+        // extremos ya no hace falta: el S2 satura su propio rango y entrega 0/16383 exactos.
+        uint16_t pb = ch.faderPos;
+        if (pb > 16383) pb = 16383;  // clamp defensivo
 
         // Master hierarchy (2026-05-24):
         //   touchState=1  → Usuario es master: enviar sin deadband

@@ -119,7 +119,7 @@ void drawSplashScreen() {
 
     tft.setFont(&fonts::FreeSans24pt7b);
     tft.setTextColor(TFT_WHITE);
-    tft.drawString("AITEC17", TFT_WIDTH / 2, 70);
+    tft.drawString("", TFT_WIDTH / 2, 70);
 
     tft.setFont(&fonts::FreeSans12pt7b);
     tft.setTextColor(TFT_MCU_GRAY);

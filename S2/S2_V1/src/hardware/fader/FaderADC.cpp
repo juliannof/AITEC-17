@@ -52,11 +52,11 @@ void FaderADC::update() {
     int16_t adcRaw = _ads.getLastConversionResults();
     if (adcRaw < 0) adcRaw = 0;
 
-    // Validar rango esperado (0–27000)
-    if (adcRaw < 0 || adcRaw > MOTOR_ADC_MAX) {
-        log_w("[ADC] Valor fuera de rango: %d (esperado %d-%d)", adcRaw, 0, MOTOR_ADC_MAX);
-        return;  // Descartar lectura inválida
-    }
+    // Saturar, NO descartar: descartar congela la posición y fabrica topes falsos en
+    // calibración. Mantener el stream vivo. (2026-07-20)
+    // TODO HARDWARE: subir MOTOR_ADC_MAX al fondo de escala real del ADS1115 (GAIN_ONE)
+    // tras medirlo con sketch aislado.
+    if (adcRaw > MOTOR_ADC_MAX) adcRaw = MOTOR_ADC_MAX;
 
     _faderPos = (uint16_t)adcRaw;
     _rawLast  = (int)adcRaw;

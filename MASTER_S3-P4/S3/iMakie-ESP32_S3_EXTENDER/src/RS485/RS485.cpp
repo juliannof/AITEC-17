@@ -49,11 +49,8 @@ void RS485Master::startTask() {
 void RS485Master::setCalibrate(uint8_t id) {
     if (id < 1 || id > _numSlaves) return;
     if (xSemaphoreTake(_mutex, pdMS_TO_TICKS(5)) == pdTRUE) {
-        _ch[id].calibrate    = true;
-        _ch[id].calibrating  = true;
-        _ch[id].calibrated   = false;   // permite re-calibrar slaves en bypass (2026-05-26)
-        _ch[id].calibRetries = 0;
-        _ch[id].dirty        = true;
+        _ch[id].calibrate = true;
+        _ch[id].dirty     = true;
         xSemaphoreGive(_mutex);
     }
 }
@@ -102,21 +99,19 @@ void RS485Master::runTask() {
                         log_w("[RS485] TIMEOUT slave %d (#%u consecuciones)",
                               _currentId, _consecutiveTimeouts);
 
-                    // ── Límite de reintentos (2026-05-16 19:25) ──
-                    // Skip + cascade si timeouts > MAX durante calibración activa (2026-05-27)
+                    // ── Límite de timeouts consecutivos (2026-05-16 19:25) ──
+                    // Calibración autónoma en S2: el S3 ya no orquesta cascada ni marca
+                    // slaves defectuosos por calibración. Solo reporta degradación. (2026-07-20)
                     // NUNCA HALT — reflash S2 causa timeouts transitorios que antes bloqueaban Core 1
-                    if (!_ch[_currentId].calibrated && _ch[_currentId].calibrating && _consecutiveTimeouts > MAX_CALIBRATION_RETRIES) {
+                    if (_consecutiveTimeouts > MAX_CALIBRATION_RETRIES) {
                         pixels.setPixelColor(0, pixels.Color(255, 0, 0));  // Rojo: error visible
                         pixels.show();
-                        if (xSemaphoreTake(_mutex, pdMS_TO_TICKS(2)) == pdTRUE) {
-                            _ch[_currentId].calibrating  = false;
-                            _ch[_currentId].calibRetries = MAX_CALIBRATION_RETRIES;
-                            _ch[_currentId].responded    = false;
-                            log_e("[CALIB] ✗ TIMEOUT Slave %d — marcado defectuoso, continuando cascada",
-                                  _currentId);
+                        log_e("[RS485] Slave %d — timeouts persistentes (#%u), degradado",
+                              _currentId, _consecutiveTimeouts);
+                        if (xSemaphoreTake(_mutex, 0) == pdTRUE) {
+                            _ch[_currentId].responded = false;
                             xSemaphoreGive(_mutex);
                         }
-                        _triggerNextCalibration(_currentId);
                         _consecutiveTimeouts = 0;
                         _busState   = BusState::GAP;
                         _stateTimer = micros();
@@ -231,28 +226,8 @@ void RS485Master::_handleResponse() {
     }
 
     if (xSemaphoreTake(_mutex, pdMS_TO_TICKS(2)) == pdTRUE) {
-        // ── Capturar calibración (min/max) si slave está enviando ──
-        if (resp->buttons & SLAVE_FLAG_CALIB_SENDING) {
-            if (resp->buttons & SLAVE_FLAG_CALIB_IS_MIN) {
-                _ch[_currentId].calibratedMin = resp->faderPos;
-                log_i("[RS485] Slave %d: calibratedMin=%d", _currentId, resp->faderPos);
-            } else {
-                _ch[_currentId].calibratedMax = resp->faderPos;
-                log_i("[RS485] Slave %d: calibratedMax=%d ✓", _currentId, resp->faderPos);
-            }
-        } else {
-            if (resp->touchState) {
-                // Usuario tocando: posición directa, sin filtro — feedback inmediato a Logic (2026-05-19)
-                _filteredFaderPos[_currentId] = resp->faderPos;
-                _ch[_currentId].faderPos      = resp->faderPos;
-            } else {
-                // Motor siguiendo target: EMA para suavizar ruido EMI
-                const float FADER_EMA_ALPHA = 0.15f;
-                _filteredFaderPos[_currentId] = _filteredFaderPos[_currentId] +
-                    (int16_t)((int32_t)resp->faderPos - _filteredFaderPos[_currentId]) * FADER_EMA_ALPHA;
-                _ch[_currentId].faderPos = _filteredFaderPos[_currentId];
-            }
-        }
+        // faderPos llega ya en PitchBend 0-16383 y filtrado por el S2. Passthrough. (2026-07-20)
+        _ch[_currentId].faderPos = resp->faderPos;
 
         if (resp->touchState) log_w("[S3-RX] touchState=1 slave=%d faderPos=%d", _currentId, resp->faderPos);
         _ch[_currentId].touchState        = resp->touchState;
@@ -261,113 +236,23 @@ void RS485Master::_handleResponse() {
         _ch[_currentId].encoderDelta      = resp->encoderDelta;
         _ch[_currentId].prevEncoderButton = _ch[_currentId].encoderButton;
         _ch[_currentId].encoderButton     = resp->encoderButton;
-        // Auto-calibración con grace period — solo esclavo 1 arranca la cascada (2026-05-22)
-        // Slaves 2..N son disparados en cascada desde calibDone del anterior
-        if (_currentId == 1 && !_ch[_currentId].calibrated && !_ch[_currentId].calibrating) {
-            _ch[_currentId].stableRespCount++;
-            if (_ch[_currentId].stableRespCount >= SLAVE_CALIB_SETTLE_RESPONSES) {
-                _ch[_currentId].calibrate     = true;
-                _ch[_currentId].calibrating   = true;
-                _ch[_currentId].calibRetries  = 0;   // reset budget en cada intento real (2026-05-26)
-                _ch[_currentId].dirty         = true;
-                log_i("[CALIB] Slave 1 estable (%d resp) — arrancando cascada de calibración",
-                      _ch[_currentId].stableRespCount);
-            } else {
-                log_d("[CALIB] Slave 1 estabilizando %d/%d",
-                      _ch[_currentId].stableRespCount, SLAVE_CALIB_SETTLE_RESPONSES);
-            }
-        }
+        // Calibración autónoma: cada S2 se autocalibra en su boot. El S3 no orquesta nada. (2026-07-20)
         _ch[_currentId].responded         = true;
 
-        // ════════════════════════════════════════════════════════════════════
-        // CALIBRACIÓN — DESACTIVADA TEMPORALMENTE
-        // ════════════════════════════════════════════════════════════════════
-        //
-        // RAZÓN: Los motores DRV8833 en los slaves S2 están desactivados en la
-        // PCB actual (líneas de control no conectadas/alimentadas). Sin motor,
-        // la calibración siempre falla → ERROR_CALIBRACION → retry automático.
-        // Los retries generan tráfico innecesario RS485 → timeouts artificiales.
-        //
-        // CUANDO REACTIVAR:
-        // - Una vez que los motores estén presentes en hardware
-        // - Cambiar _ch[_currentId].calibrated = true (abajo) a false
-        // - Descomentar bloque de lógica de calibración (ver comentario ANTIGUO)
-        // - Probar con Motor::init() funcionando en setup() S2
-        //
-        // ESTADO ACTUAL:
-        // - Se ignoran flags CALIB_DONE, CALIB_ERROR, NOT_CALIBRATED
-        // - Todos los slaves se marcan como calibrated=true (bypass)
-        // - Faders responden correctamente a targets del master
-        // - Botones/encoders funcionan sin depender de calibración
-        // ════════════════════════════════════════════════════════════════════
-
-        bool calibDone     = resp->buttons & SLAVE_FLAG_CALIB_DONE;
-        bool calibError    = resp->buttons & SLAVE_FLAG_CALIB_ERROR;
-        // notCalibrated no se usa en S3 (solo en S2)
-
-        // ── Lógica de calibración — S3 MASTER (2026-05-16 19:30) ──
-        if (calibDone) {
-            _ch[_currentId].calibrating = false;
-            if (!_ch[_currentId].calibrated) {
-                // Guard: rechazar datos inválidos (MIN=0 MAX=0) — indica CALIB_DONE prematuro
-                // antes de que S2 enviara los paquetes MIN/MAX reales. (2026-06-14)
-                bool dataValida = (_ch[_currentId].calibratedMin > 0 &&
-                                   _ch[_currentId].calibratedMax > _ch[_currentId].calibratedMin);
-                if (dataValida) {
-                    _ch[_currentId].calibrated = true;
-                    _ch[_currentId].dirty      = true;
-                    // Remapear target con el rango real recién calibrado — sin esto,
-                    // el fader queda con el mapeo teórico hasta el próximo PitchBend
-                    // de Logic, que puede no llegar si el track está parado. (2026-07-20)
-                    _recomputeFaderTarget(_currentId);
-                    log_i("[CALIB] Slave %d ✓ CALIBRADO OK: MIN=%d MAX=%d",
-                          _currentId, _ch[_currentId].calibratedMin, _ch[_currentId].calibratedMax);
-                    // Cascade con wraparound — incluye slaves que fallaron antes (2026-05-26)
-                    _triggerNextCalibration(_currentId);
-                } else {
-                    log_w("[CALIB] Slave %d ✗ CALIB_DONE inválido (MIN=%d MAX=%d) — reintentando",
-                          _currentId, _ch[_currentId].calibratedMin, _ch[_currentId].calibratedMax);
-                    _ch[_currentId].calibRetries++;
-                    if (_ch[_currentId].calibRetries >= MAX_CALIBRATION_RETRIES) {
-                        log_w("[CALIB] Slave %d — presupuesto agotado, saltando", _currentId);
-                        _triggerNextCalibration(_currentId);
-                    } else {
-                        _ch[_currentId].stableRespCount = 0;  // grace period → espera respuestas estables
-                    }
-                }
-            }
-        } else if (calibError) {
-            // Guard: contar solo si este intento fue nuestro (2026-05-26)
-            // S2 reporta CalibPhase::ERROR en CADA paquete hasta que se reinicia.
-            // Sin guard, 5 paquetes consecutivos == HALT prematuro antes del primer reintento.
-            if (_ch[_currentId].calibrating) {
-                _ch[_currentId].calibrating  = false;
-                _ch[_currentId].calibRetries++;
-                if (_ch[_currentId].calibRetries >= MAX_CALIBRATION_RETRIES) {
-                    // Presupuesto agotado — NO resetear calibRetries (2026-05-26)
-                    // _triggerNextCalibration lo saltará: calibRetries>=MAX → skip definitivo
-                    log_w("[CALIB] Slave %d — %d intentos fallidos, marcado como defectuoso",
-                          _currentId, _ch[_currentId].calibRetries);
-                    _triggerNextCalibration(_currentId);
-                } else {
-                    // Reintento tras grace period: N respuestas estables antes de nuevo intento
-                    _ch[_currentId].stableRespCount = 0;
-                    log_e("[CALIB] Slave %d ✗ ERROR calibración (%d/%d) — grace period activo",
-                          _currentId, _ch[_currentId].calibRetries, MAX_CALIBRATION_RETRIES);
-                }
-            }
-            // Si !calibrating: grace period activo — ignorar ERROR duplicados del mismo fallo
-        } else {
-            // S2 en tránsito — calibrating solo lo limpia CALIB_DONE o CALIB_ERROR
-            // Detectar reinicio: slave calibrado que ya no reporta CALIB_DONE (2026-05-27)
-            if (_ch[_currentId].calibrated && !_ch[_currentId].calibrating) {
-                _ch[_currentId].calibrated      = false;
-                _ch[_currentId].calibRetries    = 0;
-                _ch[_currentId].stableRespCount = 0;
-                _ch[_currentId].calibrate       = true;
-                _ch[_currentId].calibrating     = true;
-                _ch[_currentId].dirty           = true;
-                log_w("[CALIB] Slave %d: reinicio detectado — recalibrando automáticamente", _currentId);
+        // Estado de calibración — LECTURA PASIVA (2026-07-20).
+        // Cada S2 se autocalibra en su boot y es dueño de su rango ADC.
+        // El S3 no orquesta cascada, no reintenta y no guarda min/max.
+        bool calibDone  = resp->buttons & SLAVE_FLAG_CALIB_DONE;
+        bool calibError = resp->buttons & SLAVE_FLAG_CALIB_ERROR;
+        if (calibDone != _ch[_currentId].calibrated) {
+            _ch[_currentId].calibrated = calibDone;
+            log_i("[CALIB] Slave %d: calibrado=%d", _currentId, calibDone ? 1 : 0);
+        }
+        if (calibError) {
+            static uint32_t _lastCalibErrLog = 0;
+            if (millis() - _lastCalibErrLog > 5000) {
+                log_w("[CALIB] Slave %d reporta CALIB_ERROR (degradado)", _currentId);
+                _lastCalibErrLog = millis();
             }
         }
 
@@ -385,36 +270,6 @@ void RS485Master::_handleResponse() {
 
 
 
-
-// ─── Cascade con wraparound (2026-05-26) ────────────────────────────────────
-// Busca el siguiente slave sin calibrar: primero después de fromId, luego
-// desde 1 (wraparound). Si todos están calibrados → log completo.
-void RS485Master::_triggerNextCalibration(uint8_t fromId) {
-    for (uint8_t pass = 0; pass < 2; pass++) {
-        uint8_t start = (pass == 0) ? fromId + 1 : 1;
-        uint8_t end   = (pass == 0) ? _numSlaves  : fromId;
-        for (uint8_t i = start; i <= end; i++) {
-            if (!_ch[i].calibrated && !_ch[i].calibrating
-            && _ch[i].calibRetries < MAX_CALIBRATION_RETRIES) {  // skip si presupuesto agotado
-                _ch[i].calibrate    = true;
-                _ch[i].calibrating  = true;
-                _ch[i].calibRetries = 0;
-                _ch[i].dirty        = true;
-                log_i("[CALIB] → Slave %d", i);
-                return;
-            }
-        }
-    }
-    // Nada pendiente — reportar estado final
-    bool allOk = true;
-    for (uint8_t i = 1; i <= _numSlaves; i++) {
-        if (!_ch[i].calibrated) {
-            log_e("[CALIB] ✗ Slave %d — no calibrado (hardware defectuoso)", i);
-            allOk = false;
-        }
-    }
-    if (allOk) log_i("[CALIB] ✓ Todos los slaves calibrados");
-}
 
 void RS485Master::_nextSlave() {
     _currentId++;
@@ -459,29 +314,15 @@ void RS485Master::setFlags(uint8_t id, uint8_t flags) {
 
 void RS485Master::setFaderTarget(uint8_t id, uint16_t value14bit) {
     if (id < 1 || id > _numSlaves) return;
+    // Passthrough: el S2 mapea PB→ADC con su rango calibrado. El S3 solo transporta. (2026-07-20)
     if (xSemaphoreTake(_mutex, pdMS_TO_TICKS(5)) == pdTRUE) {
-        _ch[id].lastRawPitchBend = value14bit;
-        _recomputeFaderTarget(id);
+        _ch[id].faderTarget = value14bit;
+        _ch[id].dirty       = true;
         xSemaphoreGive(_mutex);
     }
 }
 
-// _recomputeFaderTarget — remapea lastRawPitchBend al rango ADC actual del canal.
-// ASSUMES: _mutex ya tomado por el caller (evita deadlock, ver _handleResponse). (2026-07-20)
-void RS485Master::_recomputeFaderTarget(uint8_t id) {
-    // Mapeo: Logic 0-16383 → rango calibrado real de slave
-    uint16_t faderTarget;
-    if (_ch[id].calibratedMax > _ch[id].calibratedMin) {
-        // Slave calibrado: mapear a rango real
-        uint16_t span = _ch[id].calibratedMax - _ch[id].calibratedMin;
-        faderTarget = _ch[id].calibratedMin + ((uint32_t)_ch[id].lastRawPitchBend * span / LOGIC_PITCHBEND_MAX);
-    } else {
-        // Slave no calibrado aún: usar rango teórico (0-27000)
-        faderTarget = (uint32_t)_ch[id].lastRawPitchBend * 27000 / LOGIC_PITCHBEND_MAX;
-    }
-    _ch[id].faderTarget = faderTarget;
-    _ch[id].dirty       = true;
-}
+// _recomputeFaderTarget ELIMINADO 2026-07-20: el mapeo PB→ADC vive en el S2.
 
 void RS485Master::setVuLevel(uint8_t id, uint8_t value) {
     if (id < 1 || id > _numSlaves) return;
@@ -524,7 +365,7 @@ void RS485Master::printStats() const {
     log_i("[RS485] Tasa éxito: %.1f%%  (RX/TX)", rate);
     for (uint8_t i = 1; i <= _numSlaves; i++) {
         if (xSemaphoreTake((SemaphoreHandle_t)_mutex, pdMS_TO_TICKS(2)) == pdTRUE) {
-            const char* status = _ch[i].calibrated ? "OK" : _ch[i].calibrating ? "CAL" : "---";
+            const char* status = _ch[i].calibrated ? "OK" : "---";
             log_i("[RS485] Slave %d: %-3s  responded:%s", i, status, _ch[i].responded ? "Y" : "N");
             xSemaphoreGive((SemaphoreHandle_t)_mutex);
         }

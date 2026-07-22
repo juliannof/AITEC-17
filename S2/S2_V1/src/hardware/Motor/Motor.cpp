@@ -38,6 +38,17 @@ static uint8_t _pwm_max = 0;
 //          Cualquiera → MOVING_TO_TARGET (S3 ordena setTarget)
 static MotorState _motor_state = MotorState::IDLE;
 
+static bool _dawAbsolute = false;  // true en AUTO_OFF/READ — usuario no puede fijar posición (2026-07-20)
+
+// Suelo de la máquina "fader a 0 sin Logic": el mínimo real calibrado si existe,
+// si no la constante. Sin esto, los umbrales fijos (MOTOR_ADC_MIN) contra un fondo
+// físico real de ~115-135 cuentas hacen que la llegada por threshold NUNCA se cumpla
+// → llegada por stall → re-disparo → bucle de pulsos contra el tope. (2026-07-20)
+static uint16_t _goToMinRestADC = 0;  // latch: dónde descansó el fader tras stall en el tope
+static uint16_t _floorADC() {
+    return (_motor_phase == CalibPhase::DONE) ? _calibratedFaderMin : (uint16_t)MOTOR_ADC_MIN;
+}
+
 // ─── Funciones HW (privadas) ──────────────────────────────────
 static void _hwOff() {
     digitalWrite(MOTOR_EN, LOW);   // EN primero: corta driver antes de cambiar PWM
@@ -199,9 +210,13 @@ static void _calibUpdate() {
         if (now < _motor_calibMinDetect) break;
 
         // PWM adaptativo: MAX hasta 200, luego MIN para refinamiento (2026-05-12 00:30)
+        // FIX 2026-07-22: el umbral de aplicación real (1000) no coincidía con el umbral
+        // de cálculo (200) — el motor perdía fuerza (PWM_MIN) desde 1000 cuentas de
+        // distancia, mucho antes de acercarse al fondo real, y se atascaba sin llegar al
+        // tope físico verdadero (detectaba "stuck" muy por encima del mínimo real).
         uint8_t pwmDown = (pos > 200) ? _pwm_max : _pwm_min;
         if (_motor_currentPWM != pwmDown) {
-            if (pos > 1000) _hwDown(_pwm_max);
+            if (pos > 200) _hwDown(_pwm_max);
             else _hwDown(_pwm_min);
             _motor_currentPWM = pwmDown;
         }
@@ -251,7 +266,8 @@ static void _calibUpdate() {
         log_i("[CALIB] Tope superior: noise_span=%d  margin=%d", _motor_noiseTopSpan, marginTop);
         log_i("[CALIB] Gap requerido: %d (ruidos: top=%d bot=%d)", minGapRequired, _motor_noiseTopSpan, _motor_noiseBottomSpan);
 
-        if (_motor_adcTop > adcBot + minGapRequired) {
+        uint16_t _tentativeSpan = (_motor_adcTop > adcBot) ? (_motor_adcTop - adcBot) : 0;
+        if (_motor_adcTop > adcBot + minGapRequired && _tentativeSpan >= CALIB_MIN_SPAN) {
             _calibratedFaderMin    = adcBot + marginBot;
             _calibratedFaderMax    = _motor_adcTop - marginTop;
             _motor_adcSpan   = _calibratedFaderMax - _calibratedFaderMin;
@@ -260,11 +276,26 @@ static void _calibUpdate() {
             faderADC.setCalibration(_calibratedFaderMin, _calibratedFaderMax);
             _motor_lastCalibDone = millis();  // Registrar timestamp (2026-05-16 07:48)
             _motor_phase     = CalibPhase::DONE;
+            _motor_calibRetries = 0;
             log_i("[CALIB] OK  MIN=%d MAX=%d span=%d target=%d",
                   _calibratedFaderMin, _calibratedFaderMax, _motor_adcSpan, _motor_targetADC);
         } else {
-            _motor_phase = CalibPhase::ERROR;
-            log_e("[CALIB] ERROR — rango inválido  top=%d bot=%d", _motor_adcTop, adcBot);
+            // Span demasiado corto = calibración amputada (stall a mitad de recorrido
+            // tratado como tope, o stream ADC congelado). Reintentar localmente. (2026-07-20)
+            _motor_calibRetries++;
+            if (_motor_calibRetries < CALIB_MAX_RETRIES) {
+                log_w("[CALIB] span corto (%d < %d) top=%d bot=%d — reintento %d/%d",
+                      _tentativeSpan, CALIB_MIN_SPAN, _motor_adcTop, adcBot,
+                      _motor_calibRetries, CALIB_MAX_RETRIES);
+                _pendingCalib = true;
+                _motor_phase  = CalibPhase::IDLE;
+                _motor_state  = MotorState::GOING_TO_MIN;
+                Motor::goToMin();
+            } else {
+                _motor_phase = CalibPhase::ERROR;
+                log_e("[CALIB] ERROR — amputada tras %d intentos  top=%d bot=%d span=%d",
+                      _motor_calibRetries, _motor_adcTop, adcBot, _tentativeSpan);
+            }
         }
         break;
     }
@@ -300,8 +331,18 @@ static void _positionTick() {
         log_i("[POS] ON  pos=%d target=%d err=%d span=%d", pos, (int)_motor_targetADC, err, _motor_adcSpan);
     }
 
-    int targetPWM = _pwm_min + (min((uint16_t)absErr, _motor_adcSpan) * (_pwm_max - _pwm_min)) / _motor_adcSpan;
-    targetPWM = constrain(targetPWM, _pwm_min, _pwm_max);
+    // Crucero a PWM_MAX mientras el error sea grande — igual que _calibUpdate() en
+    // GOING_UP/GOING_DOWN. El proporcional puro nunca llegaba a PWM_MAX salvo que
+    // el target estuviera en el extremo opuesto exacto, y con errores grandes pero
+    // no máximos el PWM resultante no bastaba para vencer fricción localizada cerca
+    // de los extremos → bucle STALL→cooldown→reintento parcial. (2026-07-22)
+    int targetPWM;
+    if (absErr > POSITION_CRUISE_ERR) {
+        targetPWM = _pwm_max;
+    } else {
+        targetPWM = _pwm_min + (min((uint16_t)absErr, _motor_adcSpan) * (_pwm_max - _pwm_min)) / _motor_adcSpan;
+        targetPWM = constrain(targetPWM, _pwm_min, _pwm_max);
+    }
 
     _motor_currentPWM = constrain(
         _motor_currentPWM + constrain(targetPWM - _motor_currentPWM, -PWM_SLEW, PWM_SLEW),
@@ -405,7 +446,10 @@ void update() {
             log_e("[MOTOR] STALL — tope físico, motor apagado (adc=%d)", _motor_adcPos);
             _stallProtectStart  = 0;  // evitar refire inmediato al reactivarse
             _stallCooldownUntil = millis() + STALL_COOLDOWN_MS;  // bloquear re-armado (2026-07-20)
-            _stallCooldownFromTouch = _motor_manualTouchDetected;  // origen: mano usuario vs tope físico solo (2026-07-20)
+            // En DAW absoluto (OFF/READ) cualquier STALL se asume obstrucción del usuario
+            // aunque sujete el fader QUIETO (sin delta ADC no hay touch): así soltar cancela
+            // el cooldown en vez de pulsar a ciegas cada 2s. (2026-07-20)
+            _stallCooldownFromTouch = _motor_manualTouchDetected || _dawAbsolute;
             if (_motor_state == MotorState::MOVING_TO_TARGET) {
                 _motor_state       = MotorState::AT_TARGET;
                 _atTargetStartTime = millis();
@@ -421,7 +465,8 @@ void update() {
 
     case MotorState::IDLE:
         // Esperando órdenes S3 o usuario.
-        if (!_connected && _motor_adcPos > (MOTOR_ADC_MIN + 10) &&
+        if (!_connected && _motor_adcPos > (_floorADC() + 10) &&
+            (_goToMinRestADC == 0 || _motor_adcPos > _goToMinRestADC + 40) &&
             millis() >= _stallCooldownUntil && !_motor_manualTouchDetected) {
             // Sin S3: fader debe estar en 0 — bajar (boot o desconexión S3)
             _goToMinStallStart = 0;
@@ -437,7 +482,7 @@ void update() {
 
     case MotorState::GOING_TO_MIN: {
         // Llegada por threshold o por stall (fader en tope físico, ADC no baja más)
-        bool arrived = (_motor_adcPos <= (MOTOR_ADC_MIN + 60));
+        bool arrived = (_motor_adcPos <= (_floorADC() + 60));
 
         if (abs((int)_motor_adcPos - (int)_goToMinLastADC) > 15) {
             _goToMinLastADC    = _motor_adcPos;
@@ -452,6 +497,8 @@ void update() {
             _hwOff();
             _goToMinStallStart = 0;
             _goToMinLastADC    = 0;
+            _goToMinRestADC    = _motor_adcPos;   // latch: no re-disparar hasta que el fader suba de verdad (2026-07-20)
+            _motor_targetADC   = _motor_adcPos;
             if (_pendingCalib) {
                 _pendingCalib = false;
                 _motor_state  = MotorState::CALIBRATING;
@@ -491,7 +538,8 @@ void update() {
         // En posición — fricción mecánica mantiene el fader, motor completamente apagado
         if (_motor_hw_active) _hwOff();
         // Umbral 80 > arrival threshold 60 — evita bucle AT_TARGET↔GOING_TO_MIN en tope físico
-        if (!_connected && _motor_adcPos > (MOTOR_ADC_MIN + 80) &&
+        if (!_connected && _motor_adcPos > (_floorADC() + 80) &&
+            (_goToMinRestADC == 0 || _motor_adcPos > _goToMinRestADC + 40) &&
             millis() >= _stallCooldownUntil && !_motor_manualTouchDetected) {
             _goToMinStallStart = 0;
             _goToMinLastADC    = _motor_adcPos;
@@ -509,7 +557,10 @@ void update() {
 }
 
 void setADC(uint16_t v) {
-    if (v < MOTOR_ADC_MIN || v > MOTOR_ADC_MAX) return;  // Rechazar fuera de rango esperado
+    // Saturar, NO rechazar: rechazar congela _motor_adcPos y fabrica topes falsos en
+    // calibración (la última lectura válida se toma como tope físico). (2026-07-20)
+    if (v < MOTOR_ADC_MIN) v = MOTOR_ADC_MIN;
+    if (v > MOTOR_ADC_MAX) v = MOTOR_ADC_MAX;
     // Bypass spike guard durante: calibración, bajando a mínimo, O usuario moviendo fader (2026-05-19)
     bool inCalibFlow = _isCalibrating() ||
                        _motor_state == MotorState::GOING_TO_MIN ||
@@ -591,16 +642,28 @@ void setADCDelta(uint16_t currentADC) {
         : MANUAL_TOUCH_THRESHOLD;
     bool userTouch = (delta > touchThreshold);
 
+    // Periodo de gracia tras entrar en AT_TARGET: el crucero a PWM_MAX (POSITION_CRUISE_ERR)
+    // da al motor más inercia al llegar — el overshoot/asentamiento mecánico puede superar
+    // el umbral sensible de AT_TARGET sin que el usuario haya tocado nada. (2026-07-22)
+    if (userTouch && _motor_state == MotorState::AT_TARGET &&
+        (millis() - _atTargetStartTime) < AT_TARGET_TOUCH_GRACE_MS) {
+        userTouch = false;
+    }
+
     if (userTouch) {
         _motor_manualTouchStartTime = millis();  // Refresh en cada movimiento — evita reset prematuro (2026-05-19)
         if (!_motor_manualTouchDetected) {
             // Primera detección: usuario toma control — INMEDIATO
             _motor_manualTouchDetected = true;
-            Motor::stop();
-            _motor_state = MotorState::AT_TARGET;  // Motor cede control
-            _userDropTarget = currentADC;
-            _motor_targetADC = currentADC;         // ADC actual = nueva posición aceptada
-            log_w("[MOTOR] Usuario master: adc=%d delta=%d", currentADC, delta);
+            // DAW absoluto (AUTO_OFF/READ): reportamos touch a Logic pero el motor
+            // NO cede — sigue persiguiendo el target y devuelve el fader. (2026-07-20)
+            if (!_dawAbsolute) {
+                Motor::stop();
+                _motor_state = MotorState::AT_TARGET;  // Motor cede control
+                _userDropTarget = currentADC;
+                _motor_targetADC = currentADC;         // ADC actual = nueva posición aceptada
+            }
+            log_w("[MOTOR] Usuario touch: adc=%d delta=%d dawAbs=%d", currentADC, delta, _dawAbsolute);
         }
     } else if (_motor_manualTouchDetected) {
         // Sin delta: reset tras DEBOUNCE_MS de inactividad — FaderTouch eliminado (2026-05-19)
@@ -642,6 +705,7 @@ void stop() {
 
 void setConnected(bool connected) {
     _connected = connected;  // Notificar estado de conexión S3 (2026-05-16 10:52)
+    if (connected) _goToMinRestADC = 0;  // limpiar latch anti-rebote al reconectar (2026-07-20)
 }
 
 uint16_t getRawADC() {
@@ -740,11 +804,11 @@ void requestCalibration() {
         }
     } else {
         // Fader ≠ 0 → bajar a 0, luego calibrar automáticamente
-        if (_motor_state != MotorState::GOING_TO_MIN) {
+        if (!_pendingCalib) {
             _pendingCalib = true;
             _motor_state = MotorState::GOING_TO_MIN;
             goToMin();
-            log_i("[MOTOR] requestCalibration: ≠ 0, goToMin() bajando...");
+            log_i("[MOTOR] requestCalibration: ≠ 0, goToMin() bajando (pendingCalib armado)...");
         }
     }
 }
@@ -834,6 +898,10 @@ void setTargetForced(uint16_t adcTarget) {
         }
     }
     _motor_state = MotorState::MOVING_TO_TARGET;
+}
+
+void setDawAbsolute(bool on) {
+    _dawAbsolute = on;
 }
 
 void setUserDropTarget(uint16_t adcValue) {

@@ -2,9 +2,13 @@
 
 Documentación del sistema de **AutoMode awareness** del fader motorizado S2. Define cómo el handler RS485 enruta el target del DAW al motor en función del modo de automatización activo (OFF / READ / WRITE / TRIM / TOUCH / LATCH).
 
-**Última actualización:** 2026-06-14
-**Estado:** En implementación — pendiente validación hardware
+**Última actualización:** 2026-07-22
+**Estado:** En implementación — validación parcial en banco (ver CHANGELOG sesión 2026-07-22)
 **Aplica a:** S2 (Slave). S3 y P4 transmiten AutoMode en `MasterPacket.flags` (bits 5-7).
+
+**⚠️ Actualización (2026-07-22):** el `target` que llega a `_applyFaderTarget()` ahora es el resultado de `RS485Handler::_pbToADC()` (PitchBend→ADC mapeado con el rango calibrado del propio S2) — antes era ADC ya mapeado por el S3. No cambia el routing por modo descrito en este documento, solo de dónde viene el valor. Ver `RS485.md` y `FADER.md`.
+
+**Nuevo:** `setDawAbsolute(bool)` — cierra un hueco real en AUTO_OFF/READ que `setTargetForced()` solo no cubría (ver §2.2 actualizada abajo).
 
 ---
 
@@ -61,6 +65,10 @@ Hay un `TODO` marcado en el código en ese punto.
 - Internamente: `Motor::setTargetForced(target)` — bypass del guard `_motor_manualTouchDetected`.
 
 **Caso típico:** Logic en READ reproduciendo automatización grabada. El fader sigue al DAW siempre.
+
+**Fix 2026-07-22 — `Motor::setDawAbsolute(bool)`:** `setTargetForced()` bypasea el guard de touch al aplicar el target, pero **no evitaba que `setADCDelta()` cediera el control al usuario en primer lugar** — había una ventana de hasta ~10ms (un ciclo de paquete RS485) en la que el usuario empujando el fader hacía que el motor parara y cediera (`_motor_state = AT_TARGET`, `_motor_targetADC = currentADC`) antes de que el siguiente `setTargetForced()` lo corrigiera. `RS485Handler` llama `Motor::setDawAbsolute(pktMode == AUTO_OFF || pktMode == AUTO_READ)` en cada cambio de modo; con `_dawAbsolute=true`, `setADCDelta()` reporta el touch a Logic (`touchState=1`) pero **nunca cede el control** — el motor sigue persiguiendo el target sin ninguna ventana intermedia.
+
+**Fix relacionado 2026-07-22 — cooldown STALL cancelable en DAW absoluto:** si el usuario resiste el motor *sin* generar suficiente delta ADC para disparar `_motor_manualTouchDetected` (p. ej. sujeta el fader quieto contra el empuje), el `STALL_PROTECT` puede activarse igualmente (motor activo, ADC sin cambio). Antes, el cooldown de 2s solo era cancelable si `_motor_manualTouchDetected` era true al momento del stall. Ahora, en DAW absoluto (`_dawAbsolute=true`), cualquier STALL se asume obstrucción del usuario y su cooldown es cancelable al soltar, sin esperar los 2s completos.
 
 ### 2.3 AUTO_WRITE — usuario libre, motor inhibido
 
@@ -231,7 +239,7 @@ resp.touchState = (!motorCalibrating && _rsTouchActive) ? 1 : 0
 
 | Invariante | Cómo se garantiza |
 |------------|-------------------|
-| Logic y fader físico siempre coinciden (READ/OFF) | `setTargetForced()` sin guard usuario — DAW siempre gana |
+| Logic y fader físico siempre coinciden (READ/OFF) | `setTargetForced()` sin guard usuario + `setDawAbsolute(true)` impide que `setADCDelta()` ceda el control en primer lugar (2026-07-22) — DAW siempre gana, sin ventana intermedia |
 | Usuario tiene control libre (WRITE) | Motor nunca recibe target en WRITE |
 | Motor regresa al target al soltar (TOUCH/TRIM) | `setTargetFromS3()` guard se libera con `_motor_manualTouchDetected` debounce (600ms motor) — el touchState reportado tiene su propio debounce 80ms para Logic |
 | Frozen persiste hasta Logic mueva (LATCH) | `_rsLatchFrozen` solo se limpia con cambio de modo o `abs(target - frozenADC) > 200` |

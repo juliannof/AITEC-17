@@ -111,9 +111,26 @@ enum class ConnectionState {
 static constexpr uint16_t MOTOR_ADC_MIN            = 20;      // mínimo esperado
 static constexpr uint16_t MOTOR_ADC_MAX            = 27000;   // máximo esperado
 
+// ─── Calibración autónoma S2 (2026-07-20) ───────────────────────────────
+// TODO HARDWARE: MOTOR_ADC_MAX=27000 es herencia sin dato real. Medir el tope
+// físico real del ADS1115 (GAIN_ONE) con un sketch aislado y ajustar. Hasta
+// entonces se satura en 27000 (ver FaderADC.cpp / Motor::setADC).
+#define CALIB_MIN_SPAN        18000   // span ADC mínimo para aceptar calibración (≈provisional, ajustar con dato real)
+#define CALIB_MAX_RETRIES     3       // reintentos locales antes de CalibPhase::ERROR
+#define FADER_EMA_ALPHA       0.15f   // filtro posición fader en S2 (bajado desde S3)
+#define CALIB_DATA_TIMEOUT_MS 200     // watchdog: sin muestra ADS nueva > esto en calib → ERROR
+
 // Motor — control de posición (constantes)
 static constexpr uint8_t  PWM_MIN                  = 100;
 static constexpr uint8_t  PWM_MAX                  = 160;  // calibrado: movimiento correcto sin ruido (2026-05-10 21:55)
+
+// TODO BANCO: umbral provisional — ajustar según fricción real medida en banco (2026-07-22)
+// WHY: _positionTick() calculaba PWM proporcional al error de punta a punta, sin llegar
+// nunca a PWM_MAX salvo que el target estuviera en el extremo opuesto exacto. Con errores
+// grandes pero no máximos (~40-75% del span) el PWM resultante (125-145) no bastaba para
+// vencer fricción localizada cerca de los extremos — el fader quedaba atrapado en un
+// bucle STALL→cooldown→reintento parcial en vez de moverse con fluidez.
+static constexpr uint16_t POSITION_CRUISE_ERR       = 2000;  // cuentas: por encima → PWM_MAX fijo (crucero), por debajo → proporcional (frenado fino)
 
 // Motor — spike guard (rechaza cambios > este valor)
 static constexpr uint16_t ADC_SPIKE_GUARD          = 500;     // cuentas máximas entre lecturas (aumentado para Test Mode tolerancia 2026-05-10 22:00)
@@ -167,6 +184,7 @@ static int        _motor_currentPWM     = 0;
 
 // Motor — máquina de estados v2 (2026-05-16 10:52)
 static bool       _pendingCalib         = false;        // Flag: startCalib en espera después goToMin
+static uint8_t    _motor_calibRetries   = 0;            // reintentos de calibración por span corto (2026-07-20)
 static bool       _connected            = false;        // Estado de conexión con S3
 static bool       _motor_goingToMin     = false;        // Flag: motor bajando a posición 0
 static uint16_t   _userDropTarget       = 0;            // ADC capturado cuando usuario soltó fader
@@ -208,6 +226,10 @@ static constexpr uint16_t MANUAL_TOUCH_THRESHOLD          = 150;  // umbral delt
 static constexpr uint16_t MANUAL_TOUCH_AT_TARGET_THRESHOLD =  30;  // umbral en ventana 80ms — motor off (50→30, 2026-05-27)
 static constexpr uint32_t MANUAL_TOUCH_DEBOUNCE_MS        = 600;  // ms sin movimiento antes de ceder control
 static constexpr uint32_t TOUCH_DELTA_WINDOW_MS           =  80;  // ventana acumulación delta — captura movimientos lentos (2026-05-27)
+// WHY: el crucero a PWM_MAX (POSITION_CRUISE_ERR) da al motor más inercia al llegar
+// a AT_TARGET — el overshoot/asentamiento mecánico puede superar el umbral sensible
+// MANUAL_TOUCH_AT_TARGET_THRESHOLD sin que el usuario haya tocado nada. (2026-07-22)
+static constexpr uint32_t AT_TARGET_TOUCH_GRACE_MS        = 200;  // ms tras entrar en AT_TARGET, ignora touch
 
 // ─── AutoMode routing — RS485Handler (2026-05-30 09:35) ──────
 // WHAT: estado + constantes para enrutar el faderTarget según AutoMode (OFF/READ/WRITE/TRIM/TOUCH/LATCH).

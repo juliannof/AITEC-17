@@ -20,8 +20,8 @@
 // bits 0-3: botones (FLAG_REC, SOLO, MUTE, SELECT ya definidos)
 #define SLAVE_FLAG_CALIB_DONE      (1 << 4)   // calibración completa
 #define SLAVE_FLAG_CALIB_ERROR     (1 << 5)   // calibración fallida
-#define SLAVE_FLAG_CALIB_SENDING   (1 << 6)   // enviando datos calibración (min/max en faderPos)
-#define SLAVE_FLAG_CALIB_IS_MIN    (1 << 7)   // si SENDING=1: faderPos=MIN (sin flag: faderPos=MAX)
+#define SLAVE_FLAG_CALIB_SENDING   (1 << 6)   // enviando datos calibración (min/max en faderPos)  // OBSOLETO 2026-07-20: rango ADC es interno del S2
+#define SLAVE_FLAG_CALIB_IS_MIN    (1 << 7)   // si SENDING=1: faderPos=MIN (sin flag: faderPos=MAX)  // OBSOLETO 2026-07-20: rango ADC es interno del S2
 // bits 5-7: modo de automatización (3 bits = 8 valores)
 #define AUTOMODE_SHIFT  5
 #define AUTOMODE_MASK   (0x07 << AUTOMODE_SHIFT)
@@ -66,7 +66,7 @@ struct __attribute__((packed)) MasterPacket {
     uint8_t  id;            // 1-17
     char     trackName[7];  // Mackie Scribble Strip (7 chars, sin null)
     uint8_t  flags;         // FLAG_REC | FLAG_SOLO | FLAG_MUTE | FLAG_SELECT
-    uint16_t faderTarget;   // Logic PitchBend: 0-16383 (mapea a 0-27000 ADC)
+    uint16_t faderTarget;   // PitchBend crudo de Logic 0-16383 (mapeo a ADC lo hace el S2) (2026-07-20)
     uint8_t  vuLevel;       // 0-127
     uint8_t  vpotValue;     // ← NUEVO: raw CC byte (bit6=center, 5-4=modo, 3-0=pos)
     uint8_t  connected;     // 1=CONNECTED, 0=DISCONNECTED
@@ -78,7 +78,7 @@ static_assert(sizeof(MasterPacket) == 16, "MasterPacket debe ser 16 bytes");
 struct __attribute__((packed)) SlavePacket {
     uint8_t  header;        // 0xBB
     uint8_t  id;            // MY_SLAVE_ID
-    uint16_t faderPos;      // ADS1115 raw 0-27000 (máximo esperado en rango válido)
+    uint16_t faderPos;      // posición en PitchBend 0-16383, ya mapeada por el S2 con su rango calibrado (2026-07-20)
     uint8_t  touchState;    // 0=libre 1=tocado
     uint8_t  buttons;       // FLAG_REC | FLAG_SOLO | FLAG_MUTE | FLAG_SELECT
     int8_t   encoderDelta;  // rotación acumulada (-127..+127)

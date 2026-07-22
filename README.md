@@ -1,53 +1,65 @@
 # AITEC-17 — Mackie Control protocol on ESP32
 
-> A DIY Mackie Control surface built on ESP32-P4 (master) + ESP32-S3 (extender) and ESP32-S2 Mini (17 slave) units, communicating over RS485 and interfacing with DAWs via USB MIDI.
+> A DIY Mackie Control Universal surface built on ESP32-P4 (master) + ESP32-S3 (extender) + up to 17× ESP32-S2 Mini (slave) units, communicating over RS485 and interfacing with DAWs (Logic Pro) via USB MIDI.
 
 ---
 
 ## Table of Contents
 
 - [System Overview](#system-overview)
+- [Project Status](#project-status)
 - [Hardware Architecture](#hardware-architecture)
   - [Master Unit — ESP32-P4](#master-unit--esp32-p4)
   - [Extender Unit — ESP32-S3](#extender-unit--esp32-s3)
   - [Slave Units — ESP32-S2 Mini](#slave-units--esp32-s2-mini)
 - [Communication Protocol — RS485](#communication-protocol--rs485)
-- [Key Hardware Decisions](#key-hardware-decisions)
+- [PitchBend ↔ ADC Mapping](#pitchbend--adc-mapping)
 - [Firmware Modules](#firmware-modules)
 - [Development Environment](#development-environment)
-- [Known Constraints & Workarounds](#known-constraints--workarounds)
+- [Documentation](#documentation)
 
 ---
 
 ## System Overview
 
-AITEC-17 emulates a **Mackie Control Universal** surface. It supports up to **17 slave channels** (9 on master bus A + 8 on extender bus B) coordinated by one ESP32-P4 master + one ESP32-S3 extender.
+AITEC-17 emulates a **Mackie Control Universal** surface for Logic Pro. It targets up to **17 slave channels** (9 on the P4's bus A + 8 on the S3's bus B), each a fully motorized channel strip.
 
 ```
-DAW (Logic Pro / macOS)
-        │  USB MIDI (Mackie Control protocol)
+Logic Pro (macOS)
+        │  USB-MIDI (Mackie Control protocol)
         ▼
   ┌─────────────┐
-  │  ESP32-P4   │  ◄── Master Unit (Bus A: 9 slaves)
+  │  ESP32-P4   │  ◄── Master (bus A, up to 9 slaves) — board JC1060P470C
   │  (Master)   │
   └──────┬──────┘
-         │  RS485 @ 500 kbaud (half-duplex)
-         │  Custom binary protocol + CRC8
-         │
+         │  RS485 @ 500 kbaud (half-duplex, CRC8)
   ┌─────────────┐
-  │  ESP32-S3   │  ◄── Extender Unit (Bus B: 8 slaves)
+  │  ESP32-S3   │  ◄── Extender (bus B, up to 8 slaves)
   │ (Extender)  │
   └──────┬──────┘
          │
-    ┌────┴────────────────────────── ... ──┐
-    ▼                                      ▼
-┌──────────┐                         ┌──────────┐
-│ESP32-S2  │                         │ESP32-S2  │
-│ Slave 1  │  ...  (up to 17 total)  │ Slave 17 │
-└──────────┘                         └──────────┘
+    ┌────┴──────────────── ... ──┐
+    ▼                             ▼
+┌──────────┐               ┌──────────┐
+│ESP32-S2  │   ...(×17)... │ESP32-S2  │
+│ Slave 1  │               │ Slave 17 │
+└──────────┘               └──────────┘
 ```
 
-Each slave controls one channel strip, independently managing its motorized fader, touch detection, illuminated buttons, NeoPixel LEDs, and TFT display.
+Each slave owns one channel strip: motorized fader (position + touch), illuminated REC/SOLO/MUTE/SELECT buttons, rotary encoder (V-Pot), NeoPixel LEDs, and a TFT display.
+
+---
+
+## Project Status
+
+| Unit | Status |
+|---|---|
+| **S2 (slave)** | Firmware más maduro del proyecto — calibración automática, control de motor con protección de stall, touch capacitivo, AutoMode (READ/WRITE/TRIM/TOUCH/LATCH), OTA. |
+| **S3 (extender)** | Operativo en banco — RS485 bus B, handshake MIDI con Logic, calibración en cascada, transport, NeoTrellis. Es la pieza más probada del sistema junto al S2. |
+| **P4 (master, JC1060P470C)** | En desarrollo activo — UI landscape (LVGL) funcionando; RS485 bus A, touch GT911 y calibración de sus 9 slaves aún sin completar. |
+| **P4 (JC4880P433C)** | Proyecto legado / independiente (NeoTrellis + pantalla propia) — no se toca desde la migración a JC1060P470C. |
+
+RP2040 fue descartado permanentemente como plataforma slave — S2 es la definitiva.
 
 ---
 
@@ -57,147 +69,131 @@ Each slave controls one channel strip, independently managing its motorized fade
 
 | Function          | Detail                                      |
 |-------------------|---------------------------------------------|
-| USB MIDI          | Native USB via TinyUSB, Mackie Control HID  |
-| RS485 Bus A       | UART + half-duplex, 500 kbaud (9 slaves)   |
-| Display           | JD9165 MIPI-DSI 1024×600 landscape (LVGL 9) — placa activa JC1060P470C |
-| DAW Integration   | Logic Pro (tested), compatible with any DAW supporting Mackie Control |
+| USB MIDI          | Native USB, Mackie Control protocol         |
+| RS485 Bus A       | UART half-duplex, 500 kbaud, hasta 9 slaves |
+| Display           | JD9165 MIPI-DSI 1024×600 landscape (LVGL v9) — placa activa JC1060P470C |
+| Touch             | GT911 capacitivo, I2C                       |
+| DAW Integration   | Logic Pro (probado), compatible con cualquier DAW con soporte Mackie Control |
 
 ### Extender Unit — ESP32-S3
 
 | Function          | Detail                                      |
 |-------------------|---------------------------------------------|
-| RS485 Bus B       | UART + half-duplex, 500 kbaud (8 slaves)   |
-| Transport LEDs    | REC / PLAY / FF / STOP / RW feedback         |
-| NeoTrellis        | 2× Adafruit seesaw 4×4 button grid (8×4 total) |
+| RS485 Bus B       | UART half-duplex, 500 kbaud, hasta 8 slaves |
+| Transport LEDs    | REC / PLAY / FF / STOP / RW, feedback bidireccional |
+| NeoTrellis        | 2× Adafruit seesaw 4×4 RGB (8×4 total)      |
 
 ### Slave Units — ESP32-S2 Mini
 
-Each slave unit contains:
-
 | Component             | Detail                                                      |
-|-----------------------|-------------------------------------------------------------|
-| Motorized fader       | H-bridge PWM motor driver + ADC position feedback           |
-| Touch detection       | T-Pin capacitive touch (GPIO)                               |
-| Illuminated buttons   | REC / SOLO / MUTE / SELECT — NeoPixel RGB LEDs              |
-| Display               | TFT via TFT_eSPI                                            |
-| Rotary encoder        | Per-channel parameter control                               |
-| RS485                 | Half-duplex UART, addressed slave protocol                  |
+|-----------------------|---------------------------------------------------------------|
+| Motorized fader       | DRV8833 H-bridge PWM + ADS1115 16-bit ADC feedback           |
+| Touch detection       | T-pin capacitivo + detección por delta de ADC                |
+| Illuminated buttons   | REC / SOLO / MUTE / SELECT — NeoPixel RGB                    |
+| Display               | ST7789V3 vía LovyanGFX, sprites en PSRAM                      |
+| Rotary encoder        | V-Pot por canal, ISR Gray code                                |
+| RS485                 | Half-duplex UART, protocolo de esclavo direccionado          |
 
 ---
 
 ## Communication Protocol — RS485
 
 - **Baud rate:** 500 kbaud
-- **Topology:** Half-duplex, single master, up to 17 slaves
-- **Framing:** Custom binary packets with CRC8 integrity check
-- **Addressing:** Each slave has a fixed ID (0–16)
+- **Topology:** Half-duplex, un master por bus, hasta 9 (bus A) / 8 (bus B) esclavos
+- **Framing:** Paquetes binarios fijos con CRC8
+- **Addressing:** ID fijo por esclavo (1-9 / 1-8)
 
 ### Packet Flow
 
 ```
-Master → Slave (MasterPacket):  position target, button LED states, display data
-Slave  → Master (SlavePacket):  fader ADC position, touch state, button events
+Master → Slave (MasterPacket, 16 bytes): faderTarget (PitchBend 0-16383), flags
+                                          (REC/SOLO/MUTE/SELECT/CALIB/AutoMode),
+                                          trackName, vuLevel, vpotValue, connected
+Slave  → Master (SlavePacket, 9 bytes):  faderPos (ADC), touchState, buttons,
+                                          encoderDelta, encoderButton
 
 SlavePacket path:
-  ESP32-S2 → RS485 → ESP32-S3 → USB MIDI Pitch Bend → DAW
+  ESP32-S2 (ADC real) → RS485 → ESP32-S3/P4 (mapea a PitchBend) → USB-MIDI → Logic Pro
 ```
 
 ### Protocol Integrity
 
-- CRC8 on every packet
-- Circular buffer on master RX with race condition protection on head pointer
-- Silent overflow prevention (buffer full → drop, not corrupt)
+- CRC8 en cada paquete
+- Timeout + reintentos con contador de fallos consecutivos por slave
+- Calibración automática en cascada al arrancar, con budget de reintentos por slave
 
 ---
 
-## Key Hardware Decisions
+## PitchBend ↔ ADC Mapping
 
-### ESP32-S2 ADC Limitation — Fader Position
+Logic envía PitchBend MIDI de **14-bit completo (0-16383)**, confirmado con captura directa en MIDI Monitor (2026-07-20). El master (S3/P4) mapea ese rango al ADC calibrado real de cada slave:
 
-The ESP32-S2 ADC saturates above **~1.1V**, making direct 3.3V fader VCC unusable.
-
-**Solution implemented:**
-- Use the S2's hardware **DAC on GPIO17** to power the fader VCC rail at ~1.1V
-  ```cpp
-  dacWrite(17, 85);  // ≈ 1.08V
-  ```
-- Set ADC attenuation to `ADC_0db` (0–1.1V range)
-- Reroute `RS485_ENABLE` to **GPIO35** (freed GPIO17 for DAC)
-- PCB modification: trace cut + bridge wire required
-
-**Confirmed working ADC range:** `0 – 14845`
-
-### ESP32-S2 USB CDC Logging
-
-Unlike the S3, the S2 requires explicit build flags for USB CDC to work:
-
-```ini
-; platformio.ini
-build_flags =
-  -D ARDUINO_USB_CDC_ON_BOOT=1
-  -D ARDUINO_USB_MODE=1
+```
+faderTarget = calibratedMin + (pitchBend14bit × (calibratedMax - calibratedMin) / 16383)
 ```
 
-```cpp
-// setup()
-Serial.begin(115200);
-Serial.setDebugOutput(true);  // redirects log_x() macros to USB CDC
-```
-
-### Fader VCC Rail Stabilization
-
-The `faderADC.begin()` call must happen **after** the DAC VCC rail has had time to stabilize. Calling it too early captures a bad baseline, causing the motor to aggressively drive on first movement.
-
-```cpp
-dacWrite(17, 85);
-delay(50);          // allow rail to stabilize
-faderADC.begin();
-```
+`calibratedMin`/`calibratedMax` se aprenden por slave durante la calibración automática (secuencia KICK_UP → GOING_UP → SETTLE_UP → KICK_DOWN → GOING_DOWN → SETTLE_DOWN en `Motor.cpp`) y se reportan al master vía RS485. Ver [`docs/MOTOR.md`](docs/MOTOR.md) y [`docs/FADER.md`](docs/FADER.md) para el detalle completo.
 
 ---
 
 ## Firmware Modules
 
-> Detailed documentation per module is organized in separate files.
+> Documentación exhaustiva por subsistema en [`docs/`](docs/) — esta tabla es solo un mapa de archivos.
 
-| Module                  | File                          | Description                                      |
-|-------------------------|-------------------------------|--------------------------------------------------|
-| Motor control           | `motor.cpp / motor.h`         | PWM drive, dead-zone, stall detection, calibration |
-| Fader ADC               | `faderADC.cpp / faderADC.h`   | ADC read, filtering, DAC VCC management          |
-| Touch detection         | `touch.cpp / touch.h`         | T-Pin capacitive read, touch gate logic          |
-| RS485 communication     | `rs485.cpp / rs485.h`         | Packet RX/TX, CRC8, circular buffer              |
-| Slave packet            | `slavePacket.cpp`             | SlavePacket build & dispatch to master           |
-| Button & LED            | `buttons.cpp / leds.cpp`      | NeoPixel state machine, debounced input          |
-| Display                 | `display.cpp`                 | TFT_eSPI wrapper, channel info rendering         |
-| Main loop               | `main.cpp`                    | Init sequence, task scheduling                   |
+### S2 (slave) — `S2/S2_V1/src/`
+
+| Module               | File(s)                                          | Doc |
+|-----------------------|---------------------------------------------------|-----|
+| Motor control          | `hardware/Motor/Motor.cpp`                        | [MOTOR.md](docs/MOTOR.md) |
+| Fader ADC / touch      | `hardware/fader/FaderADC.cpp`, `FaderTouch.cpp`    | [FADER.md](docs/FADER.md) |
+| Buttons                | `hardware/button/ButtonManager.cpp`                | [BUTTONS.md](docs/BUTTONS.md) |
+| Encoder (V-Pot)        | `hardware/encoder/Encoder.cpp`                     | [ENCODER.md](docs/ENCODER.md) |
+| NeoPixel LEDs          | `hardware/Neopixels/Neopixel.cpp`                  | [LEDS.md](docs/LEDS.md) |
+| Display                | `display/Display.cpp`                              | [DISPLAY.md](docs/DISPLAY.md) |
+| RS485                  | `RS485/RS485.cpp`, `RS485Handler.cpp`              | [RS485.md](docs/RS485.md) |
+| SAT (Sistema Auto-Test)| `SAT/SatMenu.cpp`                                  | [SAT.md](docs/SAT.md) |
+| OTA / WiFi             | `OTA/Otamanager.cpp`                               | [WIFI-OTA.md](docs/WIFI-OTA.md) |
+| Main loop               | `main.cpp`                                         | — |
+
+### S3 (extender) — `MASTER_S3-P4/S3/iMakie-ESP32_S3_EXTENDER/src/`
+
+RS485 master (`RS485/RS485.cpp`), procesamiento MIDI/SysEx (`midi/MIDIProcessor.cpp`), transport (`Transporte`), NeoTrellis. Ver [Transport.md](docs/Transport.md), [MIDI.md](docs/MIDI.md), [RS485.md](docs/RS485.md).
+
+### P4 (master, activo) — `MASTER_S3-P4/P4_JC1060P470C/src/`
+
+Display LVGL ([DISPLAY_P4.md](docs/DISPLAY_P4.md)), touch GT911 ([TOUCH.md](docs/TOUCH.md)), NeoTrellis ([NEOTRELLLIS.md](docs/NEOTRELLLIS.md)), RS485 bus A ([RS485_P4.md](docs/RS485_P4.md), en desarrollo).
 
 ---
 
 ## Development Environment
 
-| Tool              | Detail                          |
-|-------------------|---------------------------------|
-| Framework         | Arduino via PlatformIO          |
-| IDE               | VS Code + PlatformIO extension  |
-| Target boards     | ESP32-S3 (master), ESP32-S2 Mini (slave) |
-| MIDI testing      | Logic Pro on macOS              |
-| Reference device  | Behringer BCF2000               |
+| Tool              | Detail                                    |
+|-------------------|--------------------------------------------|
+| Framework         | Arduino vía PlatformIO, plataforma pioarduino (IDF5) |
+| IDE               | VS Code + extensión PlatformIO             |
+| Target boards     | ESP32-P4 (master), ESP32-S3 (extender), ESP32-S2 Mini ×17 (slave) |
+| MIDI testing      | Logic Pro (macOS), MIDI Monitor para captura de tráfico real |
+| Compilación       | **No la ejecuta el asistente de IA — solo el usuario en su máquina** |
+
+Cada subproyecto se compila de forma independiente:
+
+```bash
+# Master P4 (placa activa JC1060P470C)
+cd MASTER_S3-P4/P4_JC1060P470C && pio run
+
+# Extender S3
+cd MASTER_S3-P4/S3/iMakie-ESP32_S3_EXTENDER && pio run
+
+# Slave S2
+cd S2/S2_V1 && pio run
+```
 
 ---
 
-## Known Constraints & Workarounds
+## Documentation
 
-| Constraint                              | Workaround                                              |
-|-----------------------------------------|---------------------------------------------------------|
-| S2 ADC saturates above 1.1V            | DAC GPIO17 as fader VCC rail @ ~1.1V                   |
-| S2 USB CDC silent by default           | Explicit build flags + `Serial.setDebugOutput(true)`    |
-| Motor oscillation at target position   | Dead-zone simplified; no active holding torque (mechanical friction only) |
-| Fader aggressive first move            | `faderADC.begin()` called after DAC rail stabilizes    |
-| RS485 circular buffer race condition   | Head pointer protected; overflow drops silently         |
-| Motor stall detection asymmetry (WIP)  | Movement-delta approach with `STALL_THRESHOLD` + `STALL_TIME_MS` (in progress) |
-| Touch gate feedback loop (WIP)         | Touch gate prevents motor movement from triggering touch events (in progress) |
+Toda la documentación técnica detallada vive en [`docs/`](docs/) y en [`CLAUDE.md`](CLAUDE.md) (directivas de desarrollo). Historial de cambios en [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 
-*Last updated: May 2026 — AITEC-17 active development phase.*
-
+*Last updated: 2026-07-20.*

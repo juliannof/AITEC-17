@@ -19,14 +19,11 @@ struct ChannelData {
     char      trackName[8]  = {};
     uint8_t   flags         = 0;
     uint16_t  faderTarget   = 8192;
-    uint16_t  lastRawPitchBend = 0;  // último valor MIDI 14-bit crudo recibido (2026-07-20)
     uint8_t   vuLevel       = 0;
     uint8_t   vpotValue     = 0;
     bool      dirty         = true;
     bool      calibrate     = false;
-    bool      calibrating   = false;   // ← AÑADIR
     AutoMode  autoMode      = AUTO_OFF;
-    uint8_t calibRetries = 0;
 
 
     // Slave → Master
@@ -39,11 +36,6 @@ struct ChannelData {
     uint8_t  prevEncoderButton = 0;
     bool     calibrated       = false;
     bool     responded        = false;
-    uint8_t  stableRespCount  = 0;    // respuestas estables acumuladas (grace period auto-calib, 2026-05-22)
-
-    // Calibración — rango ADC de este slave (enviado por slave post-calib)
-    uint16_t calibratedMin    = 0;
-    uint16_t calibratedMax    = 0;
 
 };
 
@@ -81,7 +73,6 @@ private:
     uint8_t           _currentId  = 1;
     SemaphoreHandle_t _mutex      = nullptr;
     ChannelData       _ch[NUM_SLAVES + 1];
-    uint16_t          _filteredFaderPos[NUM_SLAVES + 1] = {0};
 
     enum class BusState : uint8_t { SEND, WAIT_RESP, GAP };
     BusState _busState   = BusState::SEND;
@@ -109,8 +100,6 @@ private:
     bool _readResponse            ();
     void _handleResponse          ();
     void _nextSlave               ();
-    void _triggerNextCalibration  (uint8_t fromId);  // cascade + wraparound (2026-05-26)
-    void _recomputeFaderTarget    (uint8_t id);  // asume _mutex ya tomado (2026-07-20)
 };
 
 extern RS485Master rs485;

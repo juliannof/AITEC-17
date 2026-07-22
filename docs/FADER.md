@@ -3,12 +3,18 @@
 Documentación exhaustiva del subsistema de faders en iMakie. Incluye calibración, feedback ADC, control motor, mapping Logic → hardware, y diagnóstico.
 
 **Responsable:** iMakie Development Team  
-**Última actualización:** 2026-05-16  
+**Última actualización:** 2026-07-22  
 **Estado:** En producción (S2 ×17 activos)
 
 ---
 
-## 1. ARQUITECTURA FADER
+## ⚠️ ACTUALIZACIÓN DE ARQUITECTURA (2026-07-22) — el S2 es dueño de la calibración y el mapeo
+
+**El S3 (y P4) ya NO mapean PitchBend↔ADC.** `MasterPacket.faderTarget` y `SlavePacket.faderPos` viajan como PitchBend crudo 0-16383 de punta a punta — el S2 mapea con su propio rango calibrado (`RS485Handler::_pbToADC()` en target entrante, `buildResponse()` en posición saliente). El S2 también se autocalibra solo en su propio boot, diferido hasta tener lecturas ADC reales (ver §4 más abajo). El diagrama de §1 y la sección §5 de este documento describen el modelo **anterior** (S3 mapeaba) — se conservan como contexto histórico pero el flujo real actual es el de arriba. Detalle completo: **CHANGELOG.md**, sesión 2026-07-22.
+
+---
+
+## 1. ARQUITECTURA FADER — ⚠️ diagrama desactualizado, ver nota arriba (S3 ya no mapea)
 
 ```
 Logic Pro (macOS)
@@ -283,6 +289,10 @@ FaderTouch::update() {
 
 ### 3.3 Control Posición (Post-calibración)
 
+**⚠️ Nota (2026-07-22):** el mapeo PitchBend→ADC del pseudo-código de abajo ya NO vive dentro de `Motor::setTarget()` — vive en `RS485Handler::_pbToADC()`, que llama a `Motor::setTargetForced()`/`setTargetFromS3()`/`setDawAbsolute()` según el AutoMode activo (ver `AUTOMODE.md`). El bloque de abajo es una simplificación conceptual del control de posición (`_positionTick()` real), no la API literal actual.
+
+**Fix 2026-07-22 — crucero a PWM_MAX con error grande:** `_positionTick()` calculaba el PWM proporcional al error de punta a punta y nunca llegaba a `PWM_MAX` salvo que el target estuviera en el extremo opuesto exacto. Con errores grandes pero no máximos, el PWM resultante no bastaba para vencer fricción localizada cerca de los extremos — el fader quedaba en un bucle STALL→cooldown→reintento parcial en vez de moverse con fluidez. Nueva constante `POSITION_CRUISE_ERR` (`config.h`, provisional `2000` cuentas): por encima de ese error se aplica `PWM_MAX` fijo ("crucero", igual que `_calibUpdate()` en `GOING_UP`/`GOING_DOWN`); por debajo se mantiene el cálculo proporcional (frenado fino).
+
 ```cpp
 Motor::setTarget(uint16_t target) {
     // target: 0-16383 (rango Logic)
@@ -325,6 +335,10 @@ filteredPos = filteredPos + (rawPos - filteredPos) * FADER_EMA_ALPHA;
 | Movimiento invertido | Sube cuando debe bajar | _hwUp/_hwDown invertidos | IN1/IN2 lógica invertida | ✅ Fijo |
 | PWM insuficiente | Motor lento o sin movimiento | PWM_MIN/MAX mal calibrados | Test en bench: PWM_MIN=100, PWM_MAX=160 | ✅ Fijo |
 | Conflicto LEDC | Motor jitter o falla | LovyanGFX backlight agota canales LEDC | Usar `analogWrite()` (no ledcWrite) | ✅ Fijo |
+| Fondo real de calibración no alcanzado (MIN muy alto, ej. 309 en vez de ~35 real) | `GOING_DOWN` se detenía lejos del tope físico real | Asimetría de umbral en `_calibUpdate()`: `GOING_UP` usa el mismo umbral (26000) para decidir PWM y para aplicarlo; `GOING_DOWN` decidía con 200 pero aplicaba con 1000 — el motor perdía fuerza (`PWM_MIN`) 800 cuentas antes de lo previsto | Umbral de aplicación corregido de 1000→200, simétrico con `GOING_UP` (2026-07-22) | ✅ Fijo |
+| Bucle STALL→cooldown→reintento parcial persiguiendo target lejano | Fader avanza ~100 cuentas cada ~2s en vez de moverse con fluidez | `_positionTick()` proporcional al error nunca llegaba a `PWM_MAX` salvo target en extremo opuesto exacto | `POSITION_CRUISE_ERR` — PWM_MAX fijo si `absErr` supera el umbral (2026-07-22) | ✅ Fijo, umbral provisional |
+| Autocalibración de boot se pierde silenciosamente | Sin log `[CALIB] Iniciada` tras boot | `requestCalibration()` comprobaba `_motor_state != GOING_TO_MIN` como guard — pero el motor ya entra en `GOING_TO_MIN` por el mecanismo normal de "sin S3, bajar a 0" antes de que llegue el disparo de autocalibración, así que `_pendingCalib` nunca se armaba | Guard cambiado a `if (!_pendingCalib)` (2026-07-22) | ✅ Fijo |
+| Falso touch al llegar a `AT_TARGET` con movimiento desde Logic | Log `[MOTOR] Usuario soltó fader` sin que nadie tocara el fader | Efecto colateral del crucero a `PWM_MAX`: más inercia al llegar → overshoot supera `MANUAL_TOUCH_AT_TARGET_THRESHOLD=30` justo al cruzar a `AT_TARGET`, donde la supresión por dirección del motor ya no aplica | `AT_TARGET_TOUCH_GRACE_MS=200` — ignora touch ese periodo tras entrar en `AT_TARGET` (2026-07-22) | ✅ Fijo |
 
 **Nota sobre topes mecánicos:** El fader tiene topes físicos de goma/plástico que limitan el recorrido. El ADC en el tope inferior es ~44, no 0. Cualquier lógica que espere `ADC == 0` fallará. Siempre usar detección por stall (ADC estable > Nms) para detectar llegada a tope. Ver **MOTOR.md §2.6** para implementación completa.
 
@@ -332,9 +346,30 @@ filteredPos = filteredPos + (rawPos - filteredPos) * FADER_EMA_ALPHA;
 
 ## 4. CALIBRACIÓN: FLUJO DETALLADO
 
-### 4.1 Inicio (Boot automático o SAT)
+### 4.0 Autocalibración de boot (2026-07-22) — reemplaza el flujo "Master ordena" de abajo
 
-**Boot:**
+El S2 se autocalibra solo en su propio boot — **ya no espera que el S3/P4 le ordene** `FLAG_CALIB` al arrancar (ese mecanismo sigue existiendo, pero ahora es solo para recalibraciones manuales puntuales vía SAT/UI, ver §4.1 "SAT Manual" abajo, sin cambios).
+
+**Por qué diferido a `loop()` y no en `setup()`:** `Motor::requestCalibration()` decide su rama comparando `_motor_adcPos` contra el mínimo — pero en `setup()` esa variable aún no refleja la posición física real del fader (vale su inicial, 0), así que la decisión se tomaría sobre una premisa falsa.
+
+```cpp
+// main.cpp — loop(), justo después de faderADC.update() y Motor::setADC()
+static bool    _bootCalibDone   = false;
+static uint8_t _bootAdcSamples = 0;
+if (!_bootCalibDone) {
+    if (Motor::getRawADC() > 0) _bootAdcSamples++;  // proxy de "ya hay lectura real"
+    if (_bootAdcSamples >= 10) {
+        Motor::requestCalibration();
+        _bootCalibDone = true;
+    }
+}
+```
+
+**Bug encontrado y corregido en banco (2026-07-22):** en boot, sin S3 aún conectado, el motor entra en `GOING_TO_MIN` por el mecanismo normal de "sin conexión, ir a 0" — a menudo *antes* de que las 10 muestras ADC del disparo de arriba se acumulen. `requestCalibration()` tenía como guard `if (_motor_state != MotorState::GOING_TO_MIN)` para la rama "fader ≠ 0" — al encontrar el motor ya en ese estado (por el otro motivo), nunca armaba `_pendingCalib`, y la calibración se perdía en silencio. Fix: el guard ahora se basa en `_pendingCalib` mismo (`if (!_pendingCalib)`), idempotente igual pero sin depender de por qué el motor ya estuviera bajando.
+
+### 4.1 Inicio (Boot automático o SAT) — ⚠️ "Boot" describe el modelo anterior, ver §4.0
+
+**Boot (modelo anterior, obsoleto — el S2 ya no espera orden del master en boot):**
 ```
 setup() {
   1. Motor::init()      ← ANTES de Serial
