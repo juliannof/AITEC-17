@@ -39,7 +39,7 @@ volatile ConnectionState logicConnectionState = ConnectionState::DISCONNECTED;
 
 static uint8_t currentVPotRaw = 0;
 static int8_t currentVPotLevel = VPOT_DEFAULT_LEVEL;
-AutoMode currentAutoMode = AUTO_OFF;
+AutoMode currentAutoMode = AUTO_READ;   // default boot: READ, no OFF (2026-07-30)
 
 // ════════════════════════════════════════════════════════════
 //  initDisplay

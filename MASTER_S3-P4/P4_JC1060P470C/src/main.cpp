@@ -209,16 +209,29 @@ void setup() {
     Serial.begin(115200);
     log_i("=== BOOT P4 Master ===");
 
-    // 1. LittleFS
-    log_i("1. LittleFS.begin()...");
+    // 1. USB (primero — evita perder el handshake si Logic ya está abierto
+    // cuando arranca el P4; antes iba detrás de LittleFS/Display y esa
+    // ventana retrasaba USB varios cientos de ms, igual que en S3) (2026-07-26)
+    log_i("1. USB.begin()...");
+    USB.begin();
+    delay(100);  // Solo 100ms
+    log_i("   USB OK");
+
+    // 2. MIDI (sin delay largo)
+    log_i("2. MIDI.begin()...");
+    MIDI.begin();
+    log_i("   MIDI OK");
+
+    // 3. LittleFS
+    log_i("3. LittleFS.begin()...");
     if (!LittleFS.begin(false)) {
         log_e("   LittleFS FALLO");
     } else {
         log_i("   LittleFS OK");
     }
 
-    // 2. Display + LVGL
-    log_i("2. initDisplay()...");
+    // 4. Display + LVGL
+    log_i("4. initDisplay()...");
     initDisplay();
     {
         Preferences bprefs;
@@ -229,33 +242,22 @@ void setup() {
     }
     log_i("   Display OK");
 
-    // 3. Preferences
-    log_i("3. Preferences...");
+    // 5. Preferences
+    log_i("5. Preferences...");
     Preferences prefs;
     prefs.begin("uimenu", true);
     g_currentPage = prefs.getUChar("lastPage", 0);
     prefs.end();
     log_i("   Preferences OK. lastPage=%d", g_currentPage);
 
-    // 4. UI Offline inicial
-    log_i("4. uiOfflineCreate()...");
+    // 6. UI Offline inicial
+    log_i("6. uiOfflineCreate()...");
     uiOfflineCreate(displayGetRoot());
     log_i("   UI Offline OK");
 
-    // 5. Timecode buffers
+    // 7. Timecode buffers
     memset(timeCodeChars_clean, ' ', 12); timeCodeChars_clean[12] = '\0';
     memset(beatsChars_clean,   ' ', 12); beatsChars_clean[12]   = '\0';
-
-    // 6. USB
-    log_i("5. USB.begin()...");
-    USB.begin();
-    delay(100);  // Solo 100ms
-    log_i("   USB OK");
-
-    // 7. MIDI (sin delay largo)
-    log_i("6. MIDI.begin()...");
-    MIDI.begin();
-    log_i("   MIDI OK");
 
     // 8. RS485
     log_i("7. RS485.begin(%d)...", NUM_SLAVES);

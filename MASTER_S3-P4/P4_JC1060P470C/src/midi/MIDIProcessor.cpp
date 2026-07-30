@@ -56,7 +56,9 @@ unsigned long masterMeterDecayTimer = 0;
 
 String vpotAssignNames[8];
 
-uint8_t g_channelAutoMode[8] = {};
+// default boot: READ, no OFF, en los 8 canales (2026-07-30)
+uint8_t g_channelAutoMode[8] = {AUTO_READ, AUTO_READ, AUTO_READ, AUTO_READ,
+                                 AUTO_READ, AUTO_READ, AUTO_READ, AUTO_READ};
 
 void tickCalibracion() {
     if (_calibPendingFrom == 0) return;

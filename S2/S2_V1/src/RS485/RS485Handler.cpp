@@ -243,6 +243,13 @@ void onMasterData(const MasterPacket& pkt) {
     // El modo decide cómo se aplica el target — debe procesarse primero.
     AutoMode pktMode = getAutoMode(pkt.flags);
 
+    // TRIM no debe sacar al S2 de READ (petición explícita, 2026-07-30).
+    // Se reescribe pktMode ANTES del resto del flujo — así el paquete se procesa
+    // como si TRIM nunca hubiese llegado (sin duplicar el filtro en ningún otro punto).
+    if (_rsCurrentMode == AUTO_READ && pktMode == AUTO_TRIM) {
+        pktMode = AUTO_READ;
+    }
+
     // Reset total al cambiar de modo (regla: modo nuevo arranca limpio)
     // WHY: si veníamos de LATCH frozen y pasamos a READ, el freeze
     //      previo no debe arrastrarse. Lo mismo con _rsTouchActive.

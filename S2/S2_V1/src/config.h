@@ -250,7 +250,7 @@ static constexpr uint16_t AUTOMODE_LATCH_UNFREEZE_ADC = 200;
 // _rsLatchFrozenADC   ─ ADC capturado al entrar en frozen (referencia para comparar con target DAW).
 // _rsTouchActive      ─ ventana de touch reportada a S3; respeta debounce por modo.
 // _rsLastTouchTime    ─ timestamp del último touch crudo detectado (Motor::isManualTouchDetected()).
-static AutoMode  _rsCurrentMode      = AUTO_OFF;
+static AutoMode  _rsCurrentMode      = AUTO_READ;   // default boot: READ, no OFF (2026-07-30)
 static bool      _rsLatchFrozen      = false;
 static uint16_t  _rsLatchFrozenADC   = 0;
 static bool      _rsTouchActive      = false;

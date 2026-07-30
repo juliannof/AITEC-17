@@ -11,7 +11,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 | Prioridad | Tarea | Notas |
 |-----------|-------|-------|
+| 🔴 Alta | **Default AutoMode boot = READ (antes OFF) sin validar en hardware (2026-07-30)** | Cambia el estado inicial en S2 (`_rsCurrentMode`, `currentAutoMode`), S3 y P4 (`g_channelAutoMode[8]`), más un guard nuevo TRIM→READ en `S2/RS485Handler.cpp`. Ningún test en banco todavía — confirmar que Logic no manda un `AUTO_OFF` explícito al reconectar que quede enmascarado por el guard, y que el primer handshake real no se ve afectado. Ver sesión 2026-07-30 abajo y `docs/AUTOMODE.md`. |
+| 🔴 Alta | **P4: pinout RS485 bus A localizado (A=GPIO26, B=GPIO27) pero SIN TESTEAR, config.h sin actualizar (2026-07-30)** | El usuario conectó el rig completo de 9×S2 al bus A del P4 y localizó el pinout real: A=GPIO26, B=GPIO27 (confirmado que no coincide con `LCD_RST_PIN`, coincidencia numérica era del conector, no del GPIO real). Transceiver **auto-direccional** — sin pin DE/RE, a diferencia del bus B (S3). Pendiente: (1) testear un ciclo TX/RX real con un S2 antes de dar el pinout por bueno; (2) portar a `P4/config.h` (sigue con `TX=52/RX=51/EN=50` heredados de la placa antigua); (3) adaptar `P4/RS485.cpp` para no usar `RS485_ENABLE_PIN` (4 puntos: `begin()`, `_sendPacket()` ×2) — bus B en S3 no se toca, sigue necesitando su enable. No subir `NUM_SLAVES` (actualmente `0`) ni activar `rs485.startTask()` hasta cerrar esto. Detalle: `docs/RS485_P4.md` §1.2. |
 | 🟡 Media | **Fader S2: convergencia a target lejano validada parcialmente (V1/V2), V3-V8 pendientes (2026-07-22)** | Arquitectura movida a "S2 dueño de calibración" (ver sesión 2026-07-22 abajo) resolvió los STALL de la sesión 2026-07-20 desde otro ángulo, más 3 bugs nuevos encontrados y corregidos en banco: `requestCalibration()` perdía `_pendingCalib`, asimetría de PWM en `GOING_DOWN` (fondo real no alcanzado), y bucle STALL en `_positionTick()` con target lejano (nueva constante `POSITION_CRUISE_ERR`). V1/V2 (boot, autocalibración, aplicar último PB) confirmados en banco. Pendiente: V3-V8 (READ con push manual, WRITE, LATCH, desconexión, 10× recalibración). |
+| 🔴 Alta | **S2: fader sube a máximo y no se detiene tras calibración correcta, con Logic abierto — DIAGNÓSTICO SIN CONFIRMAR (2026-07-24 20:16)** | Reportado por el usuario. Hipótesis principal (análisis estático, ver sesión 2026-07-24 abajo): bucle infinito empuje→STALL→cooldown(2s)→reintento en modo DAW-absoluto (OFF/READ) cuando el target de Logic está en/cerca del máximo y el margen de calibración (`marginTop=20`, `Motor.cpp`) resulta insuficiente frente a la fricción real cerca del tope físico — `setTargetForced()` no tiene límite de reintentos (a diferencia de `requestCalibration()`). Pendiente confirmar con log serie (`[MOTOR] STALL...` / `cooldown STALL activo` repitiéndose) y el AutoMode activo en el momento del fallo. Hallazgo secundario (bug real, probablemente inerte): `RS485Handler.cpp:186,378` llaman `Motor::setTarget(Motor::getRawADC())` pasando ADC crudo a una función que espera PitchBend 0-16383 — corrompe `_motor_lastMidiTarget`, consumido solo en el `map()` sin clamp de `Motor.cpp:274-275`. |
 | 🔴 Alta | **P4: Logic no aplica el V-Pot relativo del pop-up (2026-06-12 19:47)** | El pop-up envía CC relativo (`CC 16+strip`, bit6=dirección) al arrastrar el arco grande — el MIDI **SALE** (visto en monitor) pero Logic **NO mueve el pan**. Análogo al evento del S2 con los AutoModes (notas 74-78 Read/Write/Trim/Touch/Latch): Logic solo los aplica con un track **seleccionado** (`g_selectedChannel>=0`, `MIDIProcessor.cpp` ~l.611). Hipótesis: falta contexto (track seleccionado / assignment Pan / banco activo) o canal/controller distinto. Probar: (1) canal 0 fijo (`0xB0`, `0x10+strip`) en vez de `0xB0|strip`; (2) forzar selección previa; (3) verificar modo Pan. Ver [[midi_sale_logic_no_aplica]]. |
 | 🟡 Media | **P4: pop-up V-Pot — no refrescar el fondo con el modal abierto (2026-06-12 19:47)** | Fix listo, SIN aplicar: en `main.cpp` loop CONNECTED, si `uiVPotPopupIsOpen()` → solo `uiVPotPopupUpdate()`, saltar `uiHeaderUpdate`/página/`handleVUMeterDecay`. El overlay tapa toda la pantalla (1024×600), no hace falta repintar detrás. |
 | 🟡 Media | **P4: pop-up V-Pot — botón "Cerrar" demasiado grande (2026-06-12 19:47)** | Reducir el `lv_button` (actual 160×56) en `UIVPotPopup.cpp::uiVPotPopupOpen()`. |
@@ -23,6 +26,68 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 | 🟡 Media | **ExPressif: `UIKaosEdit.cpp` — geometría sin terminar de validar en hardware (2026-07-14)** | Pantalla nueva (editor de memoria Kaos). Ya corregidos en vivo: caja/tamaño del canal, y un error de ejes que apilaba canal+Guardar+Cancelar en el mismo borde físico (ver sesión 2026-07-14). Sigue pendiente confirmar en pantalla real las listas EJE X/EJE Y (posición, si el nº de filas cabe sin solapar con el título/canal). |
 | 🟡 Media | **ExPressif: NeoTrellis sigue activo con `UIKaosEdit` abierto (2026-07-14)** | A diferencia de `UIBank` (que suspende HOLD/PANIC/preset/synth en el NeoTrellis mientras está abierto, `g_bankOpen`), el editor de memoria Kaos no tiene un gate equivalente — con el editor táctil abierto, las teclas físicas (preset, synth, brillo, panic) se siguen procesando por debajo y pueden cambiar `g_currentSynth`/preset activo mientras se edita otro. No corrompe datos (Guardar usa el synth/slot capturados al abrir), pero es confuso. Pendiente: mismo patrón que `g_bankOpen` para el editor, o aceptar el comportamiento si no molesta en uso real. |
 | 🟡 Media | **ExPressif: TRITON Grupo B (efectos vía D-mod) y JV-2080 LFO Depth sin implementar (2026-07-14)** | Bloqueados en `aitec_kaos_brief_2026-07-13.md` §3: falta decidir si el `:Src` del D-mod se preconfigura una vez en el patch (`needs_route=false`) o Code lo reenvía por SysEx cada vez que se selecciona la memoria (`needs_route=true`, con el payload exacto). No se ha tocado el modelo NVS (`KaosSlot`) para soportar `needs_route`/`route_payload` todavía — el catálogo actual (`KaosParams.cpp`) solo cubre memorias sin bloqueo. |
+
+---
+
+### SESIÓN 2026-07-30 — Default AutoMode cambia de OFF a READ (boot) + guard TRIM no saca de READ — SIN VALIDAR EN HARDWARE
+
+**MCU afectadas:** S2 (mayoría) + S3 + P4 (default en caché).
+**Origen:** petición explícita del usuario — arrancar en `AUTO_OFF` deja el fader sin lógica de automatización hasta que Logic mande el primer estado real; se prefiere asumir `READ` al boot (el modo más común de facto) y corregir si el DAW indica otra cosa.
+
+| Archivo | Cambio |
+|---|---|
+| `S2/config.h` | `_rsCurrentMode` (caché de modo RS485) arranca en `AUTO_READ` en vez de `AUTO_OFF`. |
+| `S2/display/Display.cpp` | `currentAutoMode` (usado por el display) arranca también en `AUTO_READ`, coherente con el cambio anterior. |
+| `S2/RS485Handler.cpp::onMasterData()` | Nuevo guard: si `_rsCurrentMode == AUTO_READ` y llega `pktMode == AUTO_TRIM`, se reescribe `pktMode = AUTO_READ` antes del resto del flujo — el S2 ya no sale de READ por un TRIM entrante. Un único punto de reescritura, sin duplicar el filtro en otro sitio. No afecta si el S2 ya está en TOUCH/WRITE/LATCH (TRIM se acepta igual que antes). |
+| `P4/MIDIProcessor.cpp`, `S3/MIDIProcessor.cpp` | `g_channelAutoMode[8]` (caché local de modo por canal) inicializado a `AUTO_READ` en los 8 canales, en vez de `{}` (0 = `AUTO_OFF`). |
+
+**Nota:** el reset offline de P4 (`memset(g_channelAutoMode, 0, ...)` en desconexión USB-MIDI) sigue reseteando a `AUTO_OFF` — no se tocó, no se consideró parte de "boot".
+
+**Pendiente:** sin validar en hardware — ver fila 🔴 Alta en Pendientes arriba. Documentación detallada: `docs/AUTOMODE.md` (actualización 2026-07-30).
+
+**Rig de banco ampliado a producción — confirmado por el usuario (2026-07-30):**
+
+| Archivo | Cambio | Estado |
+|---|---|---|
+| `S3/config.h` | `NUM_SLAVES` **1 → 8** | **Confirmado intencionado.** El usuario conectó físicamente los 8×S2 al bus B — se pasa del banco reducido (1 slave, sesión 2026-07-22) al rig completo de producción. |
+| `S3/RS485.cpp::runTask()` | Logs de TIMEOUT `log_w`/`log_e` → `log_d` | Acompaña al cambio anterior: con 8 slaves reales en vez de 1, los timeouts ocasionales por ciclo son más frecuentes de forma rutinaria — se baja la verbosidad para no saturar el log serie. |
+
+El usuario también conectó 9×S2 al bus A del P4. **Pinout real localizado (sin testear todavía):** A=GPIO26, B=GPIO27 — se descartó la sospecha de colisión con `LCD_RST_PIN` (también "27" en `config.h`, pero corresponde a un GPIO distinto del ESP32-P4; la coincidencia era solo de numeración de conector). El transceiver de esta placa es **auto-direccional** (sin pin DE/RE), a diferencia del bus B en S3. `P4/config.h` y `P4/RS485.cpp` (que aún usa `RS485_ENABLE_PIN` en 4 puntos) no se han tocado — ver fila 🔴 Alta "P4: pinout RS485 bus A localizado... SIN TESTEAR" en Pendientes arriba y `docs/RS485_P4.md` §1.2.
+
+---
+
+### SESIÓN 2026-07-26 — P4: USB/MIDI antes en el boot + fix build LVGL (driver SD arrastrado)
+
+**MCU afectadas:** P4 únicamente.
+
+| Archivo | Cambio |
+|---|---|
+| `P4/main.cpp::setup()` | Reordenado: `USB.begin()` + `MIDI.begin()` pasan a ser los pasos 1-2 (antes iban después de LittleFS y Display, como pasos 6-7). Evita perder el handshake inicial si Logic Pro ya está abierto cuando el P4 arranca — la ventana de varios cientos de ms que tardaban LittleFS+initDisplay+Preferences+UI Offline en completarse retrasaba el `USB.begin()`, igual que ocurría antes en S3. |
+| `P4/remove_lvgl_asm.py` | Nuevo paso: elimina `lvgl/src/libs/fsdrv/lv_fs_arduino_sd.cpp` del árbol de LVGL tras la descarga de la librería. El LDF de PlatformIO detecta el `#include SD.h` por texto (sin evaluar el `#if LV_USE_FS_ARDUINO_SD`, en 0 en `lv_conf.h`) y arrastraba la librería `SD` del framework Arduino, cuyo `sd_diskio.cpp` requiere `ff.h` (FatFS de ESP-IDF) — no empaquetado para `esp32-p4` en este release, rompiendo el build. |
+
+**Validación:** cambio de build/boot únicamente, sin tocar RS485/Motor — no requiere validación en banco S2/S3, solo confirmar que el P4 sigue compilando y arrancando (lo hace el usuario en su máquina, CLAUDE.md prohíbe compilar).
+
+---
+
+### SESIÓN 2026-07-24 20:16 — Diagnóstico (solo análisis estático, SIN cambios de código): fader S2 sube a máximo indefinidamente tras calibración correcta
+
+**MCU afectadas:** S2 (análisis). Ningún archivo modificado — sesión puramente diagnóstica, a la espera de confirmación con logs reales antes de proponer fix (regla CLAUDE.md: explicar y validar antes de tocar código en Motor/RS485).
+**Origen:** reporte del usuario — "en determinadas circunstancias después de calibración correcta con Logic abierto el fader va a máximo y se queda subiendo indefinidamente".
+
+**Hipótesis principal (alta confianza, pendiente confirmar con log en vivo):**
+
+Bucle infinito empuje→STALL→cooldown→reintento en modo DAW-absoluto (`AUTO_OFF`/`AUTO_READ`):
+
+1. `marginTop = 20` cuentas fijo (`Motor.cpp:262`) → `_calibratedFaderMax = _motor_adcTop - marginTop` (`Motor.cpp:272`). `_motor_adcTop` sale del ruido máximo medido en 200ms de `SETTLE_UP` — puede quedar optimista.
+2. Si el track en Logic tiene el fader en/cerca del máximo (PB≈16383) y el AutoMode es OFF/READ, `RS485Handler::_applyFaderTarget()` llama `Motor::setTargetForced(target)` en cada paquete, sin guard de usuario (`RS485Handler.cpp:83`).
+3. `setTargetForced()` no tiene límite de reintentos (a diferencia de `requestCalibration()`, que sí tiene `CALIB_MAX_RETRIES`). Si el motor no llega al target exacto (fricción real cerca del tope físico > margen de 20 cuentas), se dispara la protección STALL (`Motor.cpp:439-457`): apaga motor + cooldown de 2s (`STALL_COOLDOWN_MS`).
+4. Al expirar el cooldown, si Logic sigue mandando el mismo target de máximo, el motor vuelve a empujar → vuelve a stallar → vuelve a esperar 2s → indefinidamente mientras la condición se mantenga. Percibido por el usuario como "sube y no para".
+
+**Hallazgo secundario (bug real de unidades, probablemente inerte con la máquina de estados actual):**
+
+`RS485Handler.cpp:186` y `:378` llaman `Motor::setTarget(Motor::getRawADC())` al desconectar. `Motor::setTarget(uint16_t midiPB14)` (`Motor.h:34`) espera PitchBend 0-16383, pero recibe ADC crudo (20-27000). Corrompe `_motor_lastMidiTarget`, consumido solo en `Motor.cpp:274-275` al completar calibración (`map()` sin clamp → puede extrapolar más allá de `_calibratedFaderMax`). Actualmente inerte porque el estado pasa a `IDLE` tras calibrar, que no persigue `_motor_targetADC` — pero viola el contrato de la función y debería corregirse.
+
+**Pendiente antes de proponer fix:** confirmar con el usuario (a) si aparecen en el log serie del S2 los mensajes `[MOTOR] STALL — tope físico, motor apagado` y `[MOTOR] setTargetForced: cooldown STALL activo` repitiéndose, y (b) en qué AutoMode estaba el track (OFF/READ/WRITE/TOUCH/LATCH) cuando ocurrió. Sin esa confirmación, no se toca código (RS485/Motor requieren validación en hardware, CLAUDE.md).
 
 ---
 

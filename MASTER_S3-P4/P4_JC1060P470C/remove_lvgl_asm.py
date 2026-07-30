@@ -75,5 +75,16 @@ def process_lvgl_path(lvgl_path):
                     print(f"  Removing ASM file: {asm_file}")
                     os.remove(asm_file)
 
+    # Remove driver de fsdrv SD (Arduino) — LV_USE_FS_ARDUINO_SD=0 en lv_conf.h,
+    # pero el LDF de PlatformIO detecta el "#include SD.h" por texto (sin evaluar
+    # el #if) y arrastra la libreria SD del framework, cuyo sd_diskio.cpp requiere
+    # ff.h (FatFS de ESP-IDF), no empaquetado para esp32-p4 en este release. (2026-07-26)
+    sd_fsdrv_file = os.path.join(lvgl_path, 'src', 'libs', 'fsdrv', 'lv_fs_arduino_sd.cpp')
+    if os.path.exists(sd_fsdrv_file):
+        print(f"  Removing unused LVGL fsdrv file: {sd_fsdrv_file}")
+        os.remove(sd_fsdrv_file)
+    else:
+        print(f"  LVGL fsdrv SD file not found (already removed?): {sd_fsdrv_file}")
+
 # Execute immediately when script loads (pre: scripts run before dependencies are resolved)
 remove_lvgl_asm_dirs()

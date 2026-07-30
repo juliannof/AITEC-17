@@ -2,9 +2,14 @@
 
 Documentación del sistema de **AutoMode awareness** del fader motorizado S2. Define cómo el handler RS485 enruta el target del DAW al motor en función del modo de automatización activo (OFF / READ / WRITE / TRIM / TOUCH / LATCH).
 
-**Última actualización:** 2026-07-22
+**Última actualización:** 2026-07-30
 **Estado:** En implementación — validación parcial en banco (ver CHANGELOG sesión 2026-07-22)
 **Aplica a:** S2 (Slave). S3 y P4 transmiten AutoMode en `MasterPacket.flags` (bits 5-7).
+
+**Actualización (2026-07-30) — default de boot cambiado a READ:**
+- `_rsCurrentMode` (S2), `currentAutoMode` (S2, display) y `g_channelAutoMode[8]` (S3/P4) arrancan en `AUTO_READ`, no en `AUTO_OFF`. Solo afecta al valor inicial en memoria — la derivación MIDI "ausencia de notas 74-78 → AUTO_OFF" (§9B) no cambia.
+- **Nuevo guard en el S2:** mientras `_rsCurrentMode == AUTO_READ`, un `pktMode == AUTO_TRIM` entrante se ignora — el S2 no sale de READ por TRIM. Solo aplica estando en READ; si el S2 ya está en TOUCH/WRITE/LATCH, TRIM se acepta igual que antes. Implementado en `RS485Handler::onMasterData()` reescribiendo `pktMode` antes del resto del flujo (un único punto, sin duplicar el filtro).
+- El reset offline de P4 (`memset(g_channelAutoMode, 0, ...)` en desconexión USB-MIDI) sigue reseteando a `AUTO_OFF` — no se consideró "boot", queda fuera de este cambio.
 
 **⚠️ Actualización (2026-07-22):** el `target` que llega a `_applyFaderTarget()` ahora es el resultado de `RS485Handler::_pbToADC()` (PitchBend→ADC mapeado con el rango calibrado del propio S2) — antes era ADC ya mapeado por el S3. No cambia el routing por modo descrito en este documento, solo de dónde viene el valor. Ver `RS485.md` y `FADER.md`.
 

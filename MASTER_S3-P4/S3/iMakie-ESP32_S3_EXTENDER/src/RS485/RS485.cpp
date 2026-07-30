@@ -96,7 +96,7 @@ void RS485Master::runTask() {
                     _timeouts++;
                     _consecutiveTimeouts++;
                     if (_consecutiveTimeouts <= 3 || _consecutiveTimeouts % 10 == 0)
-                        log_w("[RS485] TIMEOUT slave %d (#%u consecuciones)",
+                        log_d("[RS485] TIMEOUT slave %d (#%u consecuciones)",
                               _currentId, _consecutiveTimeouts);
 
                     // ── Límite de timeouts consecutivos (2026-05-16 19:25) ──
@@ -106,7 +106,7 @@ void RS485Master::runTask() {
                     if (_consecutiveTimeouts > MAX_CALIBRATION_RETRIES) {
                         pixels.setPixelColor(0, pixels.Color(255, 0, 0));  // Rojo: error visible
                         pixels.show();
-                        log_e("[RS485] Slave %d — timeouts persistentes (#%u), degradado",
+                        log_d("[RS485] Slave %d — timeouts persistentes (#%u), degradado",
                               _currentId, _consecutiveTimeouts);
                         if (xSemaphoreTake(_mutex, 0) == pdTRUE) {
                             _ch[_currentId].responded = false;
