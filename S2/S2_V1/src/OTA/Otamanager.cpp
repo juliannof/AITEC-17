@@ -33,6 +33,7 @@ void OtaManager::tick() {
 }
 
 unsigned long ota_progress_millis = 0;
+static WebServer server(80);
 
 void onOTAStart() {
     Serial.println("[OTA] Update started!");
@@ -42,6 +43,23 @@ void onOTAProgress(size_t current, size_t final) {
     if (millis() - ota_progress_millis > 1000) {
         ota_progress_millis = millis();
         Serial.printf("[OTA] Progress: %u / %u bytes\n", current, final);
+
+        // upload.totalSize (pasado aquí como "final") es acumulativo, no el tamaño
+        // real del archivo (bug de ElegantOTA en modo síncrono) — usamos el
+        // Content-Length real de la petición HTTP en su lugar.
+        int contentLength = server.clientContentLength();
+        if (contentLength > 0) {
+            extern LGFX tft;
+            uint8_t pct = (current * 100) / contentLength;
+            if (pct > 100) pct = 100;
+            char buf[16];
+            snprintf(buf, sizeof(buf), "Subiendo... %u%%", pct);
+            tft.fillRect(0, 44, tft.width(), 20, TFT_BLACK);   // solo la franja del subtítulo
+            tft.setTextFont(2);
+            tft.setTextColor(TFT_WHITE, TFT_BLACK);
+            tft.setTextDatum(MC_DATUM);
+            tft.drawString(buf, tft.width() / 2, 54);
+        }
     }
 }
 
@@ -96,8 +114,6 @@ void OtaManager::enableForUpload(bool otaOnlyMode) {
     Serial.println(WiFi.localIP());
 
     // 3. Crear servidor y ElegantOTA (LITERAL al ejemplo)
-    static WebServer server(80);
-
     server.on("/", []() {
         server.sendHeader("Location", "/update");
         server.send(302);
@@ -130,7 +146,7 @@ void OtaManager::enableForUpload(bool otaOnlyMode) {
 
     // Subtítulo
     tft.setTextFont(2);
-    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
     tft.drawString("Esperando upload...", tft.width() / 2, 54);
 
     // Línea separadora roja

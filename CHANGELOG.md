@@ -29,6 +29,22 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 ---
 
+### SESIÓN 2026-08-02 — S2: número de track más grande/blanco en splash + fix % real en pantalla OTA
+
+**MCU afectadas:** S2 únicamente.
+**Origen:** dos peticiones del usuario en la misma sesión — cosmética de la pantalla de arranque y visibilidad del progreso OTA en pantalla (antes solo por Serial).
+
+| Archivo | Cambio |
+|---|---|
+| `S2/display/Display.cpp::drawSplashScreen()` | Número de track (`"Track %d"`) pasa de `FreeSans12pt7b` gris (`TFT_MCU_GRAY`) a `FreeSans24pt7b` blanco (`TFT_WHITE`), reposicionado (Y=105→85) para no solapar con la línea de versión FW (Y=130). |
+| `S2/OTA/Otamanager.cpp::onOTAProgress()` | Añadido redibujo del % de subida en pantalla (antes solo `Serial.printf`), limitado a la franja del subtítulo (`fillRect` de 20px, no `fillScreen`) y al mismo throttle de 1s ya existente — evita añadir latencia relevante al ciclo `server.handleClient()` (confirmado: callback corre síncrono, mismo core/tarea que `Update.write()`, sin concurrencia real). |
+| `S2/OTA/Otamanager.cpp` | Subtítulo `"Esperando upload..."` y el texto de % `"Subiendo... N%"` pasan de `TFT_DARKGREY` a `TFT_WHITE` (petición del usuario, mejor legibilidad). |
+| `S2/OTA/Otamanager.cpp` | **Fix de bug real de ElegantOTA (modo síncrono):** el `final` que ElegantOTA pasa a `onOTAProgress()` es `upload.totalSize` del core `WebServer`, que es **acumulativo** (crece igual que `current`), no el tamaño real del archivo — por eso el % calculado salía siempre ≈100%. Confirmado leyendo el código vendorizado (`ElegantOTA.cpp:303-312`, `Parsing.cpp:306/492` del core Arduino-ESP32) y que en ESP32 `Update.begin(UPDATE_SIZE_UNKNOWN, ...)` nunca conoce el tamaño real. Fix: usar `server.clientContentLength()` (API pública del `WebServer`, ya parseada desde la cabecera `Content-Length` de la petición HTTP) como divisor real del %. Requirió mover `WebServer server(80)` de variable local en `enableForUpload()` a ámbito de archivo para que el callback pueda leerla. |
+
+**Validación pendiente en hardware:** confirmar en banco que el splash se ve bien (sin solape) y que el % en la pantalla OTA avanza de forma progresiva y coherente con el log Serial durante una subida real.
+
+---
+
 ### SESIÓN 2026-07-30 — Default AutoMode cambia de OFF a READ (boot) + guard TRIM no saca de READ — SIN VALIDAR EN HARDWARE
 
 **MCU afectadas:** S2 (mayoría) + S3 + P4 (default en caché).
@@ -1217,6 +1233,7 @@ Todos los valores de brillo de pantalla hardcodeados (255/70/0/200) movidos a de
 ---
 
 ### Upload log S2
+- `2026-08-02 13:23` · Flash S2 · **FW 0.5.46** · `lolin_s2_mini`
 - `2026-06-22 17:05` · Flash S2 · **FW 0.5.45** · `lolin_s2_mini`
 - `2026-06-22 16:59` · Flash S2 · **FW 0.5.44** · `lolin_s2_mini`
 - `2026-06-15 15:09` · Flash S2 · **FW 0.5.43** · `lolin_s2_mini`

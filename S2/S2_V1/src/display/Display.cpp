@@ -119,13 +119,13 @@ void drawSplashScreen() {
 
     tft.setFont(&fonts::FreeSans24pt7b);
     tft.setTextColor(TFT_WHITE);
-    tft.drawString("", TFT_WIDTH / 2, 70);
+    tft.drawString("", TFT_WIDTH / 2, 60);
 
-    tft.setFont(&fonts::FreeSans12pt7b);
-    tft.setTextColor(TFT_MCU_GRAY);
+    tft.setFont(&fonts::FreeSans24pt7b);
+    tft.setTextColor(TFT_WHITE);
     char buf[16];
     snprintf(buf, sizeof(buf), "Track %d", trackId);
-    tft.drawString(buf, TFT_WIDTH / 2, 105);
+    tft.drawString(buf, TFT_WIDTH / 2, 85);
 
     tft.setFont(&fonts::FreeSans9pt7b);
     tft.setTextColor(TFT_WHITE);

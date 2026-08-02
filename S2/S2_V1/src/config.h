@@ -25,7 +25,7 @@ enum class ConnectionState {
 // Escala: 0=Descartado/No implementado  1=En progreso  2=Estable
 //
 // HW_STATUS: Motor=1       DRV8833 OK. Logic→S2 funciona. S2→Logic (touch report) en progreso.
-// HW_STATUS: RS485=1       Comunicación funcional. Timeouts periódicos pendientes.
+// HW_STATUS: RS485=2       Comunicación funcional. Timeouts periódicos pendientes.
 // HW_STATUS: Display=2     ST7789V3 + LovyanGFX. Dibuja perfecto. Ver HW_DISPLAY abajo.
 // HW_STATUS: ADC=2         ADS1115 resolvió todos los problemas. Estable.
 // HW_STATUS: Fader=2       Lectura ADC OK. Mapeo Logic↔ADC + AutoMode routing completo (2026-05-30).
@@ -47,7 +47,7 @@ enum class ConnectionState {
 //     • pre-commit     →  sube en cada commit con cambios S2
 //     Modificarlo a mano rompe el historial de versiones
 // ⚠️ ============================================================ ⚠️
-#define FW_REVISION 45
+#define FW_REVISION 46
 
 
 // ===================================
