@@ -186,7 +186,12 @@ void onMasterData(const MasterPacket& pkt) {
         Motor::setTarget(Motor::getRawADC());
         recStates = soloStates = muteStates = selectStates = false;
         vuLevels = vuPeakLevels = 0.0f;
-        //setScreenBrightness(0);
+        // Unificado con arranque/timeout (2026-08-07): sin esto, la pantalla se
+        // quedaba mostrando el último estado (nombre de pista, VU) y el brillo no
+        // volvía a SPLASH — inconsistente con el timeout (checkTimeout más abajo)
+        // y con el arranque (main.cpp), que sí hacen ambas cosas.
+        drawSplashScreen();
+        setScreenBrightness(BRIGHTNESS_SPLASH);
         neoWaitingHandshake = true;
         // Cambio a azul
         // ¡CRÍTICO! NO llamar updateAllNeopixels() aquí — retarda RS485 response

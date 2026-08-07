@@ -119,8 +119,17 @@ static void _onButtonEvent(ButtonId id) {
             _flags |= FLAG_SELECT;
             break;
         case ButtonId::ENCODER_SELECT:
-            _encoderBtnCount++;
-            needsVPotRedraw = true;
+            // Pulsación simple abre el SAT SOLO mientras se muestra la splash screen
+            // (sin conexión con Logic) — (2026-08-07). El clic de VPot hacia Logic no
+            // tiene ningún efecto en ese estado (no hay sesión activa que lo reciba),
+            // así que sustituir esa función ahí no pierde nada. En operación normal
+            // (CONNECTED) el encoder sigue mandando el clic de VPot como siempre.
+            if (logicConnectionState != ConnectionState::CONNECTED) {
+                if (_sat && !_sat->isOpen()) _sat->open();
+            } else {
+                _encoderBtnCount++;
+                needsVPotRedraw = true;
+            }
             break;
         default: break;
     }

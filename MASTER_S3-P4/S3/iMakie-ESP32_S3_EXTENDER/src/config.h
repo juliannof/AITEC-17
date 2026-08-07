@@ -10,8 +10,12 @@
     #define NUM_SLAVES          1
 
 #elif defined(DEVICE_S3_EXTENDER)
-    #define DEVICE_FAMILY       0x14
-    #define VERSION_REPLY_CMD   0x14
+    // FIX 2026-08-07: DEVICE_FAMILY/VERSION_REPLY_CMD estaban copiados de la rama
+    // DEVICE_P4_MASTER (0x14) — el S3 se identificaba ante Logic con el MISMO byte
+    // de familia que el P4, impidiendo que Logic distinga master de extender.
+    // Corregido a 0x15, igual que la plantilla correcta en P4_JC1060P470C/src/config.h.
+    #define DEVICE_FAMILY       0x15
+    #define VERSION_REPLY_CMD   0x15
     #define NUM_SLAVES          8   // TESTING=6 | PRODUCCIÓN=8 — no cambiar aquí sin hardware real
 
 #else

@@ -131,7 +131,10 @@ void RS485Master::runTask() {
                 if (micros() - _stateTimer >= RS485_GAP_US) {
                     rs485prof.markGapEnd();
                     _cycleCount++;
-                    rs485prof.reportIfNeeded(_cycleCount, 1000, false);
+                    // DESACTIVADO temporalmente 2026-08-07 — ruido en depuración RS485-TX.
+                    // Las estadísticas se siguen acumulando internamente en rs485prof,
+                    // solo se suprime la impresión periódica "[PROF] Ciclo ...".
+                    // rs485prof.reportIfNeeded(_cycleCount, 1000, false);
                     _nextSlave();
                     _busState = BusState::SEND;
                 }
@@ -167,6 +170,22 @@ void RS485Master::_sendPacket(uint8_t id) {
         _busState   = BusState::GAP;
         _stateTimer = micros();
         return;
+    }
+
+    // ─── Diagnóstico TX — qué se envía realmente a cada S2 (2026-08-07) ──────
+    // WHAT: loguea faderTarget/flags/autoMode/connected del paquete saliente,
+    //       solo cuando faderTarget CAMBIA respecto al último enviado a ese id.
+    // WHY:  para correlacionar, por slave, el valor exacto de faderTarget que
+    //       el S3 transmite en el instante en que ese S2 completa calibración
+    //       — descartar/confirmar si el S3 envía un target fuera de lo esperado.
+    // ASSUMES: _sendPacket() se llama secuencialmente (una task), sin necesidad
+    //          de proteger _lastLoggedTarget con el mutex de _ch[].
+    static uint16_t _lastLoggedTarget[9] = {0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF,
+                                             0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF};
+    if (pkt.faderTarget != _lastLoggedTarget[id]) {
+        _lastLoggedTarget[id] = pkt.faderTarget;
+        log_i("[RS485-TX] slave=%d faderTarget=%u flags=0x%02X autoMode=%d connected=%d",
+              id, pkt.faderTarget, pkt.flags, (int)::getAutoMode(pkt.flags), pkt.connected);
     }
 
     pkt.crc = rs485_crc8((const uint8_t*)&pkt, sizeof(MasterPacket) - 1);
@@ -247,13 +266,27 @@ void RS485Master::_handleResponse() {
         if (calibDone != _ch[_currentId].calibrated) {
             _ch[_currentId].calibrated = calibDone;
             log_i("[CALIB] Slave %d: calibrado=%d", _currentId, calibDone ? 1 : 0);
+            // Forzar target a 0 al terminar de calibrar (2026-08-07).
+            // WHY: sin esto, si el slave recalibra en caliente (glitch de bus/alimentación,
+            // botón, lo que sea) el S3 reaplica el faderTarget que tuviera cacheado de ANTES
+            // — potencialmente de otra sesión/proyecto, sin relación con el estado actual de
+            // Logic — y el fader sube a una posición vieja justo tras recalibrar. Forzar 0
+            // garantiza que se queda quieto hasta que llegue un PitchBend real y actual.
+            if (calibDone) {
+                _ch[_currentId].faderTarget = 0;
+                _ch[_currentId].dirty       = true;
+                log_i("[CALIB] Slave %d: faderTarget forzado a 0 tras calibrar", _currentId);
+            }
         }
         if (calibError) {
-            static uint32_t _lastCalibErrLog = 0;
-            if (millis() - _lastCalibErrLog > 5000) {
-                log_w("[CALIB] Slave %d reporta CALIB_ERROR (degradado)", _currentId);
-                _lastCalibErrLog = millis();
-            }
+            // DESACTIVADO temporalmente 2026-08-07 — ruido en depuración RS485-TX.
+            // El estado calibError se sigue leyendo/usando normalmente arriba,
+            // solo se suprime la impresión repetida del log.
+            // static uint32_t _lastCalibErrLog = 0;
+            // if (millis() - _lastCalibErrLog > 5000) {
+            //     log_w("[CALIB] Slave %d reporta CALIB_ERROR (degradado)", _currentId);
+            //     _lastCalibErrLog = millis();
+            // }
         }
 
         xSemaphoreGive(_mutex);

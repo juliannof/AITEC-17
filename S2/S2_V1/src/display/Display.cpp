@@ -3,6 +3,7 @@
 #include "Display.h"
 #include "hardware/encoder/Encoder.h"
 #include "../hardware/Hardware.h"
+#include "../hardware/Motor/Motor.h"
 #include <Preferences.h>
 #include "SpriteUtils.h"           // en Display.cpp
 #include "../config.h"
@@ -106,6 +107,18 @@ void setScreenBrightness(uint8_t brightness) {
 }
 
 // ════════════════════════════════════════════════════════════
+//  drawCalibDot — punto de estado de calibración (2026-08-07)
+// ════════════════════════════════════════════════════════════
+// WHAT: dibuja solo el círculo verde/rojo de Motor::isCalibrated(), sin
+//       tocar el resto de la pantalla. Extraído de drawSplashScreen() para
+//       poder refrescar el punto en solitario desde updateDisplay() cuando
+//       la calibración termina mientras la splash sigue visible.
+void drawCalibDot() {
+    uint16_t calibColor = Motor::isCalibrated() ? TFT_GREEN : TFT_RED;
+    tft.fillCircle(TFT_WIDTH / 2, 205, 6, calibColor);
+}
+
+// ════════════════════════════════════════════════════════════
 //  drawSplashScreen
 // ════════════════════════════════════════════════════════════
 
@@ -133,6 +146,14 @@ void drawSplashScreen() {
     snprintf(verBuf, sizeof(verBuf), "FW %s", FW_VERSION);
     tft.drawString(verBuf, TFT_WIDTH / 2, 130);
     tft.drawString(FW_BUILD_ID, TFT_WIDTH / 2, 160);
+
+    // Min/max PWM del motor guardado en NVS (2026-08-07) — diagnóstico visual
+    // rápido del rango de potencia del motor sin depender del log serie.
+    char pwmBuf[32];
+    snprintf(pwmBuf, sizeof(pwmBuf), "PWM %u-%u", Motor::getPWMMin(), Motor::getPWMMax());
+    tft.drawString(pwmBuf, TFT_WIDTH / 2, 185);
+
+    drawCalibDot();
 
     // DESACTIVADO: círculo NVS validator
     // uint16_t circleColor = (NVSValidator::getLastStatus() == NVSStatus::VALID) ? TFT_GREEN : TFT_RED;
@@ -175,8 +196,17 @@ void updateDisplay() {
     }
     lastState = logicConnectionState;
 
-    // Sin conexión RS485: pantalla offline
+    // Sin conexión RS485: pantalla offline — refresco ligero del punto de
+    // calibración (2026-08-07): si Motor::isCalibrated() cambia mientras la
+    // splash sigue visible (calibración termina en segundo plano), redibuja
+    // SOLO el círculo, sin redibujar toda la pantalla.
     if (logicConnectionState != ConnectionState::CONNECTED) {
+        static bool lastCalibState = false;
+        bool calibNow = Motor::isCalibrated();
+        if (calibNow != lastCalibState) {
+            lastCalibState = calibNow;
+            drawCalibDot();
+        }
         return;
     }
 
@@ -221,12 +251,16 @@ void updateDisplay() {
 //  Pantallas de estado
 // ════════════════════════════════════════════════════════════
 void drawOfflineScreen() {
-    static bool splashDrawn = false;
-    if (!splashDrawn) {
-        tft.setBrightness(100);
-        drawSplashScreen();  // necesita el trackId
-        splashDrawn = true;
-    }
+    // FIX 2026-08-07: el guard "static bool splashDrawn" nunca se reseteaba —
+    // solo dibujaba la primera desconexión de toda la sesión de encendido.
+    // El llamador (updateDisplay()) YA hace detección de flanco CONNECTED→
+    // DISCONNECTED, así que esta función solo se invoca una vez por evento de
+    // desconexión — el guard interno era redundante y, al no resetearse nunca,
+    // bloqueaba todos los redibujados posteriores (por eso el círculo de
+    // calibración se quedaba congelado en rojo tras la primera desconexión).
+    // Brillo unificado con BRIGHTNESS_SPLASH (antes: 100 hardcodeado).
+    setScreenBrightness(BRIGHTNESS_SPLASH);
+    drawSplashScreen();  // necesita el trackId
 }
 
 void drawInitializingScreen() {

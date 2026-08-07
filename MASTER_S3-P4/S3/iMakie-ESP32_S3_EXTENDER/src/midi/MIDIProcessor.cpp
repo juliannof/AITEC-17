@@ -210,9 +210,12 @@ void processControlChange(byte channel, byte controller, byte value) {
 
     if (controller >= 48 && controller <= 55) {
         uint8_t strip = controller - 48;
-        rs485.setVPotValue(strip + 1, value);
-        vpotValues[strip] = value;
-        
+        // Gate de conexión (2026-08-02): mismo criterio que el fader — no propagar CC
+        // recibidos antes del handshake real.
+        if (logicConnectionState == ConnectionState::CONNECTED) {
+            rs485.setVPotValue(strip + 1, value);
+            vpotValues[strip] = value;
+        }
         return;
     }
 
@@ -263,6 +266,10 @@ String formatBeatString() {
 }
 
 void processChannelPressure(byte channel, byte value) {
+    // Gate de conexión (2026-08-02): mismo criterio que el fader — no propagar VU
+    // recibido antes del handshake real.
+    if (logicConnectionState != ConnectionState::CONNECTED) return;
+
     float normalizedLevel = 0.0f;
     int targetChannel = -1;
     bool newClipState = false;
@@ -326,19 +333,37 @@ void processMackieSysEx(byte* payload, int len) {
 
     // Fase 0: sondeo — responder a cmd 0x00 y 0x13 en cualquier familia
     if (command == 0x00) {
-        byte reply[] = {0xF0, 0x00, 0x00, 0x66, 0x14, 0x01,
+        // Diagnóstico (2026-08-02): Logic reinicia el handshake completo mandando
+        // este query — loguear con timestamp para correlacionar con reset del S3
+        // (ver esp_reset_reason() en setup()) y descartar/confirmar reboot físico.
+        log_e("[HANDSHAKE] Device Query 0x00 recibido — Logic reinicia negociacion (t=%lu ms)", millis());
+        // FIX 2026-08-07: familia hardcodeada a 0x14 aquí — el S3 respondía SIEMPRE
+        // "soy familia 0x14" (identidad del P4) sin importar qué familia sondeara
+        // Logic (0x10/0x11/0x17/0x14/0x15). Cuando Logic buscaba específicamente el
+        // extender (familia 0x15), el S3 igual contestaba 0x14 — Logic nunca lograba
+        // identificar el extender como device distinto del P4, y reiniciaba la
+        // negociación en bucle. Usar DEVICE_FAMILY (0x15 en el S3) en vez del literal.
+        byte reply[] = {0xF0, 0x00, 0x00, 0x66, DEVICE_FAMILY, 0x01,
                         0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0xF7};
         sendMIDIBytes(reply, sizeof(reply));
         return;
     }
     if (command == 0x13) {
-        byte reply[] = {0xF0, 0x00, 0x00, 0x66, 0x14, 0x14, 0x00, 0xF7};
+        // FIX 2026-08-07: mismo bug — familia hardcodeada a 0x14 en vez de DEVICE_FAMILY.
+        byte reply[] = {0xF0, 0x00, 0x00, 0x66, DEVICE_FAMILY, 0x14, 0x00, 0xF7};
         sendMIDIBytes(reply, sizeof(reply));
         return;
     }
 
-    // Fase 1+: solo familia 0x14
-    if (device_family != 0x14) return;
+    // Fase 1+: solo la familia propia del dispositivo (0x15 en el S3).
+    // FIX 2026-08-07: comparaba contra 0x14 literal (identidad del P4). Antes esto
+    // "funcionaba por accidente" porque la Fase 0 también respondía 0x14 siempre,
+    // así que Logic seguía direccionando todo a 0x14. Al corregir la Fase 0 para
+    // que el S3 se identifique como 0x15 (DEVICE_FAMILY), Logic empezó a mandar
+    // los comandos de la Fase 1+ (incluido 0x21, que marca CONNECTED) direccionados
+    // a 0x15 — y esta guarda los descartaba todos, dejando el dispositivo sin
+    // conectar nunca. Debe comparar contra DEVICE_FAMILY, no un literal.
+    if (device_family != DEVICE_FAMILY) return;
 
     switch (command) {
 
@@ -347,6 +372,11 @@ void processMackieSysEx(byte* payload, int len) {
             g_logicConnected     = 0;   // Todos los slaves recibirán connected=0
             fadersAtMinMask      = 0;
             firstFaderMinTime    = 0;
+            // Fijar target a la posición actual del fader (2026-08-02): igual que ya hacía
+            // la desconexión automática por fadersAtMinMask — evita dejar armado un target
+            // viejo/potencialmente contaminado para cuando Logic reconecte.
+            for (uint8_t i = 1; i <= NUM_SLAVES; i++)
+                rs485.setFaderTarget(i, rs485.getChannel(i).faderPos);
             Transporte::setAllLedsOff();  // LEDs transport off al desconectar (2026-05-27)
             rs485.beginDisconnectSequence();
             g_switchToOffline    = true;
@@ -458,7 +488,9 @@ void processMackieSysEx(byte* payload, int len) {
                 connectedSinceTime   = millis();
                 // _calibPendingFrom = 1;   // ELIMINADO — boot auto-calib ya lo hizo (2026-05-19)
                 // _calibNextTime    = millis();
-                log_i("[MCU] 0x21 — CONNECTED");
+                // Diagnóstico (2026-08-02): timestamp para correlacionar con [HANDSHAKE] 0x00
+                // y con [BOOT] reset reason — ver nota en processMackieSysEx case 0x00.
+                log_e("[HANDSHAKE] 0x21 — CONNECTED (t=%lu ms)", millis());
             }
             break;
         }
@@ -597,7 +629,14 @@ void processNote(byte status, byte note, byte velocity) {
 }
 
 void processPitchBend(byte channel, int bendValue) {
-    log_v("PB ch%d raw:%d", channel, bendValue);
+    // Diagnóstico RX (2026-08-07) — qué recibe el S3 de Logic, para comparar
+    // directamente contra el log [RS485-TX] (qué sale hacia el S2) en el mismo monitor.
+    // Restringido a channel < 8 (2026-08-07): solo hay 8 slaves aquí (canales 0-7).
+    // ch=8 es el master fader de Logic (no se reenvía a ningún slave) y ch=9 no se
+    // procesa en ningún sitio — loguearlos era ruido sin relación con los slaves.
+    if (channel < 8) {
+        log_i("[MIDI-RX] PB ch=%d raw=%d connected=%d", channel, bendValue, (int)(logicConnectionState == ConnectionState::CONNECTED));
+    }
     if (channel > 9) return;
 
     if (bendValue == 0) {
@@ -651,9 +690,20 @@ void processPitchBend(byte channel, int bendValue) {
         int bendClamped = (bendValue < 0) ? 0 : bendValue;
 
         if (channel < 8) {
-            if (abs(bendClamped - (int)lastSentPitchBend[channel]) > PITCHBEND_DEADBAND) {
+            // Gate de conexión (2026-08-02): sin esto, cualquier PitchBend que llegue por
+            // USB-MIDI antes del handshake real (SysEx 0x21) queda armado en _ch[id].faderTarget
+            // del S3 y se aplica de golpe al motor del S2 en cuanto CONNECTED pasa a 1 —
+            // provocaba el motor persiguiendo un target no confirmado por Logic tras conectar.
+            if (logicConnectionState == ConnectionState::CONNECTED &&
+                abs(bendClamped - (int)lastSentPitchBend[channel]) > PITCHBEND_DEADBAND) {
                 rs485.setFaderTarget(channel + 1, (uint16_t)bendClamped);
                 lastSentPitchBend[channel] = (int16_t)bendClamped;
+                log_i("[MIDI-RX] → RS485 slave=%d bendClamped=%d (forwarded)", channel + 1, bendClamped);
+            } else if (logicConnectionState != ConnectionState::CONNECTED) {
+                // Solo avisa cuando se descarta por NO estar conectado — el filtro de
+                // deadband rutinario NO se loguea aquí porque dispara constantemente
+                // en movimiento normal de fader y ahogaría el monitor. (2026-08-07)
+                log_i("[MIDI-RX] slave=%d bendClamped=%d DESCARTADO (no conectado)", channel + 1, bendClamped);
             }
         }
         float faderPositionNormalized = (float)bendClamped / (float)LOGIC_PITCHBEND_MAX;

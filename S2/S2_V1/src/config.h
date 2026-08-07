@@ -172,7 +172,6 @@ static uint16_t   _calibratedFaderMax         = 0;
 static uint16_t   _motor_adcSpan        = 0;
 static uint16_t   _motor_adcPos         = 0;
 static uint16_t   _motor_targetADC      = 0;
-static uint16_t   _motor_lastMidiTarget = 0;
 
 static uint16_t   _motor_settleMin      = 27000;  // > máximo rango ADS1115 (26423)
 static uint16_t   _motor_settleMax      = 0;      // < mínimo rango ADS1115 (23)

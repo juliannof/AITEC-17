@@ -271,8 +271,12 @@ static void _calibUpdate() {
             _calibratedFaderMin    = adcBot + marginBot;
             _calibratedFaderMax    = _motor_adcTop - marginTop;
             _motor_adcSpan   = _calibratedFaderMax - _calibratedFaderMin;
-            _motor_targetADC = (uint16_t)map((long)_motor_lastMidiTarget,
-                                        0, MIDI_PB_MAX, _calibratedFaderMin, _calibratedFaderMax);
+            // Quedarse en la posición actual (fader recién asentado en el fondo tras
+            // SETTLE_DOWN). El "flanco de calibración" en RS485Handler.cpp:286-297 aplica
+            // el target real de Logic en el siguiente paquete RS485, ya acotado a
+            // [_calibratedFaderMin,_calibratedFaderMax] por _pbToADC(). No hace falta
+            // precalcular un target aquí. (2026-08-07)
+            _motor_targetADC = _motor_adcPos;
             faderADC.setCalibration(_calibratedFaderMin, _calibratedFaderMax);
             _motor_lastCalibDone = millis();  // Registrar timestamp (2026-05-16 07:48)
             _motor_phase     = CalibPhase::DONE;
@@ -440,8 +444,15 @@ void update() {
         if (abs((int)_motor_adcPos - (int)_stallProtectLastADC) > 10) {
             _stallProtectLastADC = _motor_adcPos;
             _stallProtectStart   = millis();
-        } else if (_stallProtectStart > 0 &&
-                   millis() - _stallProtectStart > STALL_PROTECT_MS) {
+        } else if (_stallProtectStart == 0) {
+            // Motor recién activado contra una posición que no se mueve (2026-08-07):
+            // sin esto, _stallProtectStart nunca se arma si el fader ya está pegado
+            // al tope físico desde el primer tick — el corte de seguridad por timeout
+            // (rama siguiente) nunca dispara porque su guarda "> 0" es siempre falsa.
+            // Arrancar la cuenta aquí garantiza que STALL_PROTECT_MS después SIEMPRE
+            // se evalúa, se haya movido el fader o no.
+            _stallProtectStart = millis();
+        } else if (millis() - _stallProtectStart > STALL_PROTECT_MS) {
             _hwOff();  // _motor_hw_active = false → no refire inmediato
             log_e("[MOTOR] STALL — tope físico, motor apagado (adc=%d)", _motor_adcPos);
             _stallProtectStart  = 0;  // evitar refire inmediato al reactivarse
@@ -680,11 +691,21 @@ void setADCDelta(uint16_t currentADC) {
     }
 }
 
+// setTarget — ancla el target ADC directamente (dominio ADC, no PitchBend).
+// WHAT: fija _motor_targetADC = target sin remapear. Usado por RS485Handler al
+//       desconectar/timeout para anclar el target a la posición ADC actual
+//       (Motor::getRawADC()), evitando que el motor persiga un target viejo.
+// WHY:  antes esta función también guardaba el valor en _motor_lastMidiTarget
+//       para remapearlo como si fuera PitchBend 0-16383 al completar una
+//       calibración posterior — pero el llamador siempre pasa un ADC crudo
+//       (0-27000), nunca un PitchBend real. Ese remapeo producía un target
+//       muy por encima del tope físico vía map() sin clamp. Eliminado. (2026-08-07)
+// ASSUMES: solo tiene efecto si ya hay calibración (_motor_phase == DONE);
+//          antes de calibrar, el dominio ADC del target no tiene sentido.
 void setTarget(uint16_t target) {
-    _motor_lastMidiTarget = target;
     if (_motor_phase != CalibPhase::DONE) return;
-    _motor_targetADC = target;  // S3 ya mapeó al rango calibrado — usar directamente
-    log_d("[TARGET] %d → adc=%d", target, _motor_targetADC);
+    _motor_targetADC = target;
+    log_d("[TARGET] adc=%d", target);
 }
 
 void off() {

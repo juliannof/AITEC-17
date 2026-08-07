@@ -7,6 +7,7 @@
 #include "RS485/RS485.h"
 #include "hardware/Transporte.h"
 #include <Adafruit_NeoPixel.h>
+#include "esp_system.h"
 
 // ====================================================================
 // --- MIDI ---
@@ -76,6 +77,14 @@ TaskHandle_t taskCore1Handle = nullptr;
 static uint16_t lastSentPb[9] = {0};  // Track último PitchBend enviado por slave
 
 static void processSlaveResponse(uint8_t slaveId) {
+    // Gate de conexión (2026-08-07): simétrico al gate ya existente en la entrada
+    // (MIDIProcessor.cpp, PitchBend/CC "Gate de conexión 2026-08-02"). Sin esto, el
+    // feedback de fader/touch/botones sigue saliendo hacia Logic aunque la conexión
+    // esté cayéndose o cerrada (ej. el S2 bajando a 0 por desconexión) — puede
+    // colarse en Logic durante una renegociación de handshake y volver como si
+    // fuera un movimiento real del usuario.
+    if (logicConnectionState != ConnectionState::CONNECTED) return;
+
     const ChannelData& ch = rs485.getChannel(slaveId);
     uint8_t midiCh = slaveId - 1;
 
@@ -229,12 +238,37 @@ void taskCore1(void* pvParameters) {
 }
 
 // ====================================================================
+// --- DIAGNÓSTICO — motivo del último reset (2026-08-02) ──────────
+// WHY: investigar resincronizaciones MCU repetidas (~37s) vistas en
+// MIDI Monitor — confirmar si el S3 se reinicia físicamente (brownout,
+// watchdog, panic) o si es Logic quien redispara el handshake por su
+// cuenta sin que el S3 haya rebooteado.
+// ====================================================================
+static const char* resetReasonStr(esp_reset_reason_t r) {
+    switch (r) {
+        case ESP_RST_POWERON:   return "POWERON";
+        case ESP_RST_EXT:       return "EXT_PIN";
+        case ESP_RST_SW:        return "SW_RESET";
+        case ESP_RST_PANIC:     return "PANIC";
+        case ESP_RST_INT_WDT:   return "INT_WDT";
+        case ESP_RST_TASK_WDT:  return "TASK_WDT";
+        case ESP_RST_WDT:       return "OTHER_WDT";
+        case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
+        case ESP_RST_BROWNOUT:  return "BROWNOUT";
+        case ESP_RST_SDIO:      return "SDIO";
+        default:                return "UNKNOWN";
+    }
+}
+
+// ====================================================================
 // --- SETUP ---
 // ====================================================================
 void setup() {
     randomSeed(esp_random());
     Serial.begin(115200);
     log_i("=== BOOT S3-02 Extender ===");
+    log_e("[BOOT] Reset reason: %s (t=%lu ms desde power-on)",
+          resetReasonStr(esp_reset_reason()), millis());
 
     // 1. USB
     log_i("1. USB.begin()...");
