@@ -187,12 +187,21 @@ namespace VU {
 //  updateDisplay  —  redraw total + redraws incrementales
 // ════════════════════════════════════════════════════════════
 void updateDisplay() {
+    // Apagado por inactividad en Splash (2026-08-13) — solo mientras no hay
+    // Logic conectado. Se reinicia con cualquier actividad (touch fader,
+    // REC/SOLO/MUTE/SELECT, encoder). Al detectar actividad tras haberse
+    // atenuado, restaura brillo al instante (sin fundido de entrada).
+    static unsigned long _splashLastActivity = millis();
+    static bool          _splashDimmed       = false;
+
     // Detectar transición CONNECTED → DISCONNECTED
     static ConnectionState lastState = ConnectionState::DISCONNECTED;
     if (logicConnectionState == ConnectionState::DISCONNECTED &&
         lastState == ConnectionState::CONNECTED) {
         tft.fillScreen(TFT_BG_COLOR);
         drawOfflineScreen();
+        _splashLastActivity = millis();  // splash recién entrada: reiniciar contador
+        _splashDimmed       = false;
     }
     lastState = logicConnectionState;
 
@@ -208,14 +217,47 @@ void updateDisplay() {
         if (needsTOTALRedraw) {
             needsTOTALRedraw = false;
             drawOfflineScreen();
-            lastCalibState = calibNow;
+            lastCalibState       = calibNow;
+            _splashLastActivity  = millis();
+            _splashDimmed        = false;
             return;
         }
         if (calibNow != lastCalibState) {
             lastCalibState = calibNow;
             drawCalibDot();
         }
+
+        bool activity = Motor::isManualTouchDetected() ||
+                         digitalRead(BUTTON_PIN_REC)    == LOW ||
+                         digitalRead(BUTTON_PIN_SOLO)   == LOW ||
+                         digitalRead(BUTTON_PIN_MUTE)   == LOW ||
+                         digitalRead(BUTTON_PIN_SELECT) == LOW ||
+                         digitalRead(ENCODER_SW_PIN)    == LOW ||
+                         Encoder::getCount() != 0;
+
+        if (activity) {
+            _splashLastActivity = millis();
+            if (_splashDimmed) {
+                _splashDimmed = false;
+                setScreenBrightness(BRIGHTNESS_SPLASH);  // restauro instantáneo
+            }
+        } else {
+            unsigned long idle = millis() - _splashLastActivity;
+            if (idle >= SPLASH_DIM_TIMEOUT_MS) {
+                unsigned long fadeElapsed = idle - SPLASH_DIM_TIMEOUT_MS;
+                uint8_t target = (fadeElapsed >= SPLASH_DIM_FADE_MS)
+                    ? 0
+                    : (uint8_t)((uint32_t)BRIGHTNESS_SPLASH * (SPLASH_DIM_FADE_MS - fadeElapsed) / SPLASH_DIM_FADE_MS);
+                if (target != screenBrightness) setScreenBrightness(target);
+                _splashDimmed = true;
+            }
+        }
         return;
+    }
+
+    // Salir de Splash (Logic conectado): asegurar brillo restaurado si venía atenuada
+    if (_splashDimmed) {
+        _splashDimmed = false;
     }
 
     // Primera vez o redraw forzado

@@ -515,6 +515,7 @@ float realPos = Motor::isCalibrated() ? Motor::getPosition() : faderPositions;
 
 ## Últimas Actualizaciones
 
+- **(2026-08-13)** Apagado por inactividad en Splash (Logic desconectado): 2 min sin actividad (touch fader, REC/SOLO/MUTE/SELECT, encoder) → fundido de brillo a 0 en 8s (`SPLASH_DIM_TIMEOUT_MS`/`SPLASH_DIM_FADE_MS`, `config.h`). Cualquier actividad restaura brillo al instante. Detalle: `CHANGELOG.md` sesión 2026-08-13.
 - **(2026-05-26)** §9 Bug conocido: dB fader muestra target Logic, no posición ADC real — documentado con fix pendiente
 - **(2026-05-26)** §10 VU Meter: geometría, diferencial, peak hold+fade 300ms, blendColor565()
 - **(2026-05-16)** Creado DISPLAY.md como documento exhaustivo, trasladado contenido de CLAUDE.md

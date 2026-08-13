@@ -640,8 +640,13 @@ void processPitchBend(byte channel, int bendValue) {
     if (channel > 9) return;
 
     if (bendValue == 0) {
-        if (logicConnectionState == ConnectionState::CONNECTED) {
-            if (millis() - connectedSinceTime < CONNECT_GRACE_MS) return;
+        // Bug B3 fix (2026-08-13): el guard de grace period ya NO hace return
+        // aquí — antes se comía el resto del mensaje (incluido el reenvío del
+        // target más abajo) para cualquier canal procesado tras el flip a
+        // CONNECTED dentro de la misma ráfaga de conexión. Ahora solo evita
+        // que esos mensajes cuenten para la heurística de desconexión.
+        if (logicConnectionState == ConnectionState::CONNECTED &&
+            millis() - connectedSinceTime >= CONNECT_GRACE_MS) {
             unsigned long now = millis();
             if (fadersAtMinMask == 0) firstFaderMinTime = now;
             fadersAtMinMask |= (1 << channel);
@@ -694,7 +699,15 @@ void processPitchBend(byte channel, int bendValue) {
             // USB-MIDI antes del handshake real (SysEx 0x21) queda armado en _ch[id].faderTarget
             // del S3 y se aplica de golpe al motor del S2 en cuanto CONNECTED pasa a 1 —
             // provocaba el motor persiguiendo un target no confirmado por Logic tras conectar.
+            // Bug B3 fix (2026-08-13): también bloqueado durante CONNECT_GRACE_MS
+            // — sin esto, el canal que dispara el flip a CONNECTED (procesado
+            // ANTES de este guard) sí reenviaba su target, mientras el resto de
+            // canales de la misma ráfaga inicial lo perdían por el return de
+            // arriba — asimetría que causaba que un fader se moviera y otros no
+            // al abrir Logic sin proyecto. Ahora ninguno se mueve hasta pasado
+            // el grace period completo.
             if (logicConnectionState == ConnectionState::CONNECTED &&
+                millis() - connectedSinceTime >= CONNECT_GRACE_MS &&
                 abs(bendClamped - (int)lastSentPitchBend[channel]) > PITCHBEND_DEADBAND) {
                 rs485.setFaderTarget(channel + 1, (uint16_t)bendClamped);
                 lastSentPitchBend[channel] = (int16_t)bendClamped;

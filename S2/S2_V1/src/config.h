@@ -75,6 +75,7 @@ enum class ConnectionState {
 
 #define BOOT_INPUT_SETTLE_MS  2000   // ignora REC/encoder-click los primeros 2s tras boot — glitch eléctrico de arranque en pin global Button2 (2026-08-13, subido de 1000 — encoder no tiene hold propio, ver SAT_OPEN_HOLD_MS)
 #define SAT_OPEN_HOLD_MS       400   // REC en splash: hold mínimo real (Button2::wasPressedFor()) para abrir el SAT — filtra toques/rebotes breves, ya no dispara con glitches cortos (2026-08-13)
+#define GOTOMIN_JITTER_MAX_MS 2000   // retardo aleatorio 0-2s antes de goToMin() tras desconexión — anti-cascada, evita que todas las S2 bajen a la vez (pico de corriente + ruido RS485 correlacionado, confirmado en banco 2026-08-13)
 
 
 // --- SENSOR TÁCTIL DEL FADER ---
@@ -296,6 +297,10 @@ static constexpr uint32_t TOUCH_BASE_MIN_VALUE     = 50;      // valor mínimo i
 #define BRIGHTNESS_SPLASH       50   // Boot y espera (sin Logic)
 #define BRIGHTNESS_SELECTED    180   // Canal activo/seleccionado
 #define BRIGHTNESS_UNSELECTED   70   // Canal no seleccionado
+
+// --- Apagado por inactividad en Splash (sin Logic conectado) (2026-08-13) ---
+#define SPLASH_DIM_TIMEOUT_MS 120000  // 2 min sin actividad antes de empezar a atenuar
+#define SPLASH_DIM_FADE_MS      8000  // duración del fundido hasta brillo 0
 #define BRIGHTNESS_OTA          50   // Pantalla OTA WiFi
 
 // --- NEOPixel ---

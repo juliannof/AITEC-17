@@ -781,6 +781,12 @@ void setTargetFromS3(uint16_t adcTarget) {
 
 ## 7. HISTORIA DE FIXES
 
+### 2026-08-13 (tarde) — Jitter en goToMin() + fix frenado fino _positionTick()
+
+**Jitter en goToMin() (`Motor.cpp`, `config.h`):** el jitter de boot (arriba) solo cubría la autocalibración — `goToMin()` (MASTER ABSOLUTO si `!_connected`) seguía disparando sincronizado en TODAS las S2 a la vez, tanto en encendido simultáneo del rig como en desconexión de Logic en caliente. Confirmado en banco: correlaciona con ráfagas de `[RS485] ID MISMATCH`/`CRC ERROR` en S3 (ver `RS485.md`). Fix: `GOTOMIN_JITTER_MAX_MS=2000`, calculado en `Motor::init()` (boot) y en `setConnected()` (flanco conectado→desconectado). Los dos disparadores de `goToMin()` (`IDLE`, `AT_TARGET`) respetan `_goToMinJitterUntil` — la garantía "ejecuta SIEMPRE" no se compromete, solo se retrasa hasta 2s por unidad.
+
+**Fix frenado fino — `_positionTick()` (línea ~357):** denominador equivocado (`_motor_adcSpan` en vez de `POSITION_CRUISE_ERR`) hacía que el PWM cayera casi a `_pwm_min` de golpe al entrar en la zona de frenado (2000 counts) y se quedara plano el resto — sin rampa real. Causaba overshoot hasta el tope físico en movimientos largos (llega con inercia, freno insuficiente) y trompicones en movimientos cortos (PWM casi mínimo desde el principio). Fix: denominador → `POSITION_CRUISE_ERR`, rampa lineal real de `PWM_MAX` a `PWM_MIN` a lo largo de la zona. Detalle completo, incluyendo la investigación previa (Bug B3 en S3, descartada la hipótesis de calibración no aplicada): `CHANGELOG.md` sesión 2026-08-13, puntos 13 y 16.
+
 ### 2026-08-13 — Jitter anti-cascada en boot + reintento automático en timeout de calibración
 
 **Jitter (`main.cpp`, `config.h`):** todos los S2 arrancaban y disparaban `requestCalibration()` casi al mismo instante al energizar el rig (todos llegan a "10 lecturas ADC válidas" casi a la vez) → todos los motores subían juntos. Fix: nueva constante `CALIB_BOOT_JITTER_MAX_MS=2000`, cada S2 espera un retardo aleatorio 0-2s (hardware RNG del ESP32) antes de disparar la autocalibración de boot.

@@ -45,6 +45,7 @@ static bool _dawAbsolute = false;  // true en AUTO_OFF/READ — usuario no puede
 // físico real de ~115-135 cuentas hacen que la llegada por threshold NUNCA se cumpla
 // → llegada por stall → re-disparo → bucle de pulsos contra el tope. (2026-07-20)
 static uint16_t _goToMinRestADC = 0;  // latch: dónde descansó el fader tras stall en el tope
+static uint32_t _goToMinJitterUntil = 0;  // anti-cascada: no bajar antes de este millis() tras desconexión (2026-08-13)
 static uint16_t _floorADC() {
     return (_motor_phase == CalibPhase::DONE) ? _calibratedFaderMin : (uint16_t)MOTOR_ADC_MIN;
 }
@@ -353,7 +354,14 @@ static void _positionTick() {
     if (absErr > POSITION_CRUISE_ERR) {
         targetPWM = _pwm_max;
     } else {
-        targetPWM = _pwm_min + (min((uint16_t)absErr, _motor_adcSpan) * (_pwm_max - _pwm_min)) / _motor_adcSpan;
+        // Fix (2026-08-13): el denominador era _motor_adcSpan (~26000, el recorrido
+        // completo) en vez de POSITION_CRUISE_ERR (2000, el ancho real de esta zona
+        // de frenado). Con el denominador grande, targetPWM caía casi a _pwm_min de
+        // golpe en cuanto absErr<POSITION_CRUISE_ERR y se quedaba ahí plano el resto
+        // del tramo — sin rampa real. Causaba overshoot hasta el tope físico en
+        // movimientos largos (llega a la zona con inercia, freno insuficiente) y
+        // trompicones en movimientos cortos (PWM casi mínimo desde el principio).
+        targetPWM = _pwm_min + ((uint32_t)min((uint16_t)absErr, POSITION_CRUISE_ERR) * (_pwm_max - _pwm_min)) / POSITION_CRUISE_ERR;
         targetPWM = constrain(targetPWM, _pwm_min, _pwm_max);
     }
 
@@ -370,6 +378,12 @@ namespace Motor {
 
 void init() {
     log_i("[MOTOR] init(): configurando pines y PWM");
+
+    // Jitter anti-cascada también en power-on: _connected arranca en false
+    // (config.h) — sin esto, IDLE→GOING_TO_MIN dispara igual de sincronizado
+    // en un encendido simultáneo de todo el rig que en una desconexión en
+    // caliente. Mismo mecanismo que setConnected(). (2026-08-13)
+    _goToMinJitterUntil = millis() + random(GOTOMIN_JITTER_MAX_MS);
 
     pinMode(MOTOR_EN, OUTPUT);
     digitalWrite(MOTOR_EN, LOW);
@@ -487,7 +501,8 @@ void update() {
         // Esperando órdenes S3 o usuario.
         if (!_connected && _motor_adcPos > (_floorADC() + 10) &&
             (_goToMinRestADC == 0 || _motor_adcPos > _goToMinRestADC + 40) &&
-            millis() >= _stallCooldownUntil && !_motor_manualTouchDetected) {
+            millis() >= _stallCooldownUntil && millis() >= _goToMinJitterUntil &&
+            !_motor_manualTouchDetected) {
             // Sin S3: fader debe estar en 0 — bajar (boot o desconexión S3)
             _goToMinStallStart = 0;
             _goToMinLastADC    = _motor_adcPos;
@@ -560,7 +575,8 @@ void update() {
         // Umbral 80 > arrival threshold 60 — evita bucle AT_TARGET↔GOING_TO_MIN en tope físico
         if (!_connected && _motor_adcPos > (_floorADC() + 80) &&
             (_goToMinRestADC == 0 || _motor_adcPos > _goToMinRestADC + 40) &&
-            millis() >= _stallCooldownUntil && !_motor_manualTouchDetected) {
+            millis() >= _stallCooldownUntil && millis() >= _goToMinJitterUntil &&
+            !_motor_manualTouchDetected) {
             _goToMinStallStart = 0;
             _goToMinLastADC    = _motor_adcPos;
             _motor_state       = MotorState::GOING_TO_MIN;
@@ -734,6 +750,12 @@ void stop() {
 }
 
 void setConnected(bool connected) {
+    if (!connected && _connected) {
+        // Flanco conectado→desconectado: jitter anti-cascada — evita que
+        // todas las S2 bajen a la vez (pico de corriente + ruido RS485
+        // correlacionado con desconexión masiva, confirmado en banco 2026-08-13)
+        _goToMinJitterUntil = millis() + random(GOTOMIN_JITTER_MAX_MS);
+    }
     _connected = connected;  // Notificar estado de conexión S3 (2026-05-16 10:52)
     if (connected) _goToMinRestADC = 0;  // limpiar latch anti-rebote al reconectar (2026-07-20)
 }
