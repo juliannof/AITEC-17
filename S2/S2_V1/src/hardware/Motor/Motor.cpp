@@ -356,12 +356,20 @@ static void _positionTick() {
     } else {
         // Fix (2026-08-13): el denominador era _motor_adcSpan (~26000, el recorrido
         // completo) en vez de POSITION_CRUISE_ERR (2000, el ancho real de esta zona
-        // de frenado). Con el denominador grande, targetPWM caía casi a _pwm_min de
-        // golpe en cuanto absErr<POSITION_CRUISE_ERR y se quedaba ahí plano el resto
-        // del tramo — sin rampa real. Causaba overshoot hasta el tope físico en
-        // movimientos largos (llega a la zona con inercia, freno insuficiente) y
-        // trompicones en movimientos cortos (PWM casi mínimo desde el principio).
-        targetPWM = _pwm_min + ((uint32_t)min((uint16_t)absErr, POSITION_CRUISE_ERR) * (_pwm_max - _pwm_min)) / POSITION_CRUISE_ERR;
+        // de frenado) — causaba PWM casi plano en _pwm_min desde el principio de la
+        // zona (overshoot en movimientos largos, trompicones en cortos).
+        // Ajuste (2026-08-13, misma sesión): la primera versión de este fix usaba
+        // una rampa LINEAL — mantenía demasiado PWM cerca del target y el fader
+        // empezó a rebotar (overshoot → corrige → overshoot menor → asienta) en
+        // vez de pararse limpio. Cambiado a caída CUADRÁTICA: mismo PWM_MAX al
+        // entrar en la zona (sigue venciendo la fricción del crucero), pero decae
+        // mucho antes y más fuerte según se acerca al target — más margen de
+        // frenado real en el tramo final, sin perder el empuje inicial que
+        // necesitaba el fix original.
+        uint32_t clampedErr = min((uint16_t)absErr, POSITION_CRUISE_ERR);
+        uint32_t rangePWM   = (uint32_t)(_pwm_max - _pwm_min);
+        targetPWM = _pwm_min + (int)((rangePWM * clampedErr * clampedErr) /
+                                      ((uint32_t)POSITION_CRUISE_ERR * POSITION_CRUISE_ERR));
         targetPWM = constrain(targetPWM, _pwm_min, _pwm_max);
     }
 
@@ -650,7 +658,19 @@ void setADCDelta(uint16_t currentADC) {
             _motor_lastADCForDelta = currentADC;
             return;  // Motor en su dirección — no es el usuario
         }
-        // Dirección opuesta: usuario oponiéndose → detección normal
+        // Dirección opuesta: puede ser oposición real del usuario, o el propio
+        // motor rebotando/asentando al frenar cerca del target (más probable
+        // cuanto más rápido llega, ver _positionTick()). Dentro de la zona de
+        // frenado (POSITION_CRUISE_ERR) se asume asentamiento mecánico, no
+        // touch — sin esto, un rebote de un solo tick dispara touchState=1
+        // hacia Logic (vía SELECT MIDI en S3) y Logic abandona el fader a
+        // medio camino aunque el motor internamente sí llegue al target real
+        // (confirmado en banco con MIDI Monitor, 2026-08-13). Lejos del
+        // target, una dirección opuesta sí es oposición real del usuario.
+        if (abs((int)_motor_targetADC - (int)currentADC) < POSITION_CRUISE_ERR) {
+            _motor_lastADCForDelta = currentADC;
+            return;
+        }
     }
 
     // Spike eléctrico: raw ADC salta más de ADC_SPIKE_GUARD desde posición filtrada

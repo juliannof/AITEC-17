@@ -110,6 +110,22 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 - **Fix:** denominador cambiado a `POSITION_CRUISE_ERR` — rampa lineal real de `PWM_MAX` (al entrar en la zona) a `PWM_MIN` (en el target) a lo largo de los 2000 counts, en vez de un salto casi inmediato a mínimo.
 - Hipótesis alternativa descartada en la sesión (a petición del usuario): que la calibración del fader no se estuviera aplicando en algún punto de la cadena S3→S2 — confirmado que `_pbToADC()` se aplica siempre, para todos los AutoMode, con `_calibratedFaderMin/Max` correctamente delimitados. No es un problema de calibración, es un problema de control de posición.
 
+**17. S2 — `hardware/Motor/Motor.cpp:353-370` (`_positionTick`) — rampa lineal → cuadrática (ajuste sobre el punto 16)**
+- **Síntoma reportado en banco tras el punto 16:** el fader empezó a rebotar sobre el target (overshoot → corrige → overshoot menor → asienta) en vez de pararse limpio — confirmado por el usuario que se amortigua solo, no es oscilación infinita.
+- **Causa:** la rampa lineal (punto 16) mantenía demasiado PWM hasta muy cerca del target, sin margen real de frenado en el tramo final.
+- **Fix:** rampa cuadrática — `targetPWM = _pwm_min + (_pwm_max-_pwm_min) × (absErr/POSITION_CRUISE_ERR)²`. Mismo `PWM_MAX` al entrar en la zona (sigue venciendo la fricción del crucero), pero decae mucho antes y más fuerte según se acerca al target — más margen de frenado real sin perder el empuje inicial.
+
+**18. S3 — `midi/MIDIProcessor.cpp:702-720` (`processPitchBend`) — refinado el fix del Bug B3 (punto 15): faders huérfanos al cerrar proyecto**
+- **Síntoma confirmado con MIDI Monitor en banco:** al cerrar un proyecto, Logic manda PitchBend=0 a los 8 canales — pero varios faders que NO estaban ya en 0 (de pruebas anteriores) se quedaban abandonados en su posición real, nunca llegaban a 0. Causa: el fix del punto 15 bloqueaba TODO reenvío durante `CONNECT_GRACE_MS`, incluso cuando el fader realmente necesitaba corregirse — y como Logic no repite el mismo valor, esa única oportunidad se perdía para siempre.
+- **Fix:** nueva condición `alreadyThere = |bendClamped - rs485.getChannel(id).faderPos| <= PITCHBEND_DEADBAND` (compara contra la posición real ya conocida del slave, no solo contra el último valor enviado). El grace period ahora solo bloquea cuando el fader **ya está** donde Logic pide — si difiere de verdad, se deja pasar aunque siga dentro del grace period.
+
+**19. S2 — `hardware/Motor/Motor.cpp:651-673` (`setADCDelta`) — causa raíz real de los faders huérfanos: falso touch por rebote al frenar**
+- **Hallazgo clave, con MIDI Monitor + logs RS485 correlacionados:** incluso con el fix del punto 18 aplicado, los faders seguían sin llegar limpio a destino tras cerrar proyecto — reportando `touchState=1` sostenido con `faderPos` congelado a medio camino (visible en `RS485.cpp:251` `[S3-RX] touchState=1 slave=X faderPos=...` repitiéndose sin que nadie tocara nada).
+- **Cadena causal completa:** `setADCDelta()` ya tenía un guard direccional (2026-05-24): si el ADC se mueve en dirección CONTRARIA al target durante `MOVING_TO_TARGET`, lo interpreta como oposición real del usuario → `_motor_manualTouchDetected=true`. En AUTO_OFF/READ (DAW absoluto) esto no detiene el motor (sigue persiguiendo el target real, `Motor.cpp:702-704`) pero **sí reporta `touchState=1` a Logic** vía SELECT MIDI en S3 (`main.cpp:93-99`). Logic, al ver ese touch, trata el fader como "el usuario lo sujeta" y dejar de forzarle posición mientras cree eso es comportamiento estándar de automatización MCU — el fader queda huérfano donde estaba, aunque el motor internamente sí completara el viaje.
+- Cualquier rebote/inversión momentánea de dirección al frenar cerca del target (el mismo overshoot ajustado en los puntos 16-17 — más probable cuanto más rápido llega el motor) dispara esta cadena. No es un bug introducido hoy — es una vulnerabilidad de la arquitectura "usuario es master" (mayo 2026) que los ajustes de velocidad de hoy hicieron más visible.
+- **Fix:** una inversión de dirección dentro de la zona de frenado (`< POSITION_CRUISE_ERR` del target) ya no se interpreta como touch — se asume asentamiento mecánico. Lejos del target, una dirección opuesta sigue detectándose como oposición real del usuario sin cambios (la garantía de seguridad "usuario es master" se mantiene intacta fuera de esa zona).
+- **RIESGO ALTO — pendiente validar en banco, en este orden:** (1) cerrar proyecto → faders deben llegar limpio a 0 sin quedarse huérfanos; (2) sujetar un fader de verdad mientras se mueve → debe seguir cediendo el control al instante, sin excepción — es la garantía que no se puede perder; (3) automatización normal con proyecto real.
+
 ---
 
 ### SESIÓN 2026-08-07 20:06 — S3: fix identificación MCU (handshake en bucle) + S2: fixes Motor.cpp + splash screen rediseñada
@@ -1396,6 +1412,7 @@ Todos los valores de brillo de pantalla hardcodeados (255/70/0/200) movidos a de
 ---
 
 ### Upload log S2
+- `2026-08-13 12:33` · Commit S2 · **FW 0.6.47** (sin upload)
 - `2026-08-02 13:23` · Flash S2 · **FW 0.5.46** · `lolin_s2_mini`
 - `2026-06-22 17:05` · Flash S2 · **FW 0.5.45** · `lolin_s2_mini`
 - `2026-06-22 16:59` · Flash S2 · **FW 0.5.44** · `lolin_s2_mini`

@@ -704,10 +704,19 @@ void processPitchBend(byte channel, int bendValue) {
             // ANTES de este guard) sí reenviaba su target, mientras el resto de
             // canales de la misma ráfaga inicial lo perdían por el return de
             // arriba — asimetría que causaba que un fader se moviera y otros no
-            // al abrir Logic sin proyecto. Ahora ninguno se mueve hasta pasado
-            // el grace period completo.
+            // al abrir Logic sin proyecto.
+            // Ajuste (2026-08-13, misma sesión): bloquear TODO reenvío durante el
+            // grace period tenía un efecto secundario grave — confirmado con MIDI
+            // Monitor sin proyecto abierto: si un fader NO estaba ya en 0 (sesión
+            // de prueba anterior, STALL a medio camino, etc.), el target=0 de esa
+            // única ráfaga se perdía y como Logic no lo repite, el fader quedaba
+            // huérfano en su posición física real para siempre. Ahora el grace
+            // period solo suprime cuando el fader YA está donde Logic quiere
+            // (según el último faderPos reportado por el S2) — si difiere de
+            // verdad, se deja pasar aunque siga dentro del grace period.
+            bool alreadyThere = abs(bendClamped - (int)rs485.getChannel(channel + 1).faderPos) <= PITCHBEND_DEADBAND;
             if (logicConnectionState == ConnectionState::CONNECTED &&
-                millis() - connectedSinceTime >= CONNECT_GRACE_MS &&
+                (millis() - connectedSinceTime >= CONNECT_GRACE_MS || !alreadyThere) &&
                 abs(bendClamped - (int)lastSentPitchBend[channel]) > PITCHBEND_DEADBAND) {
                 rs485.setFaderTarget(channel + 1, (uint16_t)bendClamped);
                 lastSentPitchBend[channel] = (int16_t)bendClamped;

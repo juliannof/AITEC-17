@@ -781,6 +781,16 @@ void setTargetFromS3(uint16_t adcTarget) {
 
 ## 7. HISTORIA DE FIXES
 
+### 2026-08-13 (noche) — Rampa cuadrática + causa raíz real: falso touch por rebote al frenar
+
+**Rampa cuadrática (`_positionTick()`):** la rampa lineal (sesión anterior, mismo día) mantenía demasiado PWM cerca del target — el fader empezó a rebotar sobre el target (overshoot→corrige→overshoot menor→asienta, confirmado por el usuario que se amortigua solo). Fix: `targetPWM = _pwm_min + (_pwm_max-_pwm_min) × (absErr/POSITION_CRUISE_ERR)²` — mismo empuje al entrar en la zona, decae mucho antes y más fuerte cerca del target.
+
+**Causa raíz real — `setADCDelta()`, falso touch por rebote (línea ~651):** el síntoma que se venía persiguiendo todo el día ("fader se queda a medio camino") no era overshoot puro — era que cualquier rebote/inversión de dirección al frenar (más probable cuanto más rápido llega el motor) dispara el guard direccional existente de `setADCDelta()` (2026-05-24), que interpreta dirección opuesta al target como "usuario oponiéndose". En AUTO_OFF/READ el motor no se detiene, pero **sí reporta `touchState=1` a Logic** — y Logic, al verlo, abandona el fader ahí donde estaba, aunque el motor internamente sí llegara al target real. Confirmado con MIDI Monitor + `[S3-RX] touchState=1 slave=X faderPos=...` sostenido sin que nadie tocara nada.
+
+**Fix:** una inversión de dirección dentro de la zona de frenado (`< POSITION_CRUISE_ERR` del target) ya no cuenta como touch — se asume asentamiento mecánico. Fuera de esa zona, la detección de oposición real del usuario no cambia — la garantía "usuario es master" se mantiene intacta.
+
+**RIESGO ALTO, pendiente validar en banco** (orden: cerrar proyecto sin huérfanos → sujetar fader real sigue cediendo control al instante → automatización normal). Detalle completo: `CHANGELOG.md` sesión 2026-08-13, puntos 17-19.
+
 ### 2026-08-13 (tarde) — Jitter en goToMin() + fix frenado fino _positionTick()
 
 **Jitter en goToMin() (`Motor.cpp`, `config.h`):** el jitter de boot (arriba) solo cubría la autocalibración — `goToMin()` (MASTER ABSOLUTO si `!_connected`) seguía disparando sincronizado en TODAS las S2 a la vez, tanto en encendido simultáneo del rig como en desconexión de Logic en caliente. Confirmado en banco: correlaciona con ráfagas de `[RS485] ID MISMATCH`/`CRC ERROR` en S3 (ver `RS485.md`). Fix: `GOTOMIN_JITTER_MAX_MS=2000`, calculado en `Motor::init()` (boot) y en `setConnected()` (flanco conectado→desconectado). Los dos disparadores de `goToMin()` (`IDLE`, `AT_TARGET`) respetan `_goToMinJitterUntil` — la garantía "ejecuta SIEMPRE" no se compromete, solo se retrasa hasta 2s por unidad.
