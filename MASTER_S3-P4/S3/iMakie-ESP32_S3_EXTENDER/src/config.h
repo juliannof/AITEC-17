@@ -16,7 +16,7 @@
     // Corregido a 0x15, igual que la plantilla correcta en P4_JC1060P470C/src/config.h.
     #define DEVICE_FAMILY       0x15
     #define VERSION_REPLY_CMD   0x15
-    #define NUM_SLAVES          8   // TESTING=6 | PRODUCCIÓN=8 — no cambiar aquí sin hardware real
+    #define NUM_SLAVES          8   // TESTING= 1 a 8 | PRODUCCIÓN=8 — no cambiar aquí sin hardware real
 
 #else
     #error "DEBE DEFINIR: DEVICE_P4_MASTER o DEVICE_S3_EXTENDER en platformio.ini build_flags"
@@ -42,7 +42,7 @@ extern volatile ConnectionState logicConnectionState;
 #define RS485_TX_PIN        15
 #define RS485_RX_PIN        16
 #define RS485_ENABLE_PIN     1
-#define RS485_BAUD          500000
+#define RS485_BAUD          500000   // probado 250000 (2026-08-13): mismos CRC/ID MISMATCH bajo carga de motor — no era problema de velocidad, revertido
 
 
 // --- Timing (µs) ---

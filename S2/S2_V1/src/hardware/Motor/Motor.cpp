@@ -605,11 +605,18 @@ void setADC(uint16_t v) {
     // calibración (la última lectura válida se toma como tope físico). (2026-07-20)
     if (v < MOTOR_ADC_MIN) v = MOTOR_ADC_MIN;
     if (v > MOTOR_ADC_MAX) v = MOTOR_ADC_MAX;
-    // Bypass spike guard durante: calibración, bajando a mínimo, O usuario moviendo fader (2026-05-19)
+    // Bypass spike guard durante: calibración, bajando a mínimo (2026-05-19)
+    // Quitado _motor_manualTouchDetected del bypass (2026-08-13): ese flag puede
+    // activarse por un rebote al frenar cerca del target (no solo por un toque
+    // real), y justo en ese instante — motor frenando fuerte, alta corriente —
+    // es cuando más probable es que haya ruido eléctrico real en la línea del
+    // ADC. Con el guard apagado ahí, una lectura corrupta se aceptaba sin
+    // filtrar y podía mandar el motor al tope físico persiguiendo una posición
+    // que no era real. Un toque real del usuario es movimiento físico gradual,
+    // no debería generar picos que activen el guard de todas formas.
     bool inCalibFlow = _isCalibrating() ||
                        _motor_state == MotorState::GOING_TO_MIN ||
-                       _motor_state == MotorState::WAITING_FOR_CALIB ||
-                       _motor_manualTouchDetected;  // setADCDelta() ya lo activó en el mismo loop
+                       _motor_state == MotorState::WAITING_FOR_CALIB;
     if (!inCalibFlow && _motor_adcPos > 0 &&
         abs((int)v - (int)_motor_adcPos) > ADC_SPIKE_GUARD) return;
     _motor_adcPos = v;

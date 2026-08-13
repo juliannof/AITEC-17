@@ -68,13 +68,13 @@ enum class ConnectionState {
 #define RS485_RX_PIN             9
 #define RS485_TX_PIN             8
 #define RS485_ENABLE_PIN        35   // GPIO35 — libre en S2FN4R2 (PSRAM QSPI interna, no usa GPIO matrix)
-#define RS485_BAUD          500000
+#define RS485_BAUD          500000   // probado 250000 (2026-08-13): mismos CRC/ID MISMATCH bajo carga de motor — no era problema de velocidad, revertido
 
 #define RS485_START_BYTE      0xAA
 #define RS485_RESP_BYTE       0xBB
 
 #define BOOT_INPUT_SETTLE_MS  2000   // ignora REC/encoder-click los primeros 2s tras boot — glitch eléctrico de arranque en pin global Button2 (2026-08-13, subido de 1000 — encoder no tiene hold propio, ver SAT_OPEN_HOLD_MS)
-#define SAT_OPEN_HOLD_MS       400   // REC en splash: hold mínimo real (Button2::wasPressedFor()) para abrir el SAT — filtra toques/rebotes breves, ya no dispara con glitches cortos (2026-08-13)
+#define SAT_OPEN_HOLD_MS       150   // REC en splash: hold mínimo real (Button2::wasPressedFor()) para abrir el SAT — filtra toques/rebotes breves, ya no dispara con glitches cortos (2026-08-13, bajado de 400 a petición del usuario)
 #define GOTOMIN_JITTER_MAX_MS 2000   // retardo aleatorio 0-2s antes de goToMin() tras desconexión — anti-cascada, evita que todas las S2 bajen a la vez (pico de corriente + ruido RS485 correlacionado, confirmado en banco 2026-08-13)
 
 
@@ -218,7 +218,7 @@ static uint16_t   _deltaWindowRef           = 0;   // ADC referencia inicio vent
 static bool       _motor_manualTouchDetected = false;
 static uint32_t   _motor_manualTouchStartTime = 0;
 static constexpr uint16_t MANUAL_TOUCH_THRESHOLD          = 150;  // umbral delta — motor activo (MOVING_TO_TARGET)
-static constexpr uint16_t MANUAL_TOUCH_AT_TARGET_THRESHOLD =  30;  // umbral en ventana 80ms — motor off (50→30, 2026-05-27)
+static constexpr uint16_t MANUAL_TOUCH_AT_TARGET_THRESHOLD =  70;  // umbral en ventana 80ms — motor off (50→30→70, 2026-08-13: 30 quedaba dentro del ruido ADC real observado en banco — ±28 cuentas — causando touchState=1 sostenido sin toque real, bloqueando la corrección del fader al conectar)
 static constexpr uint32_t MANUAL_TOUCH_DEBOUNCE_MS        = 600;  // ms sin movimiento antes de ceder control
 static constexpr uint32_t TOUCH_DELTA_WINDOW_MS           =  80;  // ventana acumulación delta — captura movimientos lentos (2026-05-27)
 // WHY: el crucero a PWM_MAX (POSITION_CRUISE_ERR) da al motor más inercia al llegar

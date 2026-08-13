@@ -174,18 +174,31 @@ void RS485Master::_sendPacket(uint8_t id) {
 
     // ─── Diagnóstico TX — qué se envía realmente a cada S2 (2026-08-07) ──────
     // WHAT: loguea faderTarget/flags/autoMode/connected del paquete saliente,
-    //       solo cuando faderTarget CAMBIA respecto al último enviado a ese id.
+    //       cuando faderTarget CAMBIA respecto al último enviado a ese id.
     // WHY:  para correlacionar, por slave, el valor exacto de faderTarget que
     //       el S3 transmite en el instante en que ese S2 completa calibración
     //       — descartar/confirmar si el S3 envía un target fuera de lo esperado.
     // ASSUMES: _sendPacket() se llama secuencialmente (una task), sin necesidad
-    //          de proteger _lastLoggedTarget con el mutex de _ch[].
+    //          de proteger _lastLoggedTarget/_lastLoggedAutoMode con el mutex de _ch[].
     static uint16_t _lastLoggedTarget[9] = {0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF,
                                              0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF};
     if (pkt.faderTarget != _lastLoggedTarget[id]) {
         _lastLoggedTarget[id] = pkt.faderTarget;
         log_i("[RS485-TX] slave=%d faderTarget=%u flags=0x%02X autoMode=%d connected=%d",
               id, pkt.faderTarget, pkt.flags, (int)::getAutoMode(pkt.flags), pkt.connected);
+    }
+
+    // Log independiente por cambio de AutoMode (2026-08-13) — el log de arriba
+    // solo disparaba con faderTarget, así que un cambio de modo sin mover el
+    // fader nunca se veía. Necesario para diagnosticar sin acceso al log
+    // serie del S2 (unidades ya montadas en el rig).
+    static int8_t _lastLoggedAutoMode[9] = {-1, -1, -1, -1, -1, -1, -1, -1, -1};
+    int8_t curAutoMode = (int8_t)::getAutoMode(pkt.flags);
+    if (curAutoMode != _lastLoggedAutoMode[id]) {
+        int8_t prevAutoMode = _lastLoggedAutoMode[id];
+        _lastLoggedAutoMode[id] = curAutoMode;
+        log_i("[RS485-TX] slave=%d AUTOMODE %d → %d flags=0x%02X",
+              id, prevAutoMode, curAutoMode, pkt.flags);
     }
 
     pkt.crc = rs485_crc8((const uint8_t*)&pkt, sizeof(MasterPacket) - 1);

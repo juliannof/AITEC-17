@@ -791,6 +791,14 @@ void setTargetFromS3(uint16_t adcTarget) {
 
 **RIESGO ALTO, pendiente validar en banco** (orden: cerrar proyecto sin huérfanos → sujetar fader real sigue cediendo control al instante → automatización normal). Detalle completo: `CHANGELOG.md` sesión 2026-08-13, puntos 17-19.
 
+### 2026-08-13 (noche, continuación) — spike guard de setADC() + hallazgo central: MANUAL_TOUCH_AT_TARGET_THRESHOLD dentro del ruido ADC real
+
+**`setADC()`:** el spike guard del ADC (`ADC_SPIKE_GUARD`) se desactivaba también por falso touch (`_motor_manualTouchDetected`), no solo por calibración/goToMin real — justo en el instante de más ruido eléctrico (motor frenando fuerte). Quitado ese caso del bypass.
+
+**Hallazgo central del día — `MANUAL_TOUCH_AT_TARGET_THRESHOLD`:** log decisivo (MIDI Monitor + serie S3) mostró `touchState=1` sostenido 3+ segundos en un slave recién conectado, con `faderPos` temblando ~28 cuentas sin que nadie tocara nada, **antes de que llegara el target real del proyecto**. El umbral estaba en `30` — dentro del ruido real medido en banco. Cada vez que el ruido lo superaba se refrescaba el timer de debounce (600ms), impidiendo soltar el touch nunca. Esto explica el patrón "todos los S2 se van mal al abrir Logic, solo se arreglan moviendo los faders en Logic" — es la sexta capa del mismo mecanismo tocada hoy. Fix: 30 → 70.
+
+**Pendiente de diseño, sesión dedicada (no hoy):** separar un PWM de arranque/kick (fricción estática) de un PWM de posicionamiento fino (fricción dinámica) — el `pwmMin=125` real usado en banco (más alto que el default de fábrica) limita cuánto puede bajar el "suelo" de velocidad en el frenado, pese a las dos rampas ya ajustadas. Brief completo: `CHANGELOG.md` sesión 2026-08-13, al final (BRIEF DE DISEÑO PENDIENTE).
+
 ### 2026-08-13 (tarde) — Jitter en goToMin() + fix frenado fino _positionTick()
 
 **Jitter en goToMin() (`Motor.cpp`, `config.h`):** el jitter de boot (arriba) solo cubría la autocalibración — `goToMin()` (MASTER ABSOLUTO si `!_connected`) seguía disparando sincronizado en TODAS las S2 a la vez, tanto en encendido simultáneo del rig como en desconexión de Logic en caliente. Confirmado en banco: correlaciona con ráfagas de `[RS485] ID MISMATCH`/`CRC ERROR` en S3 (ver `RS485.md`). Fix: `GOTOMIN_JITTER_MAX_MS=2000`, calculado en `Motor::init()` (boot) y en `setConnected()` (flanco conectado→desconectado). Los dos disparadores de `goToMin()` (`IDLE`, `AT_TARGET`) respetan `_goToMinJitterUntil` — la garantía "ejecuta SIEMPRE" no se compromete, solo se retrasa hasta 2s por unidad.

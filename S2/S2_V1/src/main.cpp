@@ -57,6 +57,12 @@ static void _satConfigSaved(const SatConfig& cfg) { rs485.begin(cfg.trackId); }
 static void _satWiFiOta() {
     satMenu->close();
     setScreenBrightness(0);
+    // LEDs apagados explícitamente (2026-08-13) — antes solo se apagaban si se
+    // llegaba aquí a través del SAT (SatMenu::open() ya los apaga). El clic de
+    // encoder en splash llama esta función directo, sin pasar por el SAT, y
+    // dejaba los LEDs en su patrón azul de espera hasta reiniciar en OTA.
+    clearAllNeopixels();
+    showNeopixels();
     Preferences prefs;
     prefs.begin("ptxx", false);
     prefs.putBool("otaMode", true);

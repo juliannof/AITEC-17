@@ -4,6 +4,7 @@
 #include "hardware/encoder/Encoder.h"
 #include "../hardware/Hardware.h"
 #include "../hardware/Motor/Motor.h"
+#include "../hardware/Neopixels/Neopixel.h"
 #include <Preferences.h>
 #include "SpriteUtils.h"           // en Display.cpp
 #include "../config.h"
@@ -193,6 +194,7 @@ void updateDisplay() {
     // atenuado, restaura brillo al instante (sin fundido de entrada).
     static unsigned long _splashLastActivity = millis();
     static bool          _splashDimmed       = false;
+    static bool          _splashLedsOff      = false;  // LEDs apagados junto con la pantalla (2026-08-13)
 
     // Detectar transición CONNECTED → DISCONNECTED
     static ConnectionState lastState = ConnectionState::DISCONNECTED;
@@ -202,6 +204,7 @@ void updateDisplay() {
         drawOfflineScreen();
         _splashLastActivity = millis();  // splash recién entrada: reiniciar contador
         _splashDimmed       = false;
+        _splashLedsOff      = false;
     }
     lastState = logicConnectionState;
 
@@ -220,6 +223,7 @@ void updateDisplay() {
             lastCalibState       = calibNow;
             _splashLastActivity  = millis();
             _splashDimmed        = false;
+            _splashLedsOff       = false;
             return;
         }
         if (calibNow != lastCalibState) {
@@ -241,6 +245,10 @@ void updateDisplay() {
                 _splashDimmed = false;
                 setScreenBrightness(BRIGHTNESS_SPLASH);  // restauro instantáneo
             }
+            if (_splashLedsOff) {
+                _splashLedsOff = false;
+                forceNeopixelRefresh();  // repinta el patrón azul en el próximo tick (2026-08-13)
+            }
         } else {
             unsigned long idle = millis() - _splashLastActivity;
             if (idle >= SPLASH_DIM_TIMEOUT_MS) {
@@ -250,6 +258,13 @@ void updateDisplay() {
                     : (uint8_t)((uint32_t)BRIGHTNESS_SPLASH * (SPLASH_DIM_FADE_MS - fadeElapsed) / SPLASH_DIM_FADE_MS);
                 if (target != screenBrightness) setScreenBrightness(target);
                 _splashDimmed = true;
+                // LEDs se apagan junto con la pantalla, en el mismo instante en
+                // que llega a brillo 0 (no durante el fundido). (2026-08-13)
+                if (target == 0 && !_splashLedsOff) {
+                    _splashLedsOff = true;
+                    clearAllNeopixels();
+                    showNeopixels();
+                }
             }
         }
         return;
