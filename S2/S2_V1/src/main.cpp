@@ -72,6 +72,7 @@ static void _satLedsOff() {
 
 
 }
+static void _satLedsRestore() { forceNeopixelRefresh(); }  // fuerza repintado tras cerrar SAT (2026-08-13)
 static void _satSuspendSprites() {
     header.deleteSprite();
     mainArea.deleteSprite();
@@ -224,6 +225,7 @@ void setup() {
     satMenu->onWiFiOta       (_satWiFiOta);
     satMenu->onLedsTest      (_satLedsTest);
     satMenu->onLedsOff       (_satLedsOff);
+    satMenu->onLedsRestore   (_satLedsRestore);
     satMenu->onSuspendSprites(_satSuspendSprites);
     satMenu->onRestoreSprites(_satRestoreSprites);
 
@@ -231,6 +233,7 @@ void setup() {
     log_i("SatMenu OK");
 
     ButtonManager::begin(&tft, satMenu);
+    ButtonManager::setOtaCallback(_satWiFiOta);  // clic encoder sin Logic → activar OTA directo (2026-08-13)
     log_i("ButtonManager OK");
 
     if (psramFound()) {
@@ -288,14 +291,17 @@ void loop() {
     // FaderADC no expone hasNewReading() públicamente — se usa Motor::getRawADC() > 0
     // como proxy de "ya hay al menos una lectura real aplicada" (setADC() satura a
     // MOTOR_ADC_MIN como mínimo una vez se llama, nunca deja el 0 inicial).
-    static bool  _bootCalibDone   = false;
-    static uint8_t _bootAdcSamples = 0;
+    static bool     _bootCalibDone    = false;
+    static uint8_t  _bootAdcSamples   = 0;
+    // Jitter anti-cascada: cada S2 arranca con un retardo aleatorio distinto para
+    // no disparar todos los motores a la vez al energizar el rig. (2026-08-13 09:36)
+    static uint32_t _bootCalibDelayMs = random(CALIB_BOOT_JITTER_MAX_MS);
     if (!_bootCalibDone) {
         if (Motor::getRawADC() > 0) _bootAdcSamples++;
-        if (_bootAdcSamples >= 10) {
+        if (_bootAdcSamples >= 10 && millis() - g_bootTime >= _bootCalibDelayMs) {
             Motor::requestCalibration();
             _bootCalibDone = true;
-            log_i("[BOOT] autocalibración disparada (adc=%d)", Motor::getRawADC());
+            log_i("[BOOT] autocalibración disparada (adc=%d, jitter=%lums)", Motor::getRawADC(), _bootCalibDelayMs);
         }
     }
 

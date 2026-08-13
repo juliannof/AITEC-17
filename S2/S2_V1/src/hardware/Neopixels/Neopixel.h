@@ -20,3 +20,4 @@ extern bool neoWaitingHandshake;
 
 void handleButtonLedState(ButtonId id);
 void updateAllNeopixels();
+void forceNeopixelRefresh();  // invalida la caché de updateAllNeopixels() (2026-08-13)

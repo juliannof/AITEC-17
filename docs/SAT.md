@@ -482,5 +482,6 @@ Display normal
 
 ## Últimas Actualizaciones
 
+- **(2026-08-13)** SAT ahora solo accesible con Logic desconectado (splash): clic de encoder pasa a activar OTA directo (antes abría el SAT). Eliminado por completo el mecanismo de pulsación larga de REC (barra de progreso, `SAT_HOLD_MS`/`SAT_BAR_*`) — REC ahora abre el SAT con clic simple en splash, y es solo REC normal si Logic está conectado (sin acceso a SAT). Quitado autostart de calibración al entrar a MOTOR_CALIB. LEDs (azul) y pantalla (splash) ahora se restauran correctamente al cerrar el SAT estando desconectado. Detalle: `CHANGELOG.md` sesión 2026-08-13.
 - **(2026-05-16)** Creado SAT.md como documento exhaustivo, consolidado de CLAUDE.md y MOTOR.md
 - **(2026-05-20)** Sección 7 expandida — flujo OTA completo, ElegantOTA URL, credenciales NVS, provisioning sketch, pines al aire fix, portal WiFiManager, troubleshooting OTA

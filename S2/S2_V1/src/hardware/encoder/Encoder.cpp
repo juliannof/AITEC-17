@@ -21,7 +21,7 @@ void IRAM_ATTR Encoder::_isr() {
     uint8_t curr = ((reg >> ENCODER_PIN_A) & 1) << 1
                  | ((reg >> ENCODER_PIN_B) & 1);
     int8_t  step = ENC_TABLE[(_state << 2) | curr];
-    _counter    += step;
+    _counter    -= step;  // signo invertido: derecha=+ / izquierda=- (2026-08-13 09:08)
     _state       = curr;
 }
 

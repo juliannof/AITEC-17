@@ -66,12 +66,30 @@ void updateAllNeopixels() {
     lastMute = muteStates;
     lastSelect = selectStates;
 
-    // Actualizar colores
-    handleButtonLedState(ButtonId::REC);
-    handleButtonLedState(ButtonId::SOLO);
-    handleButtonLedState(ButtonId::MUTE);
-    handleButtonLedState(ButtonId::SELECT);
+    if (neoWaitingHandshake) {
+        // Sin conexión (boot, desconexión, timeout, o salir del SAT estando
+        // desconectado): todos los LEDs vuelven al azul tenue de espera, igual
+        // que initNeopixels(). Antes solo se pintaba una vez, en el boot — nunca
+        // se restauraba en desconexiones posteriores. (2026-08-13)
+        for (int i = 0; i < NEOPIXEL_COUNT; i++) {
+            neopixels.setPixelColor(i, 0, 0, NEOPIXEL_DIM_BRIGHTNESS);
+        }
+    } else {
+        // Conectado: colores por estado de botón
+        handleButtonLedState(ButtonId::REC);
+        handleButtonLedState(ButtonId::SOLO);
+        handleButtonLedState(ButtonId::MUTE);
+        handleButtonLedState(ButtonId::SELECT);
+    }
     showNeopixels();
+}
+
+void forceNeopixelRefresh() {
+    // Invalida la caché de cambios — la próxima llamada a updateAllNeopixels()
+    // repintará aunque neoWaitingHandshake no haya cambiado. Necesario porque
+    // SatMenu::open() limpia los LEDs directamente (clearAllNeopixels()) sin
+    // pasar por esta caché. (2026-08-13)
+    lastNeoWaiting = !neoWaitingHandshake;
 }
 
 void handleButtonLedState(ButtonId id) {

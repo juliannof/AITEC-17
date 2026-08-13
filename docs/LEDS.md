@@ -339,4 +339,5 @@ void debugAllLeds() {
 
 ## Últimas Actualizaciones
 
+- **(2026-08-13)** Fix: el patrón "todo azul tenue" (`initNeopixels()`) solo se pintaba una vez, en el boot — `updateAllNeopixels()` no lo repintaba nunca en desconexiones posteriores pese a que `neoWaitingHandshake=true` lo indicaba. Ahora `updateAllNeopixels()` repinta todos los píxeles a azul cuando `neoWaitingHandshake` está activo. Nueva `forceNeopixelRefresh()` para invalidar la caché de cambios (necesaria tras `SatMenu` limpiar los LEDs directamente). Detalle: `CHANGELOG.md` sesión 2026-08-13.
 - **(2026-05-16)** Creado LEDS.md como documento exhaustivo, trasladado contenido de CLAUDE.md

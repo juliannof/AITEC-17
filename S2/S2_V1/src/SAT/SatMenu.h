@@ -52,6 +52,7 @@ public:
     void onRS485Off       (CbVoid     cb) { _cbRS485Off   = cb; }
     void onRS485On        (CbVoid     cb) { _cbRS485On    = cb; }
     void onLedsOff        (CbVoid     cb) { _cbLedsOff    = cb; }
+    void onLedsRestore    (CbVoid     cb) { _cbLedsRestore = cb; }
     void onReboot         (CbVoid     cb) { _cbReboot     = cb; }
     void onWiFiOta        (CbVoid     cb) { _cbWiFiOta    = cb; }
     void onConfigSaved    (CbConfig   cb) { _cbSaved      = cb; }
@@ -107,7 +108,7 @@ private:
     unsigned long _debT = 0;
     Preferences   _prefs;
 
-    CbVoid     _cbMotorOff, _cbMotorOn, _cbRS485Off, _cbRS485On, _cbReboot, _cbLedsOff;
+    CbVoid     _cbMotorOff, _cbMotorOn, _cbRS485Off, _cbRS485On, _cbReboot, _cbLedsOff, _cbLedsRestore;
     CbVoid     _cbWiFiOta, _cbSuspend, _cbRestore;
     CbMotor    _cbMotorDrv;
     CbConfig   _cbSaved;
@@ -192,7 +193,6 @@ private:
     unsigned long _stopT      = 0;
     bool          _reported   = false;
 
-    bool          _calibStarted = false;   // Control autostart calibración (2026-05-12 00:35)
     uint32_t      _calibRecalib_ms = 0;    // Timestamp para mostrar "(recalibrado)" 600ms (2026-05-12 18:36)
 
     static const Item _mainItems[];

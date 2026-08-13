@@ -30,6 +30,55 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 ---
 
+### SESIÓN 2026-08-13 10:19 — S2: fix signo/doble-conteo encoder, calibración con jitter+retry, LEDs azul/splash tras SAT y desconexión
+
+**Origen:** serie de ajustes solicitados por el usuario sobre el comportamiento del encoder en el SAT (dirección invertida, doble movimiento por clic, navegación errática), seguidos de mejoras a la calibración (jitter anti-cascada, reintento automático) y un fix de UX en LEDs/pantalla al salir del SAT o desconectar de Logic.
+
+**MCU afectadas:** S2 ✅ (Encoder, SatMenu, RS485Handler, Motor, ButtonManager, Neopixel, Display, config, main) · S3 ❌ · P4 ❌ — todos los cambios locales al S2, sin tocar protocolo RS485 salvo el valor (no el formato) de `encoderDelta`.
+
+---
+
+**1. S2 — `hardware/encoder/Encoder.cpp:24` — signo del encoder invertido**
+- `_counter += step` → `_counter -= step`. La tabla Gray code (`ENC_TABLE`) tenía el signo contrario al diseño documentado en `docs/ENCODER.md` §1.3 (derecha=+1). Confirmado decodificando la tabla a mano para la secuencia física real.
+- Efecto: se propaga a SAT, VPot (`main.cpp`) y `encoderDelta` (RS485 → S3/P4 → Logic) — un solo punto de cambio, coherente con "Encoder.cpp única fuente de verdad".
+
+**2. S2 — `SAT/SatMenu.cpp` `_readBtn()` — navegación errática ("a lo loco") y doble movimiento por clic**
+- **Bug 1 (runaway):** `Encoder::reset()` nunca se llamaba mientras el SAT estaba abierto (el bloque que lo hace en `main.cpp` se salta con el SAT abierto) → el mismo delta se reprocesaba en cada tick indefinidamente. Fix: `Encoder::reset()` tras consumir el delta en ambas ramas (DOWN/UP).
+- **Bug 2 (doble paso):** `pendingEvents = delta/4` contaba el total de detents en vez de los que quedan tras el evento ya devuelto en la misma llamada → 1 clic físico generaba 2 eventos de menú. Fix: `pendingEvents = max(1, delta/4) - 1`.
+
+**3. S2 — `SAT/SatMenu.cpp`/`.h` — quitado autostart de calibración al entrar a MOTOR_CALIB**
+- Eliminado el bloque que disparaba `Motor::startCalib()` automáticamente al entrar a esa pantalla (`_calibStarted`, guard eliminado del header). La calibración manual desde el SAT sigue disponible con REC.
+- Efecto colateral conocido, no corregido: el mensaje "(recalibrado)" (`_calibRecalib_ms`) ya no se dispara nunca (solo se seteaba en el bloque eliminado, y el trigger REC en `main.cpp` no lo tocaba tampoco).
+
+**4. S2 — `RS485/RS485Handler.cpp:343` — `encoderDelta` enviado ×4 de más**
+- `Encoder::getCount()` → `Encoder::getCount() / 4`. El delta crudo (sin convertir a "muescas") se enviaba tal cual a S3, que lo usa como magnitud directa del CC relativo Mackie (`iMakie-ESP32_S3_EXTENDER/main.cpp:144-153`) — 1 clic físico movía el VPot en Logic ~4 posiciones en vez de 1. P4 no estaba afectado (solo usa el signo, no la magnitud).
+
+**5. S2 — `main.cpp` (autocalib boot) + `config.h` — jitter anti-cascada**
+- Nueva constante `CALIB_BOOT_JITTER_MAX_MS=2000`. Cada S2 espera un retardo aleatorio 0-2s (`random()`, hardware RNG del ESP32) antes de disparar `requestCalibration()` en boot, para no arrancar todos los motores a la vez al energizar el rig completo.
+
+**6. S2 — `hardware/Motor/Motor.cpp:86-98` — reintento automático en timeout de calibración**
+- Antes: `CALIB_TIMEOUT` (6s sin terminar) iba directo a `CalibPhase::ERROR` sin reintentar — único camino de fallo sin recuperación automática (el fallo por "span corto" ya reintentaba hasta `CALIB_MAX_RETRIES=3`).
+- Ahora: el timeout reutiliza el mismo contador/mecanismo (`_motor_calibRetries`, `goToMin()` + `_pendingCalib=true` → vuelve a `startCalib()`). Solo cae en `ERROR` permanente tras agotar los 3 intentos combinados (ambos tipos de fallo comparten el contador).
+- Pendiente conocido, no corregido: `_motor_calibRetries` solo se resetea a 0 en éxito — un reintento manual tras `ERROR` (SAT REC, o `FLAG_CALIB` vía MIDI) sin power-cycle no obtiene 3 intentos frescos si el contador ya estaba agotado.
+- Auditoría de PWM de calibración realizada a petición del usuario: confirmado que `_hwUp()`/`_hwDown()` en calibración usan siempre `_pwm_min`/`_pwm_max` (cargados de NVS vía `Motor::initPWM()`, con fallback a `config.h` solo si NVS está vacío) — no hay PWM hardcodeado en ningún punto de la máquina de calibración.
+
+**7. S2 — `hardware/button/ButtonManager.h`/`.cpp` + `main.cpp` — clic de encoder sin Logic conectado activa OTA en vez de abrir el SAT**
+- Nuevo callback `setOtaCallback()` (patrón `std::function<void()>`, igual que los callbacks de `SatMenu`), registrado en `main.cpp` apuntando a la función ya existente `_satWiFiOta()` (guarda `otaMode=true` en NVS + `ESP.restart()`) — sin duplicar lógica.
+- `ButtonId::ENCODER_SELECT` con `logicConnectionState != CONNECTED`: `_sat->open()` → `_cbOta()`. Con Logic conectado, sin cambios (clic normal de VPot). El SAT ya no se abre por clic simple del encoder.
+- **Ampliado (mismo día) — REC rediseñado, mismo patrón que el encoder:** eliminado por completo el mecanismo de pulsación larga (`_holding`/`_holdStart`/`_fired`/`_drawBar`/`_clearBar`, barra de progreso "Mantener para SAT...", constantes `SAT_HOLD_MS`/`SAT_BAR_*`/`SAT_LABEL_Y` en `config.h` — todas eliminadas por quedar sin uso). `ButtonManager.cpp::update()` queda vacío (ya no hay nada que trackear tick a tick).
+  - Ahora `_onRecReleased()` decide en el clic (release), sin temporizador: con Logic desconectado (splash) → `_sat->open()` directo, sin esperar 3s. Con Logic conectado → `FLAG_REC` normal (debounce 300ms), sin ninguna vía a SAT.
+  - **REC ya no tiene función de "mantener" en absoluto — es solo REC** (conectado) o solo "abrir SAT" (desconectado), igual que el encoder. **El SAT ahora solo es accesible con Logic desconectado (splash), por clic simple de encoder o de REC.**
+
+**8. S2 — `hardware/Neopixels/Neopixel.cpp`/`.h` + `SAT/SatMenu.cpp`/`.h` + `main.cpp` + `display/Display.cpp` — LEDs azul y splash no se restauraban tras desconexión de Logic ni al salir del SAT**
+- **Root cause LEDs:** el patrón "todos los LEDs azul tenue" (`initNeopixels()`) solo se pintaba una vez, en el boot. Los comentarios en `RS485Handler.cpp` (`onMasterData`, `checkTimeout`) decían explícitamente "Cambio a azul" al desconectar, pero `updateAllNeopixels()` solo gestionaba los 4 LEDs de botones (REC/SOLO/MUTE/SELECT) — nunca repintaba el resto. Fix: `updateAllNeopixels()` ahora repinta todos los píxeles a azul tenue cuando `neoWaitingHandshake==true`, y solo aplica los colores de botón cuando es `false`.
+- **Caso SAT:** `_cbLedsOff()` limpiaba los LEDs directamente (bypass de la caché de cambios de `updateAllNeopixels()`) — al cerrar el SAT sin que `neoWaitingHandshake` hubiera cambiado, la caché no detectaba diferencia y no repintaba nada. Fix: nueva `forceNeopixelRefresh()` invalida la caché; nuevo callback `SatMenu::onLedsRestore()` la dispara en `close()`.
+- **Root cause pantalla:** `updateDisplay()` solo redibujaba el splash en la rama "desconectado" ante un flanco CONNECTED→DISCONNECTED — si el SAT se cerraba estando ya desconectado (sin flanco), la pantalla quedaba en negro (`SatMenu::close()` solo hace `fillScreen(C_BLACK)`). Fix: la rama desconectada de `updateDisplay()` ahora también respeta `needsTOTALRedraw` (ya puesto a `true` por `_cbRestore` en `close()`) y llama `drawOfflineScreen()`.
+
+**9. Diagnóstico de hardware (sin cambio de código) — unidad con motor que sube pero nunca baja**
+- Analizado a petición del usuario: patrón "sube perfecto, nunca baja" en una unidad aislada es consistente con un fallo del lado `IN2`/`OUT2` del DRV8833 (mitad del puente H dañada) — el motor DC de una sola bobina no tiene "canal de bajar" separado, así que un fallo así explica el síntoma exacto sin involucrar al firmware (mismo firmware en el resto de unidades, que funcionan bien). Diagnóstico no invasivo sugerido: medir con multímetro el pin `MOTOR_IN2` (config.h) durante SAT > Motor Test (SOLO=baja) para confirmar si el GPIO conmuta y el DRV8833 no responde, o si el fallo está antes (GPIO/pista). Por directiva del proyecto (hardware locked): no se propone ni se aplica ninguna corrección de cableado — decisión de reparación de hardware del usuario.
+
+---
+
 ### SESIÓN 2026-08-07 20:06 — S3: fix identificación MCU (handshake en bucle) + S2: fixes Motor.cpp + splash screen rediseñada
 
 **Origen:** continuación de la investigación "S2 fader sube a máximo y no se detiene" (filas 🔴 CRÍTICA y 🔴 Alta de Pendientes, sesiones 2026-07-24 y 2026-08-02). Sesión larga con MIDI Monitor + logs de serie en vivo del S3, contrastados byte a byte. Se confirmó con evidencia repetida que el S3 transmite exactamente lo que Logic envía (sin corrupción, sin desplazamiento de dominio) — el foco se desplazó a dos bugs reales encontrados en el camino, uno en S2 (target inalcanzable) y uno en S3 (identificación MCU), más mejoras de diagnóstico visual en la pantalla S2.

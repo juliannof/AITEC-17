@@ -339,4 +339,5 @@ Serial.printf("[DEBUG] Encoder count: %d, level: %d\n",
 
 ## Últimas Actualizaciones
 
+- **(2026-08-13)** Fix signo invertido en `ENC_TABLE`/`_counter` (`Encoder.cpp:24`) — derecha ahora es +1, coincide con §1.3. Fix runaway y doble-conteo en `SatMenu::_readBtn()`. Fix `encoderDelta` enviado ×4 de más en `RS485Handler.cpp:343`. Detalle: `CHANGELOG.md` sesión 2026-08-13.
 - **(2026-05-16)** Creado ENCODER.md como documento exhaustivo, trasladado contenido de CLAUDE.md

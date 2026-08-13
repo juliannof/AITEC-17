@@ -730,6 +730,7 @@ Este log indica que la protección global disparó (MOVING_TO_TARGET pegó contr
 | Fader sube y se queda arriba con fuerza | ADC tope físico < 26000 — KICK_UP stuck | Fix aplicado 2026-05-27: stuck timeout 1000ms → pasa a GOING_UP. Log: `KICK_UP stuck pos=XXXX` |
 | Reinicios infinitos | S3 envía FLAG_CALIB continuamente | Verificar cooldown guard (2000ms) |
 | GOING_TO_MIN no transiciona | `_pendingCalib` no seteado | Verificar `requestCalibration()` setea `_pendingCalib=true` |
+| **Sube perfecto, nunca baja (una unidad aislada, mismo firmware que el resto)** | **DRV8833 dañado — mitad `IN2`/`OUT2` del puente H** (motor DC de una bobina, sin canal físico separado por sentido) | SAT > Motor Test (SOLO=baja) para descartar lógica; si tampoco responde ahí, medir con multímetro el pin `MOTOR_IN2` durante el test — si el GPIO conmuta y el DRV8833 no reacciona, es el chip. No aplica fix de software (hardware locked) — decisión de reparación de hardware. Ver `CHANGELOG.md` sesión 2026-08-13. |
 
 ---
 
@@ -779,6 +780,18 @@ void setTargetFromS3(uint16_t adcTarget) {
 ---
 
 ## 7. HISTORIA DE FIXES
+
+### 2026-08-13 — Jitter anti-cascada en boot + reintento automático en timeout de calibración
+
+**Jitter (`main.cpp`, `config.h`):** todos los S2 arrancaban y disparaban `requestCalibration()` casi al mismo instante al energizar el rig (todos llegan a "10 lecturas ADC válidas" casi a la vez) → todos los motores subían juntos. Fix: nueva constante `CALIB_BOOT_JITTER_MAX_MS=2000`, cada S2 espera un retardo aleatorio 0-2s (hardware RNG del ESP32) antes de disparar la autocalibración de boot.
+
+**Retry en timeout (`Motor.cpp:86-98`):** el fallo por `CALIB_TIMEOUT` (6s sin terminar) iba directo a `CalibPhase::ERROR` sin reintentar — a diferencia del fallo por "span corto", que ya reintentaba hasta `CALIB_MAX_RETRIES=3`. Fix: el timeout ahora reutiliza el mismo contador `_motor_calibRetries` y el mismo camino de reintento (`goToMin()` + `_pendingCalib=true` → vuelve a `startCalib()`). Solo cae en `ERROR` permanente tras agotar los 3 intentos combinados.
+
+**Pendiente conocido:** `_motor_calibRetries` solo se resetea a 0 en éxito — un reintento manual tras `ERROR` (SAT REC o `FLAG_CALIB` por MIDI) sin power-cycle no obtiene 3 intentos frescos si el contador ya estaba agotado de un ciclo anterior.
+
+**Auditoría PWM:** confirmado que toda la máquina de calibración (`_hwUp`/`_hwDown` en `KICK_UP`/`GOING_UP`/`GOING_DOWN`/etc.) usa siempre `_pwm_min`/`_pwm_max`, cargados de NVS en `Motor::initPWM()` — sin PWM hardcodeado. El fallback a `config.h` (100-160) solo aplica si NVS está vacío/inválido.
+
+Detalle completo: `CHANGELOG.md` sesión 2026-08-13.
 
 ### 2026-05-27 — KICK_UP Stuck Detection (variación ADC entre unidades)
 

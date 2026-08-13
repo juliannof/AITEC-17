@@ -340,7 +340,7 @@ SlavePacket buildResponse(FaderADC& faderADC, SatMenu& satMenu) {
     resp.buttons    = ButtonManager::getButtonFlags();
 
     // SELECT gestionado en S3 desde touchState — no enviar FLAG_SELECT desde S2 (2026-05-27)
-    resp.encoderDelta  = (int8_t)constrain(Encoder::getCount(), -127, 127);
+    resp.encoderDelta  = (int8_t)constrain(Encoder::getCount() / 4, -127, 127);  // crudo→muescas: 1 clic = 1 unidad (2026-08-13 09:08)
     resp.encoderButton = ButtonManager::getEncoderButton();
 
     Motor::CalibState cs = Motor::getCalibState();

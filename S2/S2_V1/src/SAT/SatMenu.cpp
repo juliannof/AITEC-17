@@ -98,9 +98,10 @@ void SatMenu::close() {
     // Motor controlado SOLO por Motor.cpp, NO por SAT (2026-05-10 20:30)
     _spr.deleteSprite();
 
-    if (_cbMotorOn)  _cbMotorOn();
-    if (_cbRS485On)  _cbRS485On();
-    if (_cbRestore)  _cbRestore();
+    if (_cbMotorOn)     _cbMotorOn();
+    if (_cbRS485On)     _cbRS485On();
+    if (_cbRestore)     _cbRestore();
+    if (_cbLedsRestore) _cbLedsRestore();
     _tft->fillScreen(C_BLACK);
 }
 
@@ -178,13 +179,19 @@ SatMenu::Btn SatMenu::_readBtn() {
         // Leer nuevo delta
         int delta = Encoder::getCount();
         if (delta > 0) {
-            pendingEvents = delta / 4;  // aceleración: cada 4 unidades = evento extra
+            int detents = delta / 4;
+            if (detents < 1) detents = 1;  // giro parcial (transición incompleta) cuenta como 1 paso
+            pendingEvents = detents - 1;   // el evento de este detent ya se devuelve abajo — resto queda pendiente
             encoderDir = 1;
+            Encoder::reset();  // consumir delta — evita reprocesarlo en el próximo tick (2026-08-13 09:08)
             return Btn::DOWN;
         }
         if (delta < 0) {
-            pendingEvents = (-delta) / 4;
+            int detents = (-delta) / 4;
+            if (detents < 1) detents = 1;
+            pendingEvents = detents - 1;
             encoderDir = -1;
+            Encoder::reset();  // consumir delta — evita reprocesarlo en el próximo tick (2026-08-13 09:08)
             return Btn::UP;
         }
 
@@ -935,15 +942,7 @@ void SatMenu::showStatus(const char* msg) {
 void SatMenu::_tickMotorCalib(Btn b) {
     int W = _spr.width(), H = _spr.height();
 
-    if (b == Btn::BACK) { _calibStarted = false; _goto(Scr::MOTOR); return; }
-
-    // Autostart calibración al entrar (2026-05-12 19:05)
-    if (!_calibStarted) {
-        _calibStarted = true;
-        Motor::startCalib();
-        _calibRecalib_ms = millis();
-        log_i("[SAT] Calibración iniciada al entrar");
-    }
+    if (b == Btn::BACK) { _goto(Scr::MOTOR); return; }
 
     // Replicar loop: actualizar FaderADC y Motor cada frame (2026-05-12 20:55)
     faderADC.update();

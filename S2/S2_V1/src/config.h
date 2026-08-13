@@ -73,15 +73,6 @@ enum class ConnectionState {
 #define RS485_START_BYTE      0xAA
 #define RS485_RESP_BYTE       0xBB
 
-// ─── ButtonManager — SAT long press ──────────────────────────
-#define SAT_HOLD_MS      3000   // tiempo para abrir SAT
-#define SAT_BAR_SHOW_MS  2500   // tiempo antes de mostrar barra
-#define SAT_BAR_W        180
-#define SAT_BAR_H          8
-#define SAT_BAR_CX       120
-#define SAT_BAR_CY       140
-#define SAT_LABEL_Y      (SAT_BAR_CY - 16)
-
 
 // --- SENSOR TÁCTIL DEL FADER ---
 #define FADER_TOUCH_PIN     T1 // Pin táctil para el fader (GPIO1 en ESP32-S2)
@@ -119,6 +110,7 @@ static constexpr uint16_t MOTOR_ADC_MAX            = 27000;   // máximo esperad
 #define CALIB_MAX_RETRIES     3       // reintentos locales antes de CalibPhase::ERROR
 #define FADER_EMA_ALPHA       0.15f   // filtro posición fader en S2 (bajado desde S3)
 #define CALIB_DATA_TIMEOUT_MS 200     // watchdog: sin muestra ADS nueva > esto en calib → ERROR
+#define CALIB_BOOT_JITTER_MAX_MS 2000 // retardo aleatorio 0-2s antes de autocalibrar en boot — anti-cascada (2026-08-13 09:36)
 
 // Motor — control de posición (constantes)
 static constexpr uint8_t  PWM_MIN                  = 100;

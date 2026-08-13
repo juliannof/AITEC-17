@@ -432,5 +432,6 @@ for (uint8_t pin : safePins) {
 
 ## Últimas Actualizaciones
 
+- **(2026-08-13)** Nueva vía de activación: clic del encoder sin Logic conectado (splash) activa OTA directo (`ButtonManager::setOtaCallback` → `_satWiFiOta()`), sin pasar por el menú SAT. El ítem "Activar OTA" del SAT sigue funcionando igual, misma función. Detalle: `CHANGELOG.md` sesión 2026-08-13.
 - **(2026-05-16)** Creado WIFI.md como documento exhaustivo, trasladado contenido de CLAUDE.md
 - **(2026-05-26)** Renombrado WIFI.md → WIFI-OTA.md (nombre más descriptivo)

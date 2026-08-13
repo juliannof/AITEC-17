@@ -203,6 +203,14 @@ void updateDisplay() {
     if (logicConnectionState != ConnectionState::CONNECTED) {
         static bool lastCalibState = false;
         bool calibNow = Motor::isCalibrated();
+        // Redraw forzado (p.ej. al cerrar el SAT ya desconectado, sin flanco
+        // CONNECTED→DISCONNECTED que lo dispare arriba) (2026-08-13)
+        if (needsTOTALRedraw) {
+            needsTOTALRedraw = false;
+            drawOfflineScreen();
+            lastCalibState = calibNow;
+            return;
+        }
         if (calibNow != lastCalibState) {
             lastCalibState = calibNow;
             drawCalibDot();

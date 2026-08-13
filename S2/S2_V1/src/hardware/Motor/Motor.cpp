@@ -84,9 +84,18 @@ static void _calibUpdate() {
     int      pos = (int)_motor_adcPos;
 
     if (now - _motor_calibStart > CALIB_TIMEOUT) {
-        _motor_phase = CalibPhase::ERROR;
         _hwOff();
-        log_e("[CALIB] TIMEOUT");
+        _motor_calibRetries++;
+        if (_motor_calibRetries < CALIB_MAX_RETRIES) {
+            log_w("[CALIB] TIMEOUT — reintento %d/%d", _motor_calibRetries, CALIB_MAX_RETRIES);
+            _pendingCalib = true;
+            _motor_phase  = CalibPhase::IDLE;
+            _motor_state  = MotorState::GOING_TO_MIN;
+            Motor::goToMin();
+        } else {
+            _motor_phase = CalibPhase::ERROR;
+            log_e("[CALIB] TIMEOUT — ERROR tras %d intentos", _motor_calibRetries);
+        }
         return;
     }
 
