@@ -122,6 +122,7 @@ void initDisplay() {
         },
     };
     esp_lcd_panel_dev_config_t panel_cfg = {
+        //.reset_gpio_num = (gpio_num_t)-1,   // TEST: antes LCD_RST_PIN (27) 
         .reset_gpio_num = (gpio_num_t)LCD_RST_PIN,   // GPIO27 (config.h)
         .rgb_ele_order  = ESP_LCD_COLOR_SPACE_RGB,
         .bits_per_pixel = 16,
