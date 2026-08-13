@@ -77,6 +77,14 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 **9. Diagnóstico de hardware (sin cambio de código) — unidad con motor que sube pero nunca baja**
 - Analizado a petición del usuario: patrón "sube perfecto, nunca baja" en una unidad aislada es consistente con un fallo del lado `IN2`/`OUT2` del DRV8833 (mitad del puente H dañada) — el motor DC de una sola bobina no tiene "canal de bajar" separado, así que un fallo así explica el síntoma exacto sin involucrar al firmware (mismo firmware en el resto de unidades, que funcionan bien). Diagnóstico no invasivo sugerido: medir con multímetro el pin `MOTOR_IN2` (config.h) durante SAT > Motor Test (SOLO=baja) para confirmar si el GPIO conmuta y el DRV8833 no responde, o si el fallo está antes (GPIO/pista). Por directiva del proyecto (hardware locked): no se propone ni se aplica ninguna corrección de cableado — decisión de reparación de hardware del usuario.
 
+**10. S2 — `SAT/SatMenu.cpp` — reordenado menú SAT > Motor, quitado "Motor ON/OFF"**
+- `_motorItems[]`/`_motorN` (5→4) y el switch de `_hMotor()` reindexado. Orden nuevo: **PWM Maximo → PWM Minimo → Calibrar → Test Mode**.
+- Comprobado antes de quitarlo: `_cfg.motorDisabled` se guardaba/cargaba en NVS pero **nada en el firmware lo leía** — el toggle no tenía ningún efecto real sobre el motor. Se quita solo el ítem de menú; el campo `SatConfig.motorDisabled` y su persistencia NVS quedan intactos por si se conecta a algo en el futuro.
+
+**11. S2 — `config.h` + `ButtonManager.cpp` — ventana de gracia tras boot para REC/encoder (fix de regresión del punto 7)**
+- **Bug encontrado tras aplicar el punto 7:** con Logic desconectado, el SAT se abría solo al arrancar, sin que nadie tocara REC. Causa raíz identificada revisando la librería `Button2` vendida en el proyecto (`.pio/libdeps/.../Button2/src/Button2.cpp`): `Button2 buttonRec(...)` es un objeto global cuyo constructor llama `pinMode()` en inicialización estática, **antes de `setup()`** — ventana en la que el pin puede no estar eléctricamente estable (pull-up sin asentar, ruido de arranque). Un parpadeo del pin ≥50ms (debounce por defecto de Button2, `_releasedNow()`) se registra como pulsación real y dispara `released_cb`. Esto probablemente ocurría siempre, pero antes era inofensivo (solo mandaba un `FLAG_REC` perdido); tras el punto 7, el mismo evento abre el SAT directamente — visible.
+- **Fix:** nueva constante `BOOT_INPUT_SETTLE_MS=1000`. `_onRecReleased()` y el case `ENCODER_SELECT` de `_onButtonEvent()` ignoran la acción (abrir SAT / activar OTA) si `millis() < BOOT_INPUT_SETTLE_MS`. No afecta el short-press normal de REC con Logic conectado.
+
 ---
 
 ### SESIÓN 2026-08-07 20:06 — S3: fix identificación MCU (handshake en bucle) + S2: fixes Motor.cpp + splash screen rediseñada

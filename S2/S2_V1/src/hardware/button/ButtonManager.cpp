@@ -32,6 +32,10 @@ static void _onRecReleased(Button2& btn) {
     // mientras no hay Logic conectado (splash) — igual que el encoder.
     // Con Logic conectado, REC es solo REC. (2026-08-13)
     if (logicConnectionState != ConnectionState::CONNECTED) {
+        // Ventana de gracia tras boot: pinMode() del Button2 global corre en
+        // init estático, antes de setup() — un glitch eléctrico del pin en
+        // esa ventana puede leerse como pulsación real. (2026-08-13)
+        if (millis() < BOOT_INPUT_SETTLE_MS) return;
         if (_sat) _sat->open();
         return;
     }
@@ -78,6 +82,8 @@ static void _onButtonEvent(ButtonId id) {
             // así que sustituir esa función ahí no pierde nada. En operación normal
             // (CONNECTED) el encoder sigue mandando el clic de VPot como siempre.
             if (logicConnectionState != ConnectionState::CONNECTED) {
+                // Ventana de gracia tras boot — ver _onRecReleased() (2026-08-13)
+                if (millis() < BOOT_INPUT_SETTLE_MS) break;
                 if (_cbOta) _cbOta();
             } else {
                 _encoderBtnCount++;

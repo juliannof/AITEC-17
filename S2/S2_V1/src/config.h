@@ -73,6 +73,8 @@ enum class ConnectionState {
 #define RS485_START_BYTE      0xAA
 #define RS485_RESP_BYTE       0xBB
 
+#define BOOT_INPUT_SETTLE_MS  1000   // ignora REC/encoder-click los primeros 1s tras boot — glitch eléctrico de arranque en pin global Button2 (2026-08-13)
+
 
 // --- SENSOR TÁCTIL DEL FADER ---
 #define FADER_TOUCH_PIN     T1 // Pin táctil para el fader (GPIO1 en ESP32-S2)

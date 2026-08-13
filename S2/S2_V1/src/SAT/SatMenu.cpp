@@ -24,11 +24,10 @@ const SatMenu::Item SatMenu::_mainItems[] = {
     {"RB","Reiniciar",   Scr::REINICIAR },
 };
 const SatMenu::Item SatMenu::_motorItems[] = {
-    {"DI","Motor ON/OFF",  Scr::MOTOR     },
-    {"TE","Test Mode",     Scr::MOTOR_TEST},
-    {"CA","Calibrar",      Scr::MOTOR_CALIB},
-    {"MN","PWM Minimo",    Scr::EDIT_PWMMIN},
     {"MX","PWM Maximo",    Scr::EDIT_PWMMAX},
+    {"MN","PWM Minimo",    Scr::EDIT_PWMMIN},
+    {"CA","Calibrar",      Scr::MOTOR_CALIB},
+    {"TE","Test Mode",     Scr::MOTOR_TEST},
 };
 
 const SatMenu::Item SatMenu::_touchItems[] = {
@@ -42,7 +41,7 @@ const SatMenu::Item SatMenu::_diagItems[] = {
     {"TC","Test Touch",    Scr::TEST_TOUCH    },
 };
 const int SatMenu::_mainN  = 6;
-const int SatMenu::_motorN = 5;  // Motor ON/OFF, Calibrar, Test Mode, PWM Min, PWM Max (2026-05-10 19:54)
+const int SatMenu::_motorN = 4;  // PWM Max, PWM Min, Calibrar, Test Mode (2026-08-13 — quitado Motor ON/OFF, sin efecto real)
 const int SatMenu::_touchN = 2;
 const int SatMenu::_diagN  = 5;
 
@@ -624,24 +623,16 @@ void SatMenu::_hMotor(Btn b) {
     if (b == Btn::BACK) { _goto(Scr::MAIN); return; }
     if (b == Btn::ENTER) {
         switch (_cur) {
-            case 0:  // toggle motorDisabled
-                _tmp.motorDisabled = !_tmp.motorDisabled;
-                _cfg.motorDisabled  = _tmp.motorDisabled;
-                _save();
-                if (_cbSaved) _cbSaved(_cfg);
-                _dirty = true;
-                _toast(_cfg.motorDisabled ? "Motor DESACTIVADO" : "Motor ACTIVADO", Scr::MOTOR);
-                break;
-            case 1: _goto(Scr::MOTOR_TEST);  break;  // Test Mode primero (2026-05-10 19:54)
-            case 2: _goto(Scr::MOTOR_CALIB); break;
-            case 3:
-                _eTitle="PWM Minimo"; _eVal=_tmp.pwmMin; _eMin=0; _eMax=200;
-                _goto(Scr::EDIT_PWMMIN);
-                break;
-            case 4:
+            case 0:
                 _eTitle="PWM Maximo"; _eVal=_tmp.pwmMax; _eMin=50; _eMax=255;
                 _goto(Scr::EDIT_PWMMAX);
                 break;
+            case 1:
+                _eTitle="PWM Minimo"; _eVal=_tmp.pwmMin; _eMin=0; _eMax=200;
+                _goto(Scr::EDIT_PWMMIN);
+                break;
+            case 2: _goto(Scr::MOTOR_CALIB); break;
+            case 3: _goto(Scr::MOTOR_TEST);  break;
         }
     }
 }
