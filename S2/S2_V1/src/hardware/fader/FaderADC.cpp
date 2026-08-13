@@ -58,8 +58,18 @@ void FaderADC::update() {
     // tras medirlo con sketch aislado.
     if (adcRaw > MOTOR_ADC_MAX) adcRaw = MOTOR_ADC_MAX;
 
-    _faderPos = (uint16_t)adcRaw;
-    _rawLast  = (int)adcRaw;
+    // Filtro centralizado (2026-08-13 15:10): EMA sobre la lectura cruda — único punto de
+    // suavizado de ruido del sistema (antes repartido entre spike guards en Motor.cpp
+    // y un EMA de salida en RS485Handler.cpp). Sembrado en la primera lectura real
+    // para no arrastrar desde 0 (mismo bug que el EMA de salida arrastraba al conectar).
+    if (_faderPosFiltered < 0.0f) {
+        _faderPosFiltered = (float)adcRaw;
+    } else {
+        _faderPosFiltered += ((float)adcRaw - _faderPosFiltered) * FADER_EMA_ALPHA_FAST;
+    }
+
+    _faderPos = (uint16_t)_faderPosFiltered;
+    _rawLast  = (int)adcRaw;  // diagnóstico (dumpAdsLog) sigue viendo el crudo real
 
     _logReading(adcRaw, _faderPos);
 

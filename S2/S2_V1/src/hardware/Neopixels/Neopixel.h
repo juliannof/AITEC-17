@@ -21,3 +21,4 @@ extern bool neoWaitingHandshake;
 void handleButtonLedState(ButtonId id);
 void updateAllNeopixels();
 void forceNeopixelRefresh();  // invalida la caché de updateAllNeopixels() (2026-08-13)
+void tickNeopixelShow();  // aplica el .show() diferido por throttle (2026-08-13 15:10)

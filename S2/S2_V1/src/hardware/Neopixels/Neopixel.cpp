@@ -13,6 +13,16 @@ static bool lastSolo   = false;
 static bool lastMute   = false;
 static bool lastSelect = false;
 
+// Throttle del .show() real (2026-08-13 15:10) — WHY: Adafruit_NeoPixel::show()
+// en ESP32/IDF5 usa rmtWrite(..., RMT_WAIT_FOR_EVER), bloqueo de ~600-700µs sin
+// timeout. En una ráfaga de cambios seguidos (ej. REC/SOLO/MUTE/SELECT llegando
+// en muchos paquetes RS485 durante carga de proyecto), ese bloqueo se paga en
+// cada iteración del loop — confirmado en banco correlacionado con [RS485]
+// ID MISMATCH (VU meters, que no bloquean así, casi no lo producían). No se
+// pierde ninguna actualización: solo se difiere hasta el siguiente hueco.
+static uint32_t _lastShowTime = 0;
+static bool     _showPending  = false;
+
 void initNeopixels() {
     neopixels.begin();
     neopixels.clear();
@@ -81,7 +91,15 @@ void updateAllNeopixels() {
         handleButtonLedState(ButtonId::MUTE);
         handleButtonLedState(ButtonId::SELECT);
     }
+    _showPending = true;  // .show() real diferido a tickNeopixelShow() (2026-08-13 15:10)
+}
+
+void tickNeopixelShow() {
+    if (!_showPending) return;
+    if (millis() - _lastShowTime < NEOPIXEL_SHOW_MIN_INTERVAL_MS) return;
     showNeopixels();
+    _lastShowTime = millis();
+    _showPending  = false;
 }
 
 void forceNeopixelRefresh() {

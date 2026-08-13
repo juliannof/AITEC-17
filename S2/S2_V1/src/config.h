@@ -76,6 +76,19 @@ enum class ConnectionState {
 #define BOOT_INPUT_SETTLE_MS  2000   // ignora REC/encoder-click los primeros 2s tras boot — glitch eléctrico de arranque en pin global Button2 (2026-08-13, subido de 1000 — encoder no tiene hold propio, ver SAT_OPEN_HOLD_MS)
 #define SAT_OPEN_HOLD_MS       150   // REC en splash: hold mínimo real (Button2::wasPressedFor()) para abrir el SAT — filtra toques/rebotes breves, ya no dispara con glitches cortos (2026-08-13, bajado de 400 a petición del usuario)
 #define GOTOMIN_JITTER_MAX_MS 2000   // retardo aleatorio 0-2s antes de goToMin() tras desconexión — anti-cascada, evita que todas las S2 bajen a la vez (pico de corriente + ruido RS485 correlacionado, confirmado en banco 2026-08-13)
+// TODO BANCO: ventana provisional — ajustar si 150ms se nota como lag en automatización real,
+// o si no basta para evitar el ID MISMATCH al cargar proyecto (2026-08-13 15:10)
+#define MOVING_JITTER_MAX_MS   150   // retardo aleatorio 0-150ms antes de EMPEZAR a moverse desde parado
+                                      // (setTargetFromS3/setTargetForced) — anti-cascada cuando Logic manda
+                                      // targets a varios canales a la vez (carga de proyecto). Mismo mecanismo
+                                      // que GOTOMIN_JITTER_MAX_MS, ventana mucho menor: no debe notarse en
+                                      // seguimiento ya en marcha, solo retrasa el arranque desde parado.
+// Fix (2026-08-13 15:10): sin este mínimo, el jitter se re-armaba en CADA paso de
+// una automatización continua (el motor toca AT_TARGET un instante entre pasos
+// consecutivos) — bajada de fader "a trompicones". Solo aplica jitter si llevaba
+// parado de verdad más de esto — una automatización continua nunca lo alcanza,
+// un arranque en frío tras ráfaga sí.
+#define MOVING_JITTER_MIN_IDLE_MS 300
 
 
 // --- SENSOR TÁCTIL DEL FADER ---
@@ -90,9 +103,10 @@ enum class ConnectionState {
 #define ADS_I2C_ADDR    0x48
 
 // ─── FaderADC ─────────────────────────────────────────────────
-#define NOISE_WINDOW_SIZE     8
-#define NOISE_K_MOVE          3.0f
-#define NOISE_K_MICRO         0.3f
+// Filtro centralizado (2026-08-13 15:10): único punto de suavizado de ruido del sistema,
+// aplicado en FaderADC::update() sobre la lectura cruda del ADS1115. Sustituye a
+// NOISE_WINDOW_SIZE/NOISE_K_MOVE/NOISE_K_MICRO (nunca implementadas, eliminadas)
+// y al spike guard de Motor + EMA de salida de RS485Handler (redundantes, eliminados).
 #define FADER_EMA_ALPHA_FAST  0.20f
 
 
@@ -112,7 +126,6 @@ static constexpr uint16_t MOTOR_ADC_MAX            = 27000;   // máximo esperad
 // entonces se satura en 27000 (ver FaderADC.cpp / Motor::setADC).
 #define CALIB_MIN_SPAN        18000   // span ADC mínimo para aceptar calibración (≈provisional, ajustar con dato real)
 #define CALIB_MAX_RETRIES     3       // reintentos locales antes de CalibPhase::ERROR
-#define FADER_EMA_ALPHA       0.15f   // filtro posición fader en S2 (bajado desde S3)
 #define CALIB_DATA_TIMEOUT_MS 200     // watchdog: sin muestra ADS nueva > esto en calib → ERROR
 #define CALIB_BOOT_JITTER_MAX_MS 2000 // retardo aleatorio 0-2s antes de autocalibrar en boot — anti-cascada (2026-08-13 09:36)
 
@@ -128,8 +141,12 @@ static constexpr uint8_t  PWM_MAX                  = 160;  // calibrado: movimie
 // bucle STALL→cooldown→reintento parcial en vez de moverse con fluidez.
 static constexpr uint16_t POSITION_CRUISE_ERR       = 2000;  // cuentas: por encima → PWM_MAX fijo (crucero), por debajo → proporcional (frenado fino)
 
-// Motor — spike guard (rechaza cambios > este valor)
-static constexpr uint16_t ADC_SPIKE_GUARD          = 500;     // cuentas máximas entre lecturas (aumentado para Test Mode tolerancia 2026-05-10 22:00)
+// Fracción de (pwm_max-pwm_min) que se resta a pwm_min para el suelo del frenado
+// fino en _positionTick() — separado del pwm_min usado para vencer fricción
+// ESTÁTICA en el arranque (KICK_UP/DOWN, calibración, que NO se tocan).
+// TODO BANCO: punto de partida 0.5 — ajustar hasta que el frenado se sienta
+// fino sin perder capacidad de asentar cerca de los extremos. (2026-08-13 15:10)
+static constexpr float    POSITION_FINE_PWM_K       = 0.5f;
 
 // Motor — calibración (constantes)
 static constexpr uint16_t DEAD_ZONE                = 80;      // error < esto → apagar motor (S1 ruido=60, margen 20)
@@ -308,6 +325,9 @@ static constexpr uint32_t TOUCH_BASE_MIN_VALUE     = 50;      // valor mínimo i
 #define NEOPIXEL_COUNT      4   // Número total de Neopixels
 #define NEOPIXEL_DEFAULT_BRIGHTNESS 30 // Brillo cuando botón está activo (0-255)
 #define NEOPIXEL_DIM_BRIGHTNESS 5   // brillo atenuado (reservado, no usado actualmente)
+// TODO BANCO: punto de partida — bajar si aún se ve ID MISMATCH en banco, subir si
+// se nota parpadeo perceptible en LEDs durante ráfagas (2026-08-13 15:10)
+#define NEOPIXEL_SHOW_MIN_INTERVAL_MS 20  // throttle: máx. un .show() real (bloqueo RMT ~600-700µs) cada 20ms
 #define NEOPIXEL_ULTRA_DIM 1    // "tenue de morir" — botones inactivos, casi apagado pero visible
 
 
@@ -429,6 +449,7 @@ static constexpr uint32_t TOUCH_BASE_MIN_VALUE     = 50;      // valor mínimo i
 #define TFT_AUTO_OFF    0x0842   // gris oscuro (= TFT_MCU_DARKGRAY)
 #define TFT_AUTO_READ   0x2500   // verde (= TFT_MCU_GREEN)
 #define TFT_AUTO_WRITE  0x500A// lila
+#define TFT_AUTO_TRIM   0x07FF   // cian — color propio, antes aliasado a TFT_AUTO_OFF (2026-08-13 15:10)
 #define TFT_AUTO_TOUCH  0xFD20   // naranja vivo
 #define TFT_AUTO_LATCH  0xA900   // naranja oscuro
 

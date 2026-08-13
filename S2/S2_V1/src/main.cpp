@@ -393,4 +393,5 @@ void loop() {
     handleVUMeterDecay();
     updateDisplay();
     updateAllNeopixels();
+    tickNeopixelShow();  // aplica el .show() diferido por throttle (2026-08-13 15:10)
 }

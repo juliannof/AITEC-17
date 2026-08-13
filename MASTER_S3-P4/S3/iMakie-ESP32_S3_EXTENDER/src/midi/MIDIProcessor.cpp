@@ -34,6 +34,15 @@ namespace {
     static uint32_t _calibNextTime    = 0;
     static int16_t lastSentPitchBend[9] = {INT16_MIN, INT16_MIN, INT16_MIN, INT16_MIN, INT16_MIN, INT16_MIN, INT16_MIN, INT16_MIN, INT16_MIN};
 
+    // Debounce anti-flash de nombres de pista (2026-08-13 15:10) — WHY: Logic
+    // escribe texto transitorio más ancho que un slot de 7 caracteres (ej.
+    // "Seleccionar"/"Selecting" al seleccionar canal), que se desborda sobre
+    // el canal vecino y se restaura ~34ms después. Sin retener el cambio, ese
+    // intermedio se aplica y se manda a S2 antes de la restauración.
+    static char     _pendingName[8][8]  = {};
+    static uint32_t _pendingSince[8]    = {};
+    static bool     _pendingDirty[8]    = {};
+
     // Estado de las 5 notas de automodo (notas 74-78 → índices 0-4). (2026-06-14)
     // WHAT: rastrea qué nota del grupo está actualmente On según Logic.
     // WHY:  AUTO_OFF se deriva de la ausencia de cualquier nota activa — no existe
@@ -73,6 +82,21 @@ void tickCalibracion() {
         _calibPendingFrom = 0;
     } else {
         _calibNextTime = millis() + 4000;
+    }
+}
+
+// Debounce anti-flash de nombres de pista (2026-08-13 15:10) — aplica un
+// cambio pendiente solo si sigue igual tras TRACK_NAME_DEBOUNCE_MS sin más
+// cambios para ese canal. Ver case 0x12 (arma el pendiente) y el WHY arriba.
+void tickTrackNameDebounce() {
+    uint32_t now = millis();
+    for (int t = 0; t < 8; t++) {
+        if (!_pendingDirty[t]) continue;
+        if (now - _pendingSince[t] < TRACK_NAME_DEBOUNCE_MS) continue;
+        _pendingDirty[t] = false;
+        if (trackNames[t] == _pendingName[t]) continue;  // defensivo, no debería pasar
+        trackNames[t] = String(_pendingName[t]);
+        rs485.setTrackName(t + 1, _pendingName[t]);
     }
 }
 
@@ -416,9 +440,19 @@ void processMackieSysEx(byte* payload, int len) {
                 if (!nameChanged[t]) continue;
                 trimRight(nameBufs[t]);
                 if (nameBufs[t][0] == '\0') continue;  // row 1 vacía (modo plugin/Atmos) — conservar nombre previo
-                if (trackNames[t] == nameBufs[t]) continue;
-                trackNames[t] = String(nameBufs[t]);
-                rs485.setTrackName(t + 1, nameBufs[t]);
+
+                if (trackNames[t] == nameBufs[t]) {
+                    // Coincide con lo ya mostrado — cancela cualquier cambio pendiente
+                    // (ej. el flash "Seleccionar" restaurándose al valor original: nunca
+                    // llegó a mandarse, así que no hace falta "deshacerlo").
+                    _pendingDirty[t] = false;
+                    continue;
+                }
+                // Arma/reemplaza el pendiente con timer fresco — se aplica de verdad
+                // en tickTrackNameDebounce() si sigue igual tras TRACK_NAME_DEBOUNCE_MS.
+                strncpy(_pendingName[t], nameBufs[t], 8);
+                _pendingSince[t] = millis();
+                _pendingDirty[t] = true;
             }
             break;
         }

@@ -355,7 +355,7 @@ void drawHeaderSprite() {
         TFT_AUTO_OFF,    // AUTO_OFF
         TFT_AUTO_READ,   // AUTO_READ
         TFT_AUTO_WRITE,  // AUTO_WRITE
-        TFT_AUTO_OFF,    // AUTO_TRIM — reservado
+        TFT_AUTO_TRIM,   // AUTO_TRIM
         TFT_AUTO_TOUCH,  // AUTO_TOUCH
         TFT_AUTO_LATCH,  // AUTO_LATCH
     };
@@ -552,7 +552,7 @@ static uint16_t autoModeColor(AutoMode mode) {
         TFT_AUTO_OFF,    // 0 — OFF
         TFT_AUTO_READ,   // 1 — READ
         TFT_AUTO_WRITE,  // 2 — WRITE
-        TFT_AUTO_OFF,    // 3 — TRIM
+        TFT_AUTO_TRIM,   // 3 — TRIM
         TFT_AUTO_TOUCH,  // 4 — TOUCH
         TFT_AUTO_LATCH,  // 5 — LATCH
     };

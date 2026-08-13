@@ -57,7 +57,6 @@ uint32_t _touchDebounceForMode(AutoMode mode) {
 static uint16_t _rsLastPBTarget   = 0;
 static bool     _rsPBTargetValid  = false;
 static bool     _rsWasCalibrated  = false;
-static float    _rsFaderPosEMA    = 0.0f;
 
 static uint16_t _pbToADC(uint16_t pb) {
     if (pb > 16383) pb = 16383;
@@ -207,7 +206,12 @@ void onMasterData(const MasterPacket& pkt) {
     nameBuf[7] = '\0';
     if (trackName != nameBuf) {
         trackName = String(nameBuf);
-        needsHeaderRedraw = true;
+        // Fix (2026-08-13 15:10): el nombre de pista se dibuja en mainArea
+        // (Display.cpp, mainArea.print(trackName)), no en el header (la barra
+        // de color del AutoMode). Con el flag equivocado, el nombre solo se
+        // repintaba cuando coincidía por casualidad con un cambio de REC/SOLO/MUTE
+        // — nunca tenía disparador propio.
+        needsMainAreaRedraw = true;
     }
 
     // ── Flags de botones ──────────────────────────────────────
@@ -248,12 +252,12 @@ void onMasterData(const MasterPacket& pkt) {
     // El modo decide cómo se aplica el target — debe procesarse primero.
     AutoMode pktMode = getAutoMode(pkt.flags);
 
-    // TRIM no debe sacar al S2 de READ (petición explícita, 2026-07-30).
-    // Se reescribe pktMode ANTES del resto del flujo — así el paquete se procesa
-    // como si TRIM nunca hubiese llegado (sin duplicar el filtro en ningún otro punto).
-    if (_rsCurrentMode == AUTO_READ && pktMode == AUTO_TRIM) {
-        pktMode = AUTO_READ;
-    }
+    // Guard TRIM→READ eliminado (2026-08-13 15:10): Logic es la única fuente de verdad
+    // para el AutoMode — el S2 no debe esconder ni reescribir lo que Logic manda.
+    // El guard (2026-07-30) nunca se validó en hardware; en banco se confirmó que
+    // dejaba el header sin reflejar TRIM real. El enrutado de TRIM ya existe y
+    // funciona igual que TOUCH (_applyFaderTarget(), más abajo) — no hace falta
+    // lógica nueva, solo dejar de ocultar el modo real.
 
     // Reset total al cambiar de modo (regla: modo nuevo arranca limpio)
     // WHY: si veníamos de LATCH frozen y pasamos a READ, el freeze
@@ -355,14 +359,10 @@ SlavePacket buildResponse(FaderADC& faderADC, SatMenu& satMenu) {
         if (raw > hi) raw = hi;
         uint16_t pb  = (hi > lo) ? (uint16_t)(((uint32_t)(raw - lo) * 16383) / (hi - lo)) : 0;
 
-        if (resp.touchState) {
-            // Usuario tocando: sin filtro — feedback inmediato a Logic.
-            Internal::_rsFaderPosEMA = (float)pb;
-            resp.faderPos  = pb;
-        } else {
-            Internal::_rsFaderPosEMA = Internal::_rsFaderPosEMA + ((float)pb - Internal::_rsFaderPosEMA) * FADER_EMA_ALPHA;
-            resp.faderPos  = (uint16_t)Internal::_rsFaderPosEMA;
-        }
+        // EMA de salida eliminado (2026-08-13 15:10): el ruido ya se filtra en origen
+        // (FaderADC::update()) — un segundo suavizado aquí solo añadía retraso
+        // (valores intermedios "viejos" reportados a Logic tras llegar a destino).
+        resp.faderPos  = pb;
         resp.buttons |= SLAVE_FLAG_CALIB_DONE;   // bit de estado: calibrado y operativo
     } else {
         resp.faderPos = 0;

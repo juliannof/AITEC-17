@@ -46,6 +46,32 @@ static bool _dawAbsolute = false;  // true en AUTO_OFF/READ — usuario no puede
 // → llegada por stall → re-disparo → bucle de pulsos contra el tope. (2026-07-20)
 static uint16_t _goToMinRestADC = 0;  // latch: dónde descansó el fader tras stall en el tope
 static uint32_t _goToMinJitterUntil = 0;  // anti-cascada: no bajar antes de este millis() tras desconexión (2026-08-13)
+static uint32_t _movingJitterUntil  = 0;  // anti-cascada: no arrancar movimiento antes de este millis() (2026-08-13 15:10)
+
+// ─── _readyToMove — jitter anti-cascada al iniciar movimiento desde parado ──
+// WHY: setTargetFromS3()/setTargetForced() no tenían ningún escalonado — a
+// diferencia de goToMin() (GOTOMIN_JITTER_MAX_MS) — cuando Logic manda targets
+// a varios canales casi a la vez (ej. carga de proyecto), todos los motores
+// arrancaban a moverse en el mismo instante: pico de corriente sincronizado,
+// correlacionado en banco con [RS485] ID MISMATCH aleatorio entre slaves.
+// Solo afecta el ARRANQUE desde parado — el seguimiento ya en marcha
+// (MOVING_TO_TARGET) nunca se retrasa. (2026-08-13 15:10)
+static bool _readyToMove() {
+    if (_motor_state == MotorState::MOVING_TO_TARGET) return true;
+    // Fix (2026-08-13 15:10): sin este mínimo, el jitter se re-armaba en cada
+    // parada breve entre pasos de una automatización continua (el motor toca
+    // AT_TARGET un instante entre micro-targets consecutivos de una bajada real)
+    // — resultado: bajada "a trompicones". Solo se considera "arranque en frío"
+    // si llevaba parado de verdad más de MOVING_JITTER_MIN_IDLE_MS.
+    if (millis() - _atTargetStartTime < MOVING_JITTER_MIN_IDLE_MS) return true;
+    if (_movingJitterUntil == 0) {
+        _movingJitterUntil = millis() + random(MOVING_JITTER_MAX_MS);
+        return false;
+    }
+    if (millis() < _movingJitterUntil) return false;
+    _movingJitterUntil = 0;  // consumido — listo para armar de nuevo en el próximo arranque
+    return true;
+}
 static uint16_t _floorADC() {
     return (_motor_phase == CalibPhase::DONE) ? _calibratedFaderMin : (uint16_t)MOTOR_ADC_MIN;
 }
@@ -366,11 +392,16 @@ static void _positionTick() {
         // mucho antes y más fuerte según se acerca al target — más margen de
         // frenado real en el tramo final, sin perder el empuje inicial que
         // necesitaba el fix original.
-        uint32_t clampedErr = min((uint16_t)absErr, POSITION_CRUISE_ERR);
-        uint32_t rangePWM   = (uint32_t)(_pwm_max - _pwm_min);
-        targetPWM = _pwm_min + (int)((rangePWM * clampedErr * clampedErr) /
-                                      ((uint32_t)POSITION_CRUISE_ERR * POSITION_CRUISE_ERR));
-        targetPWM = constrain(targetPWM, _pwm_min, _pwm_max);
+        // Suelo derivado (2026-08-13 15:10): separado del pwm_min de arranque (fricción
+        // estática, KICK_UP/DOWN) — el frenado fino solo necesita vencer fricción
+        // dinámica, normalmente menor. Deriva de pwm_min/pwm_max ya calibrados por
+        // unidad (NVS), sin nuevo valor persistido ni pantalla SAT.
+        uint32_t clampedErr  = min((uint16_t)absErr, POSITION_CRUISE_ERR);
+        int      pwmFineFloor = constrain((int)_pwm_min - (int)(POSITION_FINE_PWM_K * (_pwm_max - _pwm_min)), 0, (int)_pwm_min);
+        uint32_t rangePWM    = (uint32_t)(_pwm_max - pwmFineFloor);
+        targetPWM = pwmFineFloor + (int)((rangePWM * clampedErr * clampedErr) /
+                                          ((uint32_t)POSITION_CRUISE_ERR * POSITION_CRUISE_ERR));
+        targetPWM = constrain(targetPWM, pwmFineFloor, _pwm_max);
     }
 
     _motor_currentPWM = constrain(
@@ -605,142 +636,34 @@ void setADC(uint16_t v) {
     // calibración (la última lectura válida se toma como tope físico). (2026-07-20)
     if (v < MOTOR_ADC_MIN) v = MOTOR_ADC_MIN;
     if (v > MOTOR_ADC_MAX) v = MOTOR_ADC_MAX;
-    // Bypass spike guard durante: calibración, bajando a mínimo (2026-05-19)
-    // Quitado _motor_manualTouchDetected del bypass (2026-08-13): ese flag puede
-    // activarse por un rebote al frenar cerca del target (no solo por un toque
-    // real), y justo en ese instante — motor frenando fuerte, alta corriente —
-    // es cuando más probable es que haya ruido eléctrico real en la línea del
-    // ADC. Con el guard apagado ahí, una lectura corrupta se aceptaba sin
-    // filtrar y podía mandar el motor al tope físico persiguiendo una posición
-    // que no era real. Un toque real del usuario es movimiento físico gradual,
-    // no debería generar picos que activen el guard de todas formas.
-    bool inCalibFlow = _isCalibrating() ||
-                       _motor_state == MotorState::GOING_TO_MIN ||
-                       _motor_state == MotorState::WAITING_FOR_CALIB;
-    if (!inCalibFlow && _motor_adcPos > 0 &&
-        abs((int)v - (int)_motor_adcPos) > ADC_SPIKE_GUARD) return;
+    // Spike guard eliminado (2026-08-13 15:10): el ruido/picos eléctricos ahora se absorben
+    // en origen (FaderADC::update(), EMA con FADER_EMA_ALPHA_FAST) — mantener un
+    // segundo guard aquí era redundante y arriesgaba el mismo patrón de "freeze"
+    // que la nota de arriba ya identificó como problemático.
     _motor_adcPos = v;
 }
 
 void setADCDelta(uint16_t currentADC) {
-    // Detecta movimiento manual del fader: delta ADC rápido
-    // FaderTouch::isTouched() DESACTIVADO — falsos positivos en tope mecánico (2026-05-19)
-    // TODO: reactivar cuando FaderTouch sea fiable en todo el recorrido
-
-    // Inicialización en primera llamada (evitar falsa detección en boot)
-    if (_motor_lastADCForDelta == 0) {
-        _motor_lastADCForDelta = currentADC;
-        return;  // Solo calibrar, no detectar delta en boot
-    }
-
-    // No detectar usuario durante calibración ni goToMin
-    static bool _prevInCalibFlow = false;
-    bool inCalibFlow = _isCalibrating() ||
-                       _motor_state == MotorState::GOING_TO_MIN ||
-                       _motor_state == MotorState::CALIBRATING;
-    if (inCalibFlow) {
-        _prevInCalibFlow       = true;
-        _motor_lastADCForDelta = currentADC;
-        _motor_manualTouchDetected = false;  // motor bajo control automático — resetear flag usuario (2026-05-27)
-        return;
-    }
-
-    // Primer ciclo tras salir de calibFlow: resetear ventana delta para evitar falso touch (2026-06-14)
-    // _deltaWindowRef queda con el ADC de antes del goToMin → delta enorme → falsa detección
-    if (_prevInCalibFlow) {
-        _prevInCalibFlow       = false;
-        _deltaWindowRef        = currentADC;
-        _deltaWindowStart      = millis();
-        _motor_lastADCForDelta = currentADC;
-        return;
-    }
-
-    // MOVING_TO_TARGET: suprimir solo si ADC va en la misma dirección que el target (2026-05-24)
-    // Motor rápido genera delta > threshold en su propia dirección → falsa detección
-    // Si el ADC va en dirección CONTRARIA al target → usuario oponiéndose → dejar pasar
-    if (_motor_state == MotorState::MOVING_TO_TARGET) {
-        bool motorGoingUp = (_motor_targetADC > _motor_lastADCForDelta);
-        bool adcGoingUp   = ((int)currentADC >= (int)_motor_lastADCForDelta);
-        if (motorGoingUp == adcGoingUp) {
-            _motor_lastADCForDelta = currentADC;
-            return;  // Motor en su dirección — no es el usuario
-        }
-        // Dirección opuesta: puede ser oposición real del usuario, o el propio
-        // motor rebotando/asentando al frenar cerca del target (más probable
-        // cuanto más rápido llega, ver _positionTick()). Dentro de la zona de
-        // frenado (POSITION_CRUISE_ERR) se asume asentamiento mecánico, no
-        // touch — sin esto, un rebote de un solo tick dispara touchState=1
-        // hacia Logic (vía SELECT MIDI en S3) y Logic abandona el fader a
-        // medio camino aunque el motor internamente sí llegue al target real
-        // (confirmado en banco con MIDI Monitor, 2026-08-13). Lejos del
-        // target, una dirección opuesta sí es oposición real del usuario.
-        if (abs((int)_motor_targetADC - (int)currentADC) < POSITION_CRUISE_ERR) {
-            _motor_lastADCForDelta = currentADC;
-            return;
-        }
-    }
-
-    // Spike eléctrico: raw ADC salta más de ADC_SPIKE_GUARD desde posición filtrada
-    // setADC() ya rechaza el spike para la posición, pero sin este guard setADCDelta()
-    // re-dispara "usuario master" justo tras el debounce → bloqueo indefinido de targets S3
-    if (!_motor_manualTouchDetected && _motor_adcPos > 0 &&
-        abs((int)currentADC - (int)_motor_adcPos) > ADC_SPIKE_GUARD) {
-        return;  // No actualizar referencia — mantiene base válida para siguiente lectura
-    }
-
-    // Delta acumulado en ventana de tiempo — captura movimientos lentos (2026-05-27)
-    uint32_t nowMs = millis();
-    if (nowMs - _deltaWindowStart >= TOUCH_DELTA_WINDOW_MS) {
-        _deltaWindowRef   = currentADC;
-        _deltaWindowStart = nowMs;
-    }
-    uint16_t delta = abs((int)currentADC - (int)_deltaWindowRef);
+    // Detección de touch por delta ADC ELIMINADA POR COMPLETO (2026-08-13 15:10,
+    // petición explícita del usuario, confirmada dos veces — incluye el caso
+    // AT_TARGET/IDLE, no solo MOVING_TO_TARGET). Motivo: el motor en marcha
+    // rápido disparaba touchState=1 falso — Logic seleccionaba pistas solo
+    // (SELECT MIDI en S3, ver main.cpp de S3) sin que nadie tocara el fader.
+    // El heurístico por delta/dirección (2026-05-24, con ajustes en 2026-07-22
+    // y 2026-08-13) nunca llegó a ser fiable pese a varias capas de parches.
+    //
+    // CONSECUENCIA DE SEGURIDAD ACEPTADA: _motor_manualTouchDetected ya nunca
+    // se pone a true — con el fader parado, sujetarlo con la mano ya NO cede
+    // el control al motor; perseguirá el target de Logic contra la mano,
+    // cortándose por STALL_PROTECT_MS (~400ms, Motor::update(), independiente
+    // y sigue intacto) y reintentando tras STALL_COOLDOWN_MS.
+    // Motor::isManualTouchDetected() (consumida por RS485Handler para
+    // touchState, y como guard en goToMin()/setTargetFromS3()) siempre
+    // devuelve false a partir de ahora.
+    //
+    // FaderTouch::isTouched() (capacitivo) sigue desactivado por separado
+    // desde 2026-06-14 — no es una alternativa activa hoy.
     _motor_lastADCForDelta = currentADC;
-
-    // Threshold adaptativo: bajo cuando motor off (AT_TARGET/IDLE), alto cuando motor activo (2026-05-27)
-    // En AT_TARGET el motor está apagado → todo delta es del usuario, no del motor
-    uint16_t touchThreshold = (_motor_state == MotorState::AT_TARGET ||
-                               _motor_state == MotorState::IDLE)
-        ? MANUAL_TOUCH_AT_TARGET_THRESHOLD
-        : MANUAL_TOUCH_THRESHOLD;
-    bool userTouch = (delta > touchThreshold);
-
-    // Periodo de gracia tras entrar en AT_TARGET: el crucero a PWM_MAX (POSITION_CRUISE_ERR)
-    // da al motor más inercia al llegar — el overshoot/asentamiento mecánico puede superar
-    // el umbral sensible de AT_TARGET sin que el usuario haya tocado nada. (2026-07-22)
-    if (userTouch && _motor_state == MotorState::AT_TARGET &&
-        (millis() - _atTargetStartTime) < AT_TARGET_TOUCH_GRACE_MS) {
-        userTouch = false;
-    }
-
-    if (userTouch) {
-        _motor_manualTouchStartTime = millis();  // Refresh en cada movimiento — evita reset prematuro (2026-05-19)
-        if (!_motor_manualTouchDetected) {
-            // Primera detección: usuario toma control — INMEDIATO
-            _motor_manualTouchDetected = true;
-            // DAW absoluto (AUTO_OFF/READ): reportamos touch a Logic pero el motor
-            // NO cede — sigue persiguiendo el target y devuelve el fader. (2026-07-20)
-            if (!_dawAbsolute) {
-                Motor::stop();
-                _motor_state = MotorState::AT_TARGET;  // Motor cede control
-                _userDropTarget = currentADC;
-                _motor_targetADC = currentADC;         // ADC actual = nueva posición aceptada
-            }
-            log_w("[MOTOR] Usuario touch: adc=%d delta=%d dawAbs=%d", currentADC, delta, _dawAbsolute);
-        }
-    } else if (_motor_manualTouchDetected) {
-        // Sin delta: reset tras DEBOUNCE_MS de inactividad — FaderTouch eliminado (2026-05-19)
-        if (millis() - _motor_manualTouchStartTime > MANUAL_TOUCH_DEBOUNCE_MS) {
-            _motor_manualTouchDetected = false;
-            // Cancelar cooldown STALL si su origen fue esta misma sujeción —
-            // ya no hay obstáculo, el motor puede perseguir el target ya (2026-07-20)
-            if (_stallCooldownFromTouch) {
-                _stallCooldownUntil    = 0;
-                _stallCooldownFromTouch = false;
-            }
-            log_i("[MOTOR] Usuario soltó fader en adc=%d", currentADC);
-        }
-    }
 }
 
 // setTarget — ancla el target ADC directamente (dominio ADC, no PitchBend).
@@ -928,6 +851,8 @@ void setTargetFromS3(uint16_t adcTarget) {
         return;
     }
 
+    if (!_readyToMove()) return;  // jitter anti-cascada activo — target ya guardado, arranca al expirar
+
     if (_motor_targetADC != adcTarget || _motor_state != MotorState::MOVING_TO_TARGET) {
         log_i("[MOTOR] → MOVING_TO_TARGET adc=%d target=%d span=%d", _motor_adcPos, adcTarget, _motor_adcSpan);
     }
@@ -968,6 +893,8 @@ void setTargetForced(uint16_t adcTarget) {
         abs((int)_motor_adcPos - (int)adcTarget) < DEAD_ZONE) {
         return;
     }
+
+    if (!_readyToMove()) return;  // jitter anti-cascada activo — target ya guardado, arranca al expirar
 
     if (_motor_state != MotorState::MOVING_TO_TARGET) {
         static unsigned long _lastForcedLog = 0;

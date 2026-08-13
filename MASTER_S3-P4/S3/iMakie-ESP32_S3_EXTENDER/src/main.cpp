@@ -197,6 +197,10 @@ void taskCore0(void* pvParameters) {
         // tickCalibracion gestiona calibración post-conexión (disparada por SysEx 0x21)
         tickCalibracion();
 
+        // tickTrackNameDebounce aplica nombres de pista pendientes tras la ventana
+        // anti-flash (2026-08-13 15:10) — ver MIDIProcessor.cpp case 0x12
+        tickTrackNameDebounce();
+
         // VU timeout — Logic deja de enviar Channel Pressure cuando no hay audio.
         // S3 mantiene el último vuLevel indefinidamente → S2 nunca decae.
         // Fix: reset a 0 si no llega Channel Pressure en >200ms. (2026-05-26)

@@ -45,6 +45,7 @@ void processControlChange(byte channel, byte controller, byte value);
 void processPitchBend(byte channel, int bendValue);
 void checkMidiTimeout();   // ← AÑADIR
 void tickCalibracion();    // ← AÑADIR
+void tickTrackNameDebounce();  // debounce anti-flash de nombres de pista (2026-08-13 15:10)
 String formatBeatString();
 String formatTimecodeString();
 

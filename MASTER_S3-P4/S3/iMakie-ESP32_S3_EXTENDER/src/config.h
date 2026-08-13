@@ -67,6 +67,11 @@ extern volatile ConnectionState logicConnectionState;
 #define FADER_SYNC_DEADBAND    200   // PitchBend counts S2→Logic: ~1.2% escala full (0-16383)
 #define MOTOR_SETTLE_THRESHOLD  60   // TODO BANCO: reescalado ADC→PB, verificar en V3 — motor settled cuando |faderPos-target| <= este valor (PitchBend 0-16383)
 
+// --- Nombre de pista: debounce anti-flash (2026-08-13 15:10) ---
+// TODO BANCO: ventana real observada del flash "Seleccionar"/"Selecting" fue
+// ~34ms — 100ms da margen sin ser perceptible en un renombrado real.
+#define TRACK_NAME_DEBOUNCE_MS 100
+
 // --- NeoPixel Status LED (2026-05-16 19:40) ---
 #define NEOPIXEL_PIN 48              // GPIO 48 (WS2812B RGB)
 #define NEOPIXEL_COUNT 1             // 1 LED
