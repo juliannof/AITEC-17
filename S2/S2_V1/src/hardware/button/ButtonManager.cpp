@@ -25,17 +25,19 @@ static void _onRecPressed(Button2& btn) {
 }
 
 static void _onRecReleased(Button2& btn) {
-    (void)btn;
     if (_sat && _sat->isOpen()) return;
 
-    // REC abre el SAT directo (clic simple, sin pulsación larga) solo
-    // mientras no hay Logic conectado (splash) — igual que el encoder.
-    // Con Logic conectado, REC es solo REC. (2026-08-13)
+    // REC abre el SAT en splash con un hold corto (no 3s como antes, pero
+    // tampoco instantáneo) — mientras no hay Logic conectado. Con Logic
+    // conectado, REC es solo REC. (2026-08-13)
     if (logicConnectionState != ConnectionState::CONNECTED) {
         // Ventana de gracia tras boot: pinMode() del Button2 global corre en
         // init estático, antes de setup() — un glitch eléctrico del pin en
         // esa ventana puede leerse como pulsación real. (2026-08-13)
         if (millis() < BOOT_INPUT_SETTLE_MS) return;
+        // Hold mínimo real: filtra toques/rebotes breves que antes (con el
+        // hold de 3s) nunca llegaban a disparar nada. (2026-08-13)
+        if (btn.wasPressedFor() < SAT_OPEN_HOLD_MS) return;
         if (_sat) _sat->open();
         return;
     }

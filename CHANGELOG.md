@@ -85,6 +85,11 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 - **Bug encontrado tras aplicar el punto 7:** con Logic desconectado, el SAT se abría solo al arrancar, sin que nadie tocara REC. Causa raíz identificada revisando la librería `Button2` vendida en el proyecto (`.pio/libdeps/.../Button2/src/Button2.cpp`): `Button2 buttonRec(...)` es un objeto global cuyo constructor llama `pinMode()` en inicialización estática, **antes de `setup()`** — ventana en la que el pin puede no estar eléctricamente estable (pull-up sin asentar, ruido de arranque). Un parpadeo del pin ≥50ms (debounce por defecto de Button2, `_releasedNow()`) se registra como pulsación real y dispara `released_cb`. Esto probablemente ocurría siempre, pero antes era inofensivo (solo mandaba un `FLAG_REC` perdido); tras el punto 7, el mismo evento abre el SAT directamente — visible.
 - **Fix:** nueva constante `BOOT_INPUT_SETTLE_MS=1000`. `_onRecReleased()` y el case `ENCODER_SELECT` de `_onButtonEvent()` ignoran la acción (abrir SAT / activar OTA) si `millis() < BOOT_INPUT_SETTLE_MS`. No afecta el short-press normal de REC con Logic conectado.
 
+**12. S2 — `config.h` + `ButtonManager.cpp` — reforzado el fix del punto 11: hold corto real en REC, más margen de boot en encoder**
+- El usuario señaló que con el hold original de 3s este glitch nunca se disparaba — confirma que un hold (aunque corto) filtra mejor que solo la ventana de boot.
+- **REC:** nueva `SAT_OPEN_HOLD_MS=400`. `_onRecReleased()` usa `Button2::wasPressedFor()` (duración real de la pulsación, ya disponible en el parámetro `btn` sin coste extra) — solo abre el SAT si la pulsación duró ≥400ms. Filtra toques/rebotes breves en cualquier momento (no solo en boot), no solo glitches de arranque.
+- **Encoder:** no tiene hold propio — su callback (`ENCODER_SELECT`, vía `_onButtonEvent`) se dispara en el **press**, no en el release (a diferencia de REC), así que `wasPressedFor()` no está disponible ahí sin reestructurar a un handler de release dedicado (no se hizo, fuera de alcance). Como mitigación, `BOOT_INPUT_SETTLE_MS` sube de 1000 a 2000ms — única protección disponible para ese camino sin ese refactor.
+
 ---
 
 ### SESIÓN 2026-08-07 20:06 — S3: fix identificación MCU (handshake en bucle) + S2: fixes Motor.cpp + splash screen rediseñada

@@ -73,7 +73,8 @@ enum class ConnectionState {
 #define RS485_START_BYTE      0xAA
 #define RS485_RESP_BYTE       0xBB
 
-#define BOOT_INPUT_SETTLE_MS  1000   // ignora REC/encoder-click los primeros 1s tras boot — glitch eléctrico de arranque en pin global Button2 (2026-08-13)
+#define BOOT_INPUT_SETTLE_MS  2000   // ignora REC/encoder-click los primeros 2s tras boot — glitch eléctrico de arranque en pin global Button2 (2026-08-13, subido de 1000 — encoder no tiene hold propio, ver SAT_OPEN_HOLD_MS)
+#define SAT_OPEN_HOLD_MS       400   // REC en splash: hold mínimo real (Button2::wasPressedFor()) para abrir el SAT — filtra toques/rebotes breves, ya no dispara con glitches cortos (2026-08-13)
 
 
 // --- SENSOR TÁCTIL DEL FADER ---
