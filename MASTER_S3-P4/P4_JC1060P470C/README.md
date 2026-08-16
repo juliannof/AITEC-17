@@ -1,230 +1,98 @@
 # iMakie — ESP32-P4 Master MCU
 
-> ⚠️ **Placa actual: JC1060P470C.** La especificación de más abajo describe la placa
-> ANTIGUA `JC4880P443C` (480×800, ST7701S, NeoTrellis). La placa en uso es la
-> **JC1060P470C**: ESP32-P4 + display **JD9165 MIPI-DSI 1024×600 landscape nativo** +
-> touch **GT911**, **sin NeoTrellis**.
+Master Mackie Control Universal (MCU) para Logic Pro. Controla slaves S2 vía
+RS485 bus A, display táctil MIPI-DSI 1024×600, y reenvía/recibe estado de
+los 8 canales del S3 (Extender) por un enlace serie dedicado (S3LINK).
+
+**Placa activa:** GUITION JC1060P470C-I-W-Y — display **JD9165 MIPI-DSI 1024×600
+landscape nativo**, touch **GT911**, **sin NeoTrellis**.
+**Chip:** ESP32-P4 (dual-core), Flash 16MB (QIO), PSRAM 32MB (OPI)
+**Familia Mackie:** `0x14` (Main Unit)
+**Slaves controlados (RS485 bus A):** `NUM_SLAVES=0` en `config.h` — **bus A sin
+activar todavía**, pinout heredado de la placa antigua sin confirmar contra el
+esquemático real (ver §Pinout). El rig de 9×S2 ya está cableado, pendiente
+validar el pinout antes de subir `NUM_SLAVES` a 9. Nunca asumir el valor —
+verificar `config.h`.
+
+> ⚠️ **Placa descartada del desarrollo activo: `P4_JC4880P433C/`** (480×800,
+> ST7701S, NeoTrellis). Es un proyecto futuro independiente — no tocar, no
+> referenciar desde aquí.
 
 ---
 
-## Migración JC4880P433C → JC1060P470C (2026-06-10)
+## Pinout (verificado contra `src/config.h`)
 
-**Estado:** display + touch **funcionando**, UI completa migrada a **landscape 1024×600**.
+| Función | GPIO | Notas |
+|---------|------|-------|
+| RS485 TX / RX / EN (bus A) | 52 / 51 / 50 | ⚠️ **Heredado de la placa antigua, SIN confirmar** contra el esquemático JC1060P470C — ver `docs/RS485_P4.md` |
+| S3LINK TX / RX (↔ S3, Serial2) | 1 / 2 | 115200 baud, ver `docs/S3LINK.md` |
+| LCD_RST / LCD_BL (JD9165) | 27 / 23 | |
+| Touch GT911 SDA / SCL | 7 / 8 | I2C_NUM_1 (I2C_NUM_0 lo usa Wire del core), addr `0x5D`, RST/INT en NC |
 
-Referencia (fuente de verdad de pines y driver): demo del fabricante **`JC1060P470C_I_W`**
-(Arduino, LVGL v9).
+Todos los pines, baudrates y constantes de timing viven en `src/config.h` —
+es la fuente única de verdad, no asumir valores de este README.
 
-### Pines (`src/config.h`)
-- **Display JD9165**: `LCD_RST=27`, `LCD_BL=23`, 1024×600 landscape nativo.
-- **Touch GT911**: `SDA=7`, `SCL=8`, `RST=NC`, `INT=NC`, addr `0x5D`, **`I2C_NUM_1`** (`i2c_new_master_bus`).
-
-### Driver del display — lo crítico
-El `esp_lcd_jd9165` de **esp-iot-solution NO sirve** para este panel: init genérico
-(`0x11/0x29`) y timing distinto. Hay que usar el del **demo del fabricante**
-(`src/lcd/esp_lcd_jd9165.c/.h`), que trae:
-- Secuencia de init **real** del panel (~50 comandos).
-- `lane_bit_rate = 550` (no 750).
-- `dpi_clock = 56 MHz`, hsync `40/160/160`, vsync `10/23/12`, `num_fbs = 1`.
-
-> Con el driver equivocado, el panel **enciende (backlight) pero no pinta**. Fue la causa
-> raíz del "iluminado en negro".
-
-### Trampas / lecciones aprendidas
-- `idf_component.yml` **NO se procesa** con `framework=arduino` puro → drivers **vendorizados** en `src/` (incluir con ruta, p.ej. `"lcd/esp_lcd_jd9165.h"`).
-- Las macros `JD9165_*_CONFIG()` son **C99** → en C++ rellenar las structs a mano respetando el **orden de declaración** de los campos:
-  - `esp_lcd_dpi_panel_config_t`: `virtual_channel` primero.
-  - `esp_lcd_video_timing_t`: `h_size, v_size, hsync_pw, hsync_bp, hsync_fp, vsync_pw, vsync_bp, vsync_fp`.
-  - `jd9165_vendor_config_t` **no** tiene campo `.flags`.
-- **`I2C_NUM_0`** lo usa Wire del core → usar **`I2C_NUM_1`** para el touch.
-- UI portrait→landscape: quitar todas las `transform_rotation(900)` y recolocar en 1024×600
-  (header arriba `HEADER_H=88`, 8 canales en columnas `CH_W=128`, área `CONTENT_H=512`).
-
-### Pendiente
-- **Arranque sin monitor**: el informe del core (`CORE_DEBUG_LEVEL=5`) bloquea el USB-CDC hasta que un host abre el puerto.
-- Eliminar el subproyecto legado `P4_JC4880P433C` tras la validación final.
+**⚠️ Dato pendiente de portar desde S3:** `LOGIC_PITCHBEND_MAX` sigue en `14845`
+en este `config.h` — S3 lo corrigió a `16383` (confirmado por MIDI Monitor,
+2026-07-20) y nunca se replicó aquí. No es urgente mientras `NUM_SLAVES=0`,
+pero hay que portarlo antes de activar el bus A.
 
 ---
 
-Master Mackie Control Universal (MCU) para Logic Pro. Controla 9 tracks S2 locales vía RS485 bus A, display IPS táctil 480×800, y matriz NeoTrellis 4×8.
+## Driver del display — lo crítico
 
-**Placa de desarrollo:** GUITION ESP32-P4 Capacitive Touch IPS 4.3"  
-**Chip:** ESP32-P4 (Xtensa dual-core 400MHz)  
-**Flash:** 16MB (QIO)  
-**PSRAM:** 32MB (OPI)  
-**Display:** IPS 4.3" 480×800 (ST7701S MIPI-DSI 2-lane)  
-**Touch:** Capacitivo GT911 (I2C)  
-**Familia Mackie:** 0x14 (testing) / 0x15 (producción)  
-**Slaves controlados:** 9 (IDs 1–9) en RS485 bus A  
-**NeoTrellis:** 2× Adafruit seesaw 4×4 (matriz 4×8)
+El `esp_lcd_jd9165` de esp-iot-solution **no sirve** para este panel (init
+genérico, timing distinto — "enciende pero no pinta"). Se usa el driver del
+demo del fabricante, vendorizado en `src/lcd/esp_lcd_jd9165.c/.h` (`lane_bit_rate=550`,
+`dpi_clock=56MHz`, `num_fbs=1`). Detalle completo: `docs/DISPLAY_P4.md`.
 
----
+## Orientación de pantalla
 
-## Especificación de placa (2026-05-16)
-
-**Módulo:** GUITION JC4880P443C-I-W (placa de desarrollo integrada)  
-**Procesador principal:** ESP32-P4 Xtensa dual-core 400MHz (Core0 + Core1)  
-**Procesador secundario:** ESP32-C6 (Wi-Fi 6 + Bluetooth 5)  
-**Memoria:**
-- Flash: 16MB (QIO mode)
-- PSRAM: **32MB** (OPI mode) — ⚠️ ABUNDANTE para LVGL + multimedia
-- HP L2MEM: 768KB
-- LP SRAM: 32KB
-- HP ROM: 128KB
-- Bootloader: 0x0 (256KB)
-- App: 0x10000 (15.75MB)
-
-**Display:** IPS capacitivo 4.3" (color, alta definición)
-- Resolución: 480×800 píxeles (70.4 ppi)
-- Interface: MIPI-DSI 2-lane (ST7701S driver integrado)
-- Colores: 16M (24-bit RGB)
-- Touch: Capacitivo multitouch GT911 (I2C, detección gesto)
-- Brillo: Ajustable 0-255 (backlight PWM control)
-
-**Procesamiento multimedia:** (ESP32-P4 integrado)
-- JPEG codec (encode/decode)
-- Pixel Processing Accelerator (PPA)
-- Image Signal Processor (ISP) — RAW sensor input
-- H.264 video encoder
-- Propósito: soporta cámara MIPI-CSI + procesamiento en tiempo real
-
-**Audio:** (opcional, ES8311 codec en algunas variantes)
-- I2S stereo (microfono + altavoz)
-- ADC/DAC 16-bit
-- Propósito: soporte para synth/metrónomo futuro
-
-**Energía:**
-- Voltaje: USB 5V → regulador interno 3.3V
-- Corriente: ~200mA idle, 400mA full power, picos 500mA
-- USB: alimenta placa, display, touch y periféricos
-
-**Conectividad integral (ESP32-P4 + ESP32-C6):**
-
-ESP32-P4 periféricos:
-- **RS485 bus A:** 500 kbaud (9 slaves S2) — GPIO 50/51/52 UART
-- **I2C_NUM_0:** NeoTrellis seesaw (GPIO 33/31) — dirección 0x2F/0x2E
-- **I2C_NUM_1:** GT911 touch (GPIO 7/8) — multitouch capacitivo
-- **MIPI-CSI:** entrada cámara (interfaz física en placa)
-- **MIPI-DSI:** display ST7701S (integrado)
-- **SPI:** periféricos (DDR, SDIO)
-- **I2S:** audio stereo (micrófono, altavoz)
-- **LED PWM:** backlight display + 8 canales PWM auxiliares
-- **MCPWM:** motor control PWM (future expansion)
-- **ADC:** analog input (sensor temperatura, batería, etc)
-- **TWAI (CAN):** bus industrial (future)
-- **USB OTG 2.0 HS:** host + device mode
-
-ESP32-C6 wireless (suplementario):
-- **Wi-Fi 6** (802.11ax)
-- **Bluetooth 5** (BLE + classic)
-- Propósito: conectividad Logic Pro remota (futuro), OTA firmware
-
----
-
-## Pinout definitivo P4
-
-| Función | GPIO | Tipo | Notas |
-|---------|------|------|-------|
-| **RS485 TX (bus A)** | 50 | UART TX | 500 kbaud |
-| **RS485 RX (bus A)** | 51 | UART RX | 500 kbaud |
-| **RS485 EN (driver enable)** | 52 | GPIO output | Transceiver externo |
-| **NeoTrellis SDA (I2C_NUM_0)** | 33 | I2C SDA | Dirección 0x2F/0x2E |
-| **NeoTrellis SCL (I2C_NUM_0)** | 31 | I2C SCL | Dirección 0x2F/0x2E |
-| **Touch SDA (GT911, I2C_NUM_1)** | 7 | I2C SDA | Capacitivo |
-| **Touch SCL (GT911, I2C_NUM_1)** | 8 | I2C SCL | Capacitivo |
-| **Display MIPI-DSI** | Integrado | MIPI 2-lane | ST7701S en placa |
+La UI se dibuja en lienzo portrait nativo 480×800 pero el panel se monta
+girado 90° y se ve en landscape — la rotación es **por-objeto** (`transform_rotation`
+en cada label), no global. Ver `docs/DISPLAY_P4.md` §3 para el patrón completo
+y sus trampas.
 
 ---
 
 ## Compilación
 
-### Build con PlatformIO
-
 ```bash
-cd MASTER_S3-P4/P4
+cd MASTER_S3-P4/P4_JC1060P470C
 pio run -e esp32-p4
 ```
 
-### Configuración PlatformIO
+**`platformio.ini` (resumen, ver el archivo para la versión completa):**
+- `board = esp32-p4`, `board_build.partitions = default_16MB.csv`,
+  `board_build.psram_type = opi`
+- Flags: `-DDEVICE_P4_MASTER`, `-DBOARD_HAS_PSRAM`, `-DARDUINO_USB_MODE=1`,
+  `-DARDUINO_USB_CDC_ON_BOOT=1`
+- `lib_deps`: `lvgl/lvgl@^9.5.0`, `tamctec/TAMC_GT911@^1.0.2`
 
-```ini
-[env:esp32-p4]
-platform = https://github.com/pioarduino/platform-espressif32/releases/download/55.03.37/platform-espressif32.zip
-board = esp32-p4
-board_build.partitions = default_16MB.csv
-board_build.flash_size = 16MB
-board_build.psram_type = opi
-```
-
-> ⚠️ **Riesgo conocido (2026-05-24):** `default_16MB.csv` puede colisionar con la tabla del framework pioarduino (mismo nombre → PlatformIO usa la del framework, no la local). S3 tuvo este bug exacto y lo resolvió renombrando el archivo. Si P4 da problemas de tamaño de partición, renombrar a `p4_master_16MB.csv` y actualizar `board_build.partitions`.
-
-**Flags críticos:**
-- `-DBOARD_HAS_PSRAM` — Habilita PSRAM (32MB OPI)
-- `-DARDUINO_USB_MODE=1` — USB CDC nativo (USBMIDI)
-- `-DDEVICE_P4_MASTER` — Identifica como P4 Master (vs S3 Extender)
-
-### Platform y Framework
-
-**Platform:** espressif32 (pioarduino 55.03.37 — IDF5 + Arduino core)  
-**Framework:** Arduino  
-**Librerías (`lib_deps`):**
-- `lvgl/lvgl@^9.5.0` — UI framework 480×800
-- `tamctec/TAMC_GT911@^1.0.2` — Touch capacitivo GT911
-
-**Nota:** el display ST7701S usa un driver custom ESP-IDF (`src/lcd/st7701_lcd.cpp`) — **no LovyanGFX**. La comunicación MIDI usa la librería USBMIDI incluida en el framework Arduino ESP32.
+**Platform:** espressif32 (pioarduino 55.03.37 — IDF5 + Arduino core)
 
 ---
 
-## 🔄 Orientación de pantalla: Portrait dibujado → Landscape visualizado (2026-05-30 11:30)
+## Subsistemas — documentación centralizada
 
-El P4 **dibuja toda la UI en un lienzo portrait nativo 480×800**, pero el dispositivo se monta girado 90° y **se mira en landscape**. La conversión **NO es global** (el panel va con `swap_xy=0` y no hay `lv_display_set_rotation`): cada elemento de **texto** se rota individualmente 90° con `lv_obj_set_style_transform_rotation(obj, 900, 0)` + pivote al centro. Es frágil — cualquier label nuevo sin rotar aparece girado respecto al resto.
+Toda la arquitectura, protocolos y troubleshooting viven en `docs/`, no en
+este README — evita mantener el mismo dato en dos sitios que acaban
+divergiendo.
 
-> **Documentación canónica y exhaustiva** (diagrama de capas, patrón de código, las 5 trampas de `transform_rotation` solo-visual / touch sin compensar, y hallazgos de limpieza):
-> → **[docs/DISPLAY_P4.md §3 — Sistema de orientación](../../docs/DISPLAY_P4.md#3--sistema-de-orientación-portrait-dibujado--landscape-visualizado)**
-
----
-
-## Capacidades no utilizadas (expansion futura)
-
-| Capacidad | Hardware | Uso potencial |
-|-----------|----------|----------------|
-| **Cámara MIPI-CSI** | Interfaz física, ISP integrado | Análisis visual de escena, grabación |
-| **Audio I2S** | ES8311 codec (opcional en PCB) | Synth integrado, metrónomo, realtime monitor |
-| **Wi-Fi 6** | ESP32-C6 | Control remoto Logic Pro, streaming OSC |
-| **Bluetooth 5** | ESP32-C6 | Control inalámbrico de transporte, MIDI remote |
-| **USB OTG 2.0** | Integrado P4 | Host mode para periféricos USB futuros |
-| **TWAI (CAN)** | GPIO dedicados | Bus industrial para expansión modular |
-| **ADC 12-bit** | 7 canales | Sensores analog (temperatura, batería, presión) |
-| **MCPWM** | 6 canales PWM | Motor control (proyector, cortinas, luces escena) |
-| **JPEG codec** | Acelerador HW | Captura y envío foto de contraseña/escena |
-| **H.264 encoder** | Acelerador HW | Streaming video Logic → redes |
-
----
-
-## Subsistemas P4
-
-### Display P4 (ST7701S MIPI-DSI)
-→ **[docs/DISPLAY_P4.md](../../docs/DISPLAY_P4.md)** (ST7701S 480×800, LVGL v9, orientación portrait→landscape, pantalla de botones UIPage1 con los 32 botones MCU)
-
-### Touch (GT911)
-→ **[docs/TOUCH.md](../../docs/TOUCH.md)** (GT911 capacitivo, I2C_NUM_1, calibración, gestos)
-
-### NeoTrellis
-→ **[docs/NEOTRELLLIS.md](../../docs/NEOTRELLLIS.md)** (2× Adafruit seesaw 4×4, matriz 4×8, direcciones 0x2F/0x2E, RGB LEDs)
-
-### RS485 P4 (Bus A)
-→ **[docs/RS485_P4.md](../../docs/RS485_P4.md)** (500 kbaud, 9 slaves, timing, diferencias vs bus B S3)
-
-### Arquitectura Tareas P4
-→ **[docs/ARCHITECTURE_P4.md](../../docs/ARCHITECTURE_P4.md)** (dual-core Core0/Core1, flags g_switchToPage, VU meter decay, race conditions)
+| Tema | Documento |
+|---|---|
+| Display JD9165, LVGL v9, orientación portrait→landscape | [docs/DISPLAY_P4.md](../../docs/DISPLAY_P4.md) |
+| Touch GT911, calibración, integración LVGL | [docs/TOUCH.md](../../docs/TOUCH.md) |
+| RS485 bus A (pinout pendiente confirmar), timing vs bus B | [docs/RS485_P4.md](../../docs/RS485_P4.md) |
+| Enlace serie P4↔S3 (Serial2): canal + heartbeat | [docs/S3LINK.md](../../docs/S3LINK.md) |
+| Arquitectura de tasks (dual-core, flags de página, VU decay) | `docs/ARCHITECTURE_P4.md` — **pendiente de crear**, no existe todavía (enlace roto heredado del README anterior) |
+| Protocolo Mackie MCU completo (SysEx, notas, faders, VU) | [docs/MIDI.md](../../docs/MIDI.md) |
 
 ---
 
 ## Referencias
 
-- **RS485 (general):** [docs/RS485.md](../../docs/RS485.md)
-- **Transport:** [docs/Transport.md](../../docs/Transport.md)
-- **SAT:** [docs/SAT.md](../../docs/SAT.md)
-- **Arquitectura general:** [CLAUDE.md](../../CLAUDE.md)
-- **Estado técnico:** [STATUS.md](../../STATUS.md)
-- **S2 Slave:** [S2/README.md](../../S2/README.md)
-- **S3 Extender:** [MASTER_S3-P4/S3/iMakie-ESP32_S3_EXTENDER/README.md](../S3/iMakie-ESP32_S3_EXTENDER/README.md)
+- **Arquitectura general y directivas:** [CLAUDE.md](../../CLAUDE.md)
+- **Extender S3:** [MASTER_S3-P4/S3/iMakie-ESP32_S3_EXTENDER/README.md](../S3/iMakie-ESP32_S3_EXTENDER/README.md)
+- **Slave S2:** [S2/README.md](../../S2/README.md)
+- **Historial de cambios:** [CHANGELOG.md](../../CHANGELOG.md)

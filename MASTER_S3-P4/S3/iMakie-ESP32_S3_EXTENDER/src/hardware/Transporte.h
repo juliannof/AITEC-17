@@ -5,6 +5,7 @@
 
 
 namespace Transporte {
+    void initPins();
     void begin();
     void update();
     void setLed(uint8_t pin, bool on);

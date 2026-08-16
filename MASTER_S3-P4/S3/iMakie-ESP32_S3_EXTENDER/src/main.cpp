@@ -284,6 +284,10 @@ static const char* resetReasonStr(esp_reset_reason_t r) {
 // --- SETUP ---
 // ====================================================================
 void setup() {
+    // Apaga los GPIO de LEDs de transporte lo antes posible: reduce la ventana
+    // en la que quedan flotantes tras el bootloader (glow tenue fantasma en REC).
+    Transporte::initPins();
+
     randomSeed(esp_random());
     Serial.begin(115200);
     log_i("=== BOOT S3-02 Extender ===");
@@ -323,7 +327,10 @@ void setup() {
     // 6. Crear tareas
     log_i("5. Creando tareas...");
     xTaskCreatePinnedToCore(taskCore0, "MIDI", 4096, NULL, 2, &taskCore0Handle, 0);
-    xTaskCreatePinnedToCore(taskCore1, "TRANSP", 4096, NULL, 1, &taskCore1Handle, 1);
+    // TRANSP movido a core 0 (2026-08-16 22:05): compartía core 1 con RS485 (prio 5,
+    // busy-loop con taskYIELD) que lo dejaba sin CPU — botonera lenta. Core 1 ahora
+    // es exclusivo para RS485 (timing crítico en microsegundos).
+    xTaskCreatePinnedToCore(taskCore1, "TRANSP", 4096, NULL, 1, &taskCore1Handle, 0);
     rs485.startTask();
     log_i("   Tareas creadas");
 

@@ -24,8 +24,28 @@ Documentación exhaustiva del subsistema de transporte. Incluye botones físicos
 
 **Hardware:**
 - **Botones:** Switches mecánicos, gestión con Button2 library
-- **LEDs:** GPIO directo, on/off binario (no PWM actualmente)
+- **LEDs:** PWM 8-bit vía `analogWrite()` — brillo ajustable, ver §1.2 (2026-08-16)
 - **Polaridad:** Ánodo común a 5V → sink a GND para encender
+
+### 1.2 Brillo PWM (2026-08-16 22:05)
+
+Los 5 LEDs pasaron de `digitalWrite` on/off a `analogWrite` con brillo configurable:
+
+```cpp
+// config.h
+#define TRANSPORT_LED_BRIGHTNESS 50   // 0-255: 0=apagado, 255=brillo máximo
+
+// Transporte.cpp
+void setLed(uint8_t pin, bool on) {
+    // PWM invertido: ánodo común 5V, sink por GPIO — más tiempo en LOW = más brillo.
+    // analogWrite(valor) = % tiempo en HIGH, por eso 255-brillo
+    analogWrite(pin, on ? (255 - TRANSPORT_LED_BRIGHTNESS) : 255);
+}
+```
+
+**Por qué invertido:** con ánodo común, el GPIO enciende el LED en `LOW` (sink). `analogWrite(pin, valor)` en el core Arduino-ESP32 interpreta `valor` como % de tiempo en `HIGH` — así que para que el brillo suba con `TRANSPORT_LED_BRIGHTNESS` hay que restar a 255, no pasar el valor directo.
+
+Sin conflicto de canales LEDC en S3: no hay display/backlight ni otro uso previo de PWM (el NeoPixel de estado usa RMT, no LEDC).
 
 ---
 
@@ -48,17 +68,42 @@ Documentación exhaustiva del subsistema de transporte. Incluye botones físicos
 - **127** = encendido (Logic confirma estado activo, LED on)
 - **0** = apagado (Logic confirma estado inactivo, LED off)
 
-### 2.2 Caso especial — PLAY/STOP
+### 2.2 PLAY y STOP — combo, sin nota 93 (2026-08-16 22:25, tras dos intentos fallidos)
 
-`setLedByNote()` maneja nota 94 como combo:
+**Intento 1 (22:15, revertido):** STOP separado en `case 93` propio, asumiendo que Logic la manda de forma fiable — no es así, STOP dejó de apagarse nunca.
+
+**Intento 2 (22:18, revertido):** se restauró el combo (`case 94`) y se mantuvo `case 93` como vía secundaria — resultado: STOP dejaba de **encenderse** al pulsarlo. Sospecha: Logic manda un Note Off de la nota 93 como flash momentáneo del botón físico que pisa el `true` que el combo ya había puesto correctamente.
+
+**Diseño final:** `case 93` eliminado por completo — no hay evidencia fiable (sin captura de MIDI Monitor) de cómo Logic usa esa nota, y en dos intentos distintos causó una regresión distinta cada vez. STOP depende **únicamente** del combo con PLAY (mecanismo original, validado antes de tocar nada) + el apagado explícito al activar FF/RW:
 ```cpp
-case 94:  // PLAY/STOP — vel 127 = reproduciendo, vel 0 = parado
+case 94:  // PLAY/STOP combo — relación inversa, la única vía validada
     setLed(LED_PLAY, on);
-    setLed(LED_STOP, !on);  // STOP es el inverso de PLAY
+    setLed(LED_STOP, !on);
+    break;
+case 92:  // FAST FWD
+    setLed(LED_FF, on);
+    if (on) setLed(LED_STOP, false);   // Logic no apaga STOP al hacer FF por su cuenta
+    break;
+case 91:  // REWIND
+    setLed(LED_RW, on);
+    if (on) setLed(LED_STOP, false);   // mismo motivo que FF
     break;
 ```
-Cuando Logic envía PLAY ON: LED PLAY enciende, LED STOP apaga.  
-Cuando Logic envía PLAY OFF: LED PLAY apaga, LED STOP enciende.
+**Confirmado con captura real de MIDI Monitor (2026-08-16 22:28):** Logic **nunca** manda feedback de la nota 93 al pulsar el botón físico STOP del S3 — en toda una sesión de prueba con RW/FF/STOP pulsados varias veces, `A5` (nota 93) como mensaje `To iMakie-Extender` solo apareció una vez, dentro de la ráfaga de reset de conexión (§3.3 en `MIDI.md`), nunca como respuesta a una pulsación real. Sí se confirmó que Logic **responde con eco fiable a FF y RW** (`G♯5`→92 y `G5`→91 respectivamente), así que el problema es específico de la nota 93, no de la ruta de recepción MIDI en general.
+
+**Fix final (2026-08-16 22:30) — STOP encendido localmente:** ya que no hay ninguna señal fiable de Logic para "transporte parado", `onButtonPressed()` (`Transporte.cpp`) enciende `LED_STOP` de forma **local e inmediata** al pulsar el botón físico STOP, sin esperar feedback:
+```cpp
+static void onButtonPressed(Button2& b) {
+    for (uint8_t i = 0; i < N; i++) {
+        if (&buttons[i] == &b) {
+            sendNoteOn(MCU_TRANSPORT_NOTES[i]);
+            if (LEDS[i] == LED_STOP) setLed(LED_STOP, true);
+            return;
+        }
+    }
+}
+```
+PLAY/FF/RW siguen apagando STOP como antes (combo `case 94` + `case 91`/`92`), y REC/PLAY/FF/RW se siguen rigiendo por feedback real de Logic (confirmado fiable para esas 4 notas).
 
 ---
 
@@ -179,14 +224,14 @@ S2 recibe pkt.connected=0:
 
 ### 5.2 Implementación real
 
-**`Transporte::setLed()`** — lógica invertida (ánodo común):
+**`Transporte::setLed()`** — PWM invertido, ánodo común (ver §1.2):
 ```cpp
 void setLed(uint8_t pin, bool on) {
-    digitalWrite(pin, on ? LOW : HIGH);  // LOW = enciende, HIGH = apaga
+    analogWrite(pin, on ? (255 - TRANSPORT_LED_BRIGHTNESS) : 255);
 }
 ```
 
-**`Transporte::setLedByNote()`** — convierte nota MIDI en control LED:
+**`Transporte::setLedByNote()`** — convierte nota MIDI en control LED. PLAY/STOP en combo (relación inversa, validada), RW/FF apagan STOP al activarse. Nota 93 (STOP explícita) deliberadamente NO manejada — ver §2.2, dos intentos con ella causaron regresiones distintas:
 ```cpp
 void setLedByNote(uint8_t note, bool on) {
     switch (note) {
@@ -194,11 +239,16 @@ void setLedByNote(uint8_t note, bool on) {
             setLed(LED_PLAY, on);
             setLed(LED_STOP, !on);
             break;
-        case 95:  // REC
+        case 95:  // RECORD
             setLed(LED_REC, on);
             break;
-        case 97:  // FF
+        case 92:  // FAST FWD (nota MCU real 0x5C)
             setLed(LED_FF, on);
+            if (on) setLed(LED_STOP, false);
+            break;
+        case 91:  // REWIND
+            setLed(LED_RW, on);
+            if (on) setLed(LED_STOP, false);
             break;
     }
 }
@@ -248,10 +298,10 @@ Logic Pro recibe Note On 0x5E vel 127
 S3 processMidiByte() → processNote()
      ↓
 Transporte::setLedByNote(94, true)
-     │  setLed(LED_PLAY, true)   → LOW
-     │  setLed(LED_STOP, false)  → HIGH
+     │  setLed(LED_PLAY, true)
+     │  setLed(LED_STOP, false)
      ↓
-LED PLAY enciende, LED STOP apaga
+LED PLAY enciende, LED STOP apaga (combo, ver §2.2)
 
 Latencia total típica: < 60ms
 ```
@@ -270,6 +320,8 @@ Latencia total típica: < 60ms
 | Handshake falla (Logic no conecta) | Familia 0x14 no respondida en 0x00 | Verificar `DEVICE_FAMILY = 0x14` en config.h |
 | LEDs no se apagan al desconectar | `setAllLedsOff()` no llamado | Verificar en case 0x0F y bloque PitchBend disconnect |
 | Botón no envía MIDI | MIDI buffer lleno o task bloqueada | Verificar `tud_midi_stream_read()` en taskCore0 |
+| Brillo tenue "fantasma" en LED (típicamente REC) al arrancar/conectar, sin acción del usuario ni de Logic | GPIO en alta impedancia (flotante) entre power-on y el primer `pinMode(OUTPUT)` — fuga vía diodo ESD interno, microamperios (2026-08-16) | Resuelto: `Transporte::initPins()` como primera instrucción de `setup()` (antes de Serial/USB), + brillo PWM bajo (`TRANSPORT_LED_BRIGHTNESS=50`) reduce el contraste. Confirmado en banco por el usuario. |
+| Botonera de transporte se nota lenta al pulsar | `taskCore1` (botones) compartía core 1 con el task RS485 (prioridad 5, busy-loop `taskYIELD()`) que lo dejaba sin CPU | Resuelto (2026-08-16): `taskCore1` movido a core 0 (`main.cpp:330`) — core 1 queda dedicado en exclusiva al RS485. Ver CHANGELOG sesión 2026-08-16 22:05. |
 
 ### 6.2 Logs de Referencia
 
@@ -300,6 +352,11 @@ Latencia total típica: < 60ms
 
 ## Últimas Actualizaciones
 
+- **(2026-08-16 22:30)** §2.2 Confirmado con MIDI Monitor real: Logic nunca manda feedback de la nota 93 al pulsar Stop. Fix final: `onButtonPressed()` enciende LED_STOP localmente al pulsar el botón físico, sin esperar a Logic. Ver CHANGELOG sesión 2026-08-16 22:05, Hallazgo 5 (cerrado)
+- **(2026-08-16 22:25)** §2.2/§5.2 `case 93` (STOP explícito) eliminado por completo tras dos intentos fallidos distintos — STOP depende solo del combo con PLAY + apagado explícito por FF/RW. Ver CHANGELOG sesión 2026-08-16 22:05, Hallazgo 5 (actualizado)
+- **(2026-08-16 22:10)** §5.2 `setLedByNote()` — LEDs RW/FF corregidos (`case 97`→`92`, nuevo `case 91`), nunca recibían feedback real de Logic. Ver CHANGELOG sesión 2026-08-16 22:05, Hallazgo 4
+- **(2026-08-16 22:05)** §1.2 Brillo PWM ajustable en los 5 LEDs (`TRANSPORT_LED_BRIGHTNESS`, invertido por ánodo común) — antes on/off binario
+- **(2026-08-16 22:05)** §6.1 Fantasma REC (GPIO flotante en boot) y botonera lenta (contención de core FreeRTOS con RS485) — ambos diagnosticados y resueltos, ver CHANGELOG sesión 2026-08-16 22:05
 - **(2026-05-27)** §3 Comportamiento por estado de conexión — tabla completa conectado/desconectado
 - **(2026-05-27)** §4.2 Bug 0x61 documentado y fix explicado — causa: S2s siempre oscuros al conectar
 - **(2026-05-27)** §4.3 Secuencia GoOffline completa con `setAllLedsOff()`

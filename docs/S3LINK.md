@@ -148,3 +148,32 @@ falta el enlace físico o el S3 no está respondiendo.
 - Quitar o reducir el log de diagnóstico de heartbeat una vez el sistema
   lleve tiempo estable en producción (`S3Link.cpp` del P4, comentario
   "quitar tras validar en banco").
+- **Selección remota de pistas del S3 desde la pantalla del P4 — DISEÑO SIN IMPLEMENTAR (2026-08-16 22:35)**, ver §8.
+
+## 8. Diseño pendiente — SELECT remoto P4→S3 (2026-08-16 22:35)
+
+**Objetivo del usuario:** poder seleccionar, desde la pantalla táctil del P4, una de las pistas 0-7 que en realidad pertenecen al S3 (columnas 0-7 de `UIPage3.cpp`, alimentadas por `S3LINK_TYPE_CHANNEL`).
+
+**Por qué el baudrate no es el problema:** análisis de capacidad ya hecho para el enlace actual (VU throttlado a 8×30ms = 3.467 bytes/seg sobre 11.520 bytes/seg disponibles a 115200 8N1 → ~30% de uso, ~70% de margen). Una trama de selección es un evento disparado por el usuario (toque en pantalla), no periódico — incluso en un escenario pesimista de toques repetidos no acerca el enlace a su límite. **No hace falta subir el baudrate.**
+
+**Lo que sí falta — protocolo y ruta de vuelta:**
+
+1. **Nuevo tipo de trama P4→S3**, mismo patrón que `S3LinkPingPongFrame` (`s3_link_protocol.h`):
+   ```cpp
+   #define S3LINK_TYPE_SELECT   0x04   // P4 → S3
+
+   struct S3LinkSelectFrame {   // 4 bytes
+       uint8_t start;            // S3LINK_START
+       uint8_t type;             // S3LINK_TYPE_SELECT
+       uint8_t channel;          // 0-7
+       uint8_t crc;              // CRC8 sobre [type,channel]
+   };
+   ```
+
+2. **El S3 NO debe marcar el flag SELECT localmente al recibir esta trama.** Debe replicar exactamente lo que hace `Transporte.cpp::onButtonPressed()` con los botones físicos: mandar el Note On de SELECT (grupo 3 del rango 0-31, notas 24-31 → canal = nota-24) por USB-MIDI a Logic, y dejar que sea **Logic quien confirme** la selección real. La confirmación de Logic vuelve por el camino ya existente: `processNote()` (`MIDIProcessor.cpp:586-590`, grupo 3) actualiza `selectStates[]`/`g_selectedChannel` y ya dispara `s3Link.setFlags()` de vuelta hacia el P4 (§4, tabla de hooks, línea 98). **El circuito se cierra solo, reutilizando código existente — no hace falta lógica de estado nueva en el S3.**
+
+3. **Latencia esperada:** la trama en sí tarda ~0,35ms a 115200 (4 bytes). El tiempo dominante es la ida y vuelta con Logic por USB-MIDI (típicamente 10-50ms) — el mismo orden de magnitud que ya tarda pulsar un botón físico de SELECT en el propio S3. El enlace serie no añade demora perceptible.
+
+**Lado P4 — pendiente también:** detectar el toque sobre una columna 0-7 en `UIPage3.cpp` (actualmente esas columnas son de solo lectura, alimentadas por `S3LINK_TYPE_CHANNEL`) y, en ese handler, enviar `S3LinkSelectFrame` por `Serial2` en vez de escribir el estado directamente — la fuente de verdad sigue siendo la confirmación que vuelva del S3.
+
+**Estado:** diseño only, sin código escrito ni en P4 ni en S3.

@@ -106,6 +106,9 @@ extern volatile ConnectionState logicConnectionState;
 #define LED_RW     4
 #define BTN_RW     3
 
+// Brillo LEDs transporte — PWM 8-bit, invertido por ánodo común (2026-08-16 21:59)
+#define TRANSPORT_LED_BRIGHTNESS 40   // 0-255: 0=apagado, 255=brillo máximo
+
 // ====================================================================
 // --- NOTAS MIDI TRANSPORTE ---
 // ====================================================================
