@@ -5,6 +5,7 @@
 #include "config.h"
 #include "midi/MIDIProcessor.h"
 #include "RS485/RS485.h"
+#include "S3Link/S3Link.h"
 #include "hardware/Transporte.h"
 #include <Adafruit_NeoPixel.h>
 #include "esp_system.h"
@@ -154,6 +155,7 @@ static void processSlaveResponse(uint8_t slaveId) {
 void taskCore0(void* pvParameters) {
     log_e("MIDI task arrancando en Core %d", xPortGetCoreID());
     static unsigned long lastStatusLog = 0;  // ← MOVER AQUÍ
+    static unsigned long lastTempLog = 0;  // Log temperatura chip cada 1s (2026-08-16)
 
     for (;;) {
         // ── Apagar LED verde después de 200ms (2026-05-16 21:30) ──
@@ -190,6 +192,9 @@ void taskCore0(void* pvParameters) {
         // tickTrackNameDebounce aplica nombres de pista pendientes tras la ventana
         // anti-flash (2026-08-13 15:10) — ver MIDIProcessor.cpp case 0x12
         tickTrackNameDebounce();
+
+        // Enlace serie hacia P4: procesa PING entrante y responde PONG (2026-08-16)
+        s3Link.update();
 
         // VU timeout — Logic deja de enviar Channel Pressure cuando no hay audio.
         // S3 mantiene el último vuLevel indefinidamente → S2 nunca decae.
@@ -232,6 +237,12 @@ void taskCore0(void* pvParameters) {
                   internalNames[g_channelAutoMode[7] < 6 ? g_channelAutoMode[7] : 0]);
         }
         
+        // Temperatura interna del chip S3 — sensor nativo ESP32-S3 (2026-08-16)
+        if (millis() - lastTempLog > 1000) {
+            lastTempLog = millis();
+            log_i("[TEMP] S3 chip: %.1f C", temperatureRead());
+        }
+
         vTaskDelay(1);
     }
 }
@@ -294,6 +305,11 @@ void setup() {
     log_i("3. rs485.begin(%d)...", NUM_SLAVES);
     rs485.begin(NUM_SLAVES);
     log_i("   RS485 OK. Slaves: %d", NUM_SLAVES);
+
+    // 3b. Enlace serie hacia P4 (2026-08-16)
+    log_i("3b. s3Link.begin()...");
+    s3Link.begin();
+    log_i("   S3Link OK — TX:%d RX:%d", S3LINK_TX_PIN, S3LINK_RX_PIN);
 
     // 4. MIDI (sin delay largo)
     log_i("4. MIDI.begin()...");

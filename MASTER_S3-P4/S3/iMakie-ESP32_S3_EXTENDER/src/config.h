@@ -26,7 +26,7 @@
     // recibir transport/LCD con normalidad, revertir a 0x15 inmediatamente.
     #define DEVICE_FAMILY       0x14
     #define VERSION_REPLY_CMD   0x14
-    #define NUM_SLAVES          8   // TESTING= 1 a 8 | PRODUCCIÓN=8 — no cambiar aquí sin hardware real
+    #define NUM_SLAVES          8   // TESTING= 61 a 8 | PRODUCCIÓN=8 — no cambiar aquí sin hardware real
 
 #else
     #error "DEBE DEFINIR: DEVICE_P4_MASTER o DEVICE_S3_EXTENDER en platformio.ini build_flags"
@@ -53,6 +53,13 @@ extern volatile ConnectionState logicConnectionState;
 #define RS485_RX_PIN        16
 #define RS485_ENABLE_PIN     1
 #define RS485_BAUD          500000   // probado 250000 (2026-08-13): mismos CRC/ID MISMATCH bajo carga de motor — no era problema de velocidad, revertido
+
+// ====================================================================
+// --- Enlace serie S3↔P4 (Serial2, independiente del RS485 propio) (2026-08-16) ---
+// ====================================================================
+#define S3LINK_TX_PIN        18
+#define S3LINK_RX_PIN        17
+#define S3LINK_BAUD          115200
 
 
 // --- Timing (µs) ---

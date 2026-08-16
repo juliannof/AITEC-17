@@ -3,6 +3,7 @@
 #include <USBMIDI.h>
 #include "config.h"
 #include "RS485/RS485.h"
+#include "S3Link/S3Link.h"
 #include "midi/MIDIProcessor.h"
 #include "display/Display.h"
 #include "display/UIPage1.h"
@@ -119,6 +120,10 @@ void taskCore0(void* pvParameters) {
         }
 
         tickCalibracion();
+
+        // Enlace serie hacia S3: aplica canales recibidos + heartbeat (2026-08-16)
+        s3Link.update();
+
         // checkMidiTimeout();
         vTaskDelay(1);
     }
@@ -265,6 +270,11 @@ void setup() {
     rs485.startTask();
     log_i("   RS485 OK — TX:%d RX:%d EN:%d",
           RS485_TX_PIN, RS485_RX_PIN, RS485_ENABLE_PIN);
+
+    // 7b. Enlace serie hacia S3 (2026-08-16)
+    log_i("7b. s3Link.begin()...");
+    s3Link.begin();
+    log_i("   S3Link OK — TX:%d RX:%d", S3LINK_TX_PIN, S3LINK_RX_PIN);
 
     // 9. Crear tareas
     log_i("8. Creando tareas...");

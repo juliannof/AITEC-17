@@ -3,6 +3,7 @@
 #include "../config.h"
 #include <USBMIDI.h>
 #include "../RS485/RS485.h"
+#include "../S3Link/S3Link.h"
 #include "../hardware/Transporte.h"  // ← AÑADIDO
 
 extern USBMIDI MIDI;
@@ -97,6 +98,7 @@ void tickTrackNameDebounce() {
         if (trackNames[t] == _pendingName[t]) continue;  // defensivo, no debería pasar
         trackNames[t] = String(_pendingName[t]);
         rs485.setTrackName(t + 1, _pendingName[t]);
+        s3Link.setTrackName(t, _pendingName[t]);  // reenvía al P4 (2026-08-16)
     }
 }
 
@@ -314,11 +316,13 @@ void processChannelPressure(byte channel, byte value) {
                 break;
         }
         rs485.setVuLevel(targetChannel + 1, vuLevel7bit);
+        s3Link.setVuLevel(targetChannel, vuLevel7bit);  // reenvía al P4 (2026-08-16)
     } else if (channel >= 1 && channel <= 7) {
         targetChannel = channel;
         normalizedLevel = (float)value / 127.0f;
         if (value >= 127) newClipState = true;
         rs485.setVuLevel(targetChannel + 1, value);
+        s3Link.setVuLevel(targetChannel, value);  // reenvía al P4 (2026-08-16)
     } else {
         return;
     }
@@ -594,6 +598,7 @@ void processNote(byte status, byte note, byte velocity) {
             if (selectStates[track_idx]) flags |= FLAG_SELECT;
             flags = setAutoMode(flags, (AutoMode)g_channelAutoMode[track_idx]);
             rs485.setFlags(slaveId, flags);
+            s3Link.setFlags(track_idx, flags);  // reenvía al P4 (2026-08-16); enmascara AutoMode internamente
         }
         return;
     }

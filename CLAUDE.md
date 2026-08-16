@@ -412,7 +412,8 @@ ESP32-S3  ←→  RS485 bus B  ←→  8× ESP32-S2 (PTxx Track)
 │   ├── DISPLAY_P4.md                 ← ST7701S MIPI-DSI 480×800, LVGL v9 (2026-05-16)
 │   ├── TOUCH.md                      ← GT911 capacitivo I2C, calibración (2026-05-16)
 │   ├── NEOTRELLLIS.md                ← 2× seesaw 4×4 RGB, I2C (2026-05-16)
-│   └── RS485_P4.md                   ← Bus A pines pendientes confirmar, 9 slaves (2026-06-11)
+│   ├── RS485_P4.md                   ← Bus A pines pendientes confirmar, 9 slaves (2026-06-11)
+│   └── S3LINK.md                     ← Enlace serie S3↔P4 (Serial2): datos de canal + heartbeat (2026-08-16)
 ├── CHANGELOG.md                       ← Historial de cambios
 ├── README.md                          ← Intro repo
 └── platformio.ini                     ← Índice de subproyectos
@@ -441,6 +442,9 @@ ESP32-S3  ←→  RS485 bus B  ←→  8× ESP32-S2 (PTxx Track)
 - **TOUCH.md** — GT911 capacitivo I2C, calibración, LVGL integration
 - **NEOTRELLLIS.md** — 2× seesaw 4×4 RGB, I2C control
 - **RS485_P4.md** — Bus A pines (pendientes confirmar esquemático), timing vs Bus B
+
+**Enlace S3↔P4:**
+- **S3LINK.md** — UART punto a punto (Serial2, independiente de RS485): S3 reenvía nombre/REC/MUTE/SOLO/SELECT/VU de sus 8 canales al P4; P4 envía heartbeat y detecta al S3 desconectado (2026-08-16)
 
 **Directivas:**
 - **CLAUDE.md** — Directivas vinculantes únicamente (no duplicar técnica)
@@ -596,6 +600,7 @@ loop() {
 | Display | 7", 1024×600 landscape nativo, driver JD9165 MIPI-DSI |
 | Touch | GT911, I2C SDA=GPIO7 / SCL=GPIO8 |
 | RS485 | TX=GPIO43, RX=GPIO44, DE=GPIO42 |
+| S3LINK (enlace serie a S3, Serial2) | TX=GPIO1, RX=GPIO2, 115200 baud (ver docs/S3LINK.md) |
 | Backlight | GPIO23 |
 | LCD_RST | GPIO27 |
 | USB flash | USB-OTG (`/dev/cu.usbmodem`) |

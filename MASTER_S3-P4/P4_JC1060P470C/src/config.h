@@ -29,6 +29,15 @@
 #define RS485_ENABLE_PIN  50
 #define RS485_BAUD       500000
 
+// ── Enlace serie P4↔S3 (Serial2, independiente del RS485 propio) (2026-08-16) ──
+// TX/RX intercambiados (2026-08-16 20:31) respecto al plan original — el cable
+// físico ya tendido conecta al revés; se corrige en firmware, no en hardware.
+#define S3LINK_TX_PIN         1
+#define S3LINK_RX_PIN         2
+#define S3LINK_BAUD           115200
+#define S3LINK_HEARTBEAT_MS   500
+#define S3LINK_TIMEOUT_MS     1500
+
 // ── Display JD9165 (MIPI-DSI, 1024×600 landscape nativo) (2026-06-09) ──
 #define LCD_RST_PIN    27
 #define LCD_BL_PIN     23
@@ -114,6 +123,7 @@ enum DisplayMode { MODE_BEATS, MODE_SMPTE };
 // --- Estado de conexión global ---
 extern volatile ConnectionState logicConnectionState;
 extern uint8_t g_logicConnected;
+extern volatile bool g_s3Connected;  // true si el S3 respondió PONG dentro de S3LINK_TIMEOUT_MS (2026-08-16)
 
 // --- Variables de display ---
 extern String trackNames[16];
