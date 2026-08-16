@@ -228,20 +228,18 @@ static uint32_t           _stallCooldownUntil  = 0;      // timestamp: no re-arm
 //      físico real, nadie tocando), sí se respeta el cooldown completo. (2026-07-20)
 static bool               _stallCooldownFromTouch = false; // true si el STALL activo se originó con touch
 
-// Motor — detección movimiento manual (delta ADC acumulado en ventana de tiempo)
-static uint16_t   _motor_lastADCForDelta    = 0;   // ADC anterior (compatibilidad)
-static uint32_t   _deltaWindowStart         = 0;   // inicio ventana delta (2026-05-27)
-static uint16_t   _deltaWindowRef           = 0;   // ADC referencia inicio ventana (2026-05-27)
+// Motor — gancho de touch manual (detección por delta ADC eliminada 2026-08-14,
+// ver Motor::isManualTouchDetected() — devuelve false permanentemente, reservado
+// para reactivar el capacitivo)
 static bool       _motor_manualTouchDetected = false;
 static uint32_t   _motor_manualTouchStartTime = 0;
-static constexpr uint16_t MANUAL_TOUCH_THRESHOLD          = 150;  // umbral delta — motor activo (MOVING_TO_TARGET)
-static constexpr uint16_t MANUAL_TOUCH_AT_TARGET_THRESHOLD =  70;  // umbral en ventana 80ms — motor off (50→30→70, 2026-08-13: 30 quedaba dentro del ruido ADC real observado en banco — ±28 cuentas — causando touchState=1 sostenido sin toque real, bloqueando la corrección del fader al conectar)
-static constexpr uint32_t MANUAL_TOUCH_DEBOUNCE_MS        = 600;  // ms sin movimiento antes de ceder control
-static constexpr uint32_t TOUCH_DELTA_WINDOW_MS           =  80;  // ventana acumulación delta — captura movimientos lentos (2026-05-27)
-// WHY: el crucero a PWM_MAX (POSITION_CRUISE_ERR) da al motor más inercia al llegar
-// a AT_TARGET — el overshoot/asentamiento mecánico puede superar el umbral sensible
-// MANUAL_TOUCH_AT_TARGET_THRESHOLD sin que el usuario haya tocado nada. (2026-07-22)
-static constexpr uint32_t AT_TARGET_TOUCH_GRACE_MS        = 200;  // ms tras entrar en AT_TARGET, ignora touch
+// MANUAL_TOUCH_DEBOUNCE_MS: pese al nombre, ya NO tiene relación con el touch manual
+// (ese mecanismo fue eliminado 2026-08-14). Se conserva porque RS485Handler.cpp
+// (_touchDebounceForMode(), rama default) la reutiliza como debounce genérico de
+// 600ms para el reporte de touchState en AutoMode OFF/READ/WRITE — en la práctica
+// esa rama es inalcanzable hoy porque rawTouch (Motor::isManualTouchDetected())
+// nunca es true, pero el símbolo sigue siendo código vivo y compilado.
+static constexpr uint32_t MANUAL_TOUCH_DEBOUNCE_MS        = 600;
 
 // ─── AutoMode routing — RS485Handler (2026-05-30 09:35) ──────
 // WHAT: estado + constantes para enrutar el faderTarget según AutoMode (OFF/READ/WRITE/TRIM/TOUCH/LATCH).
@@ -267,6 +265,25 @@ static bool      _rsLatchFrozen      = false;
 static uint16_t  _rsLatchFrozenADC   = 0;
 static bool      _rsTouchActive      = false;
 static uint32_t  _rsLastTouchTime    = 0;
+
+// ─── Reporte de posición S2→Logic (2026-08-14) ────────────────
+// WHAT: decisión de "reportar faderPos ahora" — antes vivía en S3 como heurística
+//       (motorSettled + FADER_SYNC_DEADBAND comparando contra faderTarget, con
+//       lastSentPb[] almacenado por slave). Se traslada al S2 porque cada S2 ya
+//       conoce su propio AutoMode y estado de Motor — S3 pasa a ser transparente
+//       (solo transmite lo que el S2 decide, sin almacenar estado propio).
+// WHY:  en AUTO_WRITE el motor está inhibido (RS485Handler::_applyFaderTarget) y
+//       faderTarget queda congelado en el último valor de Logic — la heurística de
+//       S3 basada en "motor asentado respecto a faderTarget" dejaba de disparar en
+//       cuanto el usuario alejaba el fader del valor congelado, rompiendo la
+//       escritura de automatización en WRITE. Ver CHANGELOG sesión 2026-08-14.
+// _rsLastReportedPB: último valor PitchBend (0-16383) que este S2 decidió reportar.
+static uint16_t  _rsLastReportedPB   = 0;
+// Deadband para reporte en WRITE: filtra ruido residual del ADC sin perder
+// respuesta real del usuario. ±28 cuentas ADC observadas en banco (ver
+// MANUAL_TOUCH_AT_TARGET_THRESHOLD arriba) equivalen a ~17 cuentas PB
+// (28 × 16383/27000) — 20 cuentas cubre ese margen con holgura pequeña.
+static constexpr uint16_t FADER_REPORT_DEADBAND_PB = 20;
 
 // ─── FADERTOUCH — detección por sostenimiento ────────────────
 static constexpr uint32_t TOUCH_POLL_MS            = 20;      // intervalo de muestreo (ms)

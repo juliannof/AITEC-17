@@ -14,8 +14,18 @@
     // DEVICE_P4_MASTER (0x14) — el S3 se identificaba ante Logic con el MISMO byte
     // de familia que el P4, impidiendo que Logic distinga master de extender.
     // Corregido a 0x15, igual que la plantilla correcta en P4_JC1060P470C/src/config.h.
-    #define DEVICE_FAMILY       0x15
-    #define VERSION_REPLY_CMD   0x15
+    //
+    // EXPERIMENTO 2026-08-16: revertido a 0x14 a propósito — se confirmó en banco
+    // que Logic nunca manda las notas 74-78 (AutoMode) al Extender (familia 0x15),
+    // ni siquiera seleccionando el canal directamente en el S3 (descarta que sea un
+    // tema de selección). Se prueba si identificándose como Main Unit (misma familia
+    // que P4) Logic empieza a mandarle el AutoMode también. RIESGO: este mismo valor
+    // ya causó, por error de copia, que "Logic no pudiera distinguir master de
+    // extender" (ver arriba) — no se conoce el síntoma exacto de aquella vez. Si el
+    // S3 deja de conectar bien, de mantener banking sincronizado con el P4, o de
+    // recibir transport/LCD con normalidad, revertir a 0x15 inmediatamente.
+    #define DEVICE_FAMILY       0x14
+    #define VERSION_REPLY_CMD   0x14
     #define NUM_SLAVES          8   // TESTING= 1 a 8 | PRODUCCIÓN=8 — no cambiar aquí sin hardware real
 
 #else
@@ -64,8 +74,6 @@ extern volatile ConnectionState logicConnectionState;
 // el tope real de Logic — provocaba targets calculados más allá de
 // calibratedMax (motor persiguiendo una posición físicamente inalcanzable).
 #define LOGIC_PITCHBEND_MAX  16383
-#define FADER_SYNC_DEADBAND    200   // PitchBend counts S2→Logic: ~1.2% escala full (0-16383)
-#define MOTOR_SETTLE_THRESHOLD  60   // TODO BANCO: reescalado ADC→PB, verificar en V3 — motor settled cuando |faderPos-target| <= este valor (PitchBend 0-16383)
 
 // --- Nombre de pista: debounce anti-flash (2026-08-13 15:10) ---
 // TODO BANCO: ventana real observada del flash "Seleccionar"/"Selecting" fue

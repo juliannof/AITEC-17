@@ -263,7 +263,11 @@ void onMasterData(const MasterPacket& pkt) {
     // WHY: si veníamos de LATCH frozen y pasamos a READ, el freeze
     //      previo no debe arrastrarse. Lo mismo con _rsTouchActive.
     if (pktMode != _rsCurrentMode) {
-        log_i("[AUTOMODE] cambio modo %d → %d (reset freeze+touch)", _rsCurrentMode, pktMode);
+        // Nombres para comparar directo contra el log "[AUTOMODE] S3 0x0E ..." del
+        // extender — diagnóstico temporal 2026-08-16, quitar tras validar en banco.
+        static const char* modeNames[6] = {"OFF","READ","WRITE","TRIM","TOUCH","LATCH"};
+        log_i("[AUTOMODE] cambio modo %d(%s) -> %d(%s) (reset freeze+touch)",
+              _rsCurrentMode, modeNames[_rsCurrentMode], pktMode, modeNames[pktMode]);
         _rsCurrentMode    = pktMode;
         _rsLatchFrozen    = false;
         _rsTouchActive    = false;
@@ -364,6 +368,45 @@ SlavePacket buildResponse(FaderADC& faderADC, SatMenu& satMenu) {
         // (valores intermedios "viejos" reportados a Logic tras llegar a destino).
         resp.faderPos  = pb;
         resp.buttons |= SLAVE_FLAG_CALIB_DONE;   // bit de estado: calibrado y operativo
+
+        // ─── Decisión de reporte a Logic (2026-08-14) ──────────
+        // WHAT: sustituye la heurística que vivía en S3 (motorSettled contra
+        //       faderTarget congelado). Cada S2 decide con su propio estado —
+        //       S3 pasa a ser transparente (RS485Handler.h Internal, mismo
+        //       principio que ya rige calibración/mapeo PB↔ADC).
+        // WHY:  en AUTO_WRITE, faderTarget queda congelado (motor inhibido) —
+        //       la heurística de S3 dejaba de disparar en cuanto el usuario se
+        //       alejaba de ese valor viejo, rompiendo la escritura en WRITE.
+        bool shouldReport;
+        switch (_rsCurrentMode) {
+            case AUTO_WRITE: {
+                // Motor libre — cualquier cambio real es el usuario. Deadband
+                // filtra ruido residual del ADC (ver FADER_REPORT_DEADBAND_PB).
+                int deltaPB = abs((int)pb - (int)_rsLastReportedPB);
+                shouldReport = deltaPB > (int)FADER_REPORT_DEADBAND_PB;
+                break;
+            }
+            case AUTO_OFF:
+            case AUTO_READ:
+                // DAW absoluto — Logic ya conoce la posición, el motor la persigue.
+                shouldReport = false;
+                break;
+            case AUTO_TRIM:
+            case AUTO_TOUCH:
+            case AUTO_LATCH:
+                // Ligado al touch crudo — letra muerta hoy (isManualTouchDetected()
+                // siempre false), gancho para cuando se reactive el capacitivo.
+                shouldReport = (resp.touchState == 1);
+                break;
+            default:
+                // Reservados/desconocidos: conservador, igual que _applyFaderTarget().
+                shouldReport = false;
+                break;
+        }
+        if (!motorCalibrating && shouldReport) {
+            resp.buttons |= SLAVE_FLAG_REPORT_FADER;
+            _rsLastReportedPB = pb;
+        }
     } else {
         resp.faderPos = 0;
     }

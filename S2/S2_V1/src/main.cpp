@@ -209,7 +209,8 @@ void setup() {
     log_i("Hardware OK");
 
     // FaderTouch DESACTIVADO completamente (2026-06-14) — capacitivo no fiable en todo el recorrido
-    // Para reactivar: descomentar init/callbacks/update y revisar setADCDelta() en Motor.cpp
+    // Para reactivar: descomentar init/callbacks/update — el gancho manual (delta ADC) fue
+    // eliminado (2026-08-14), usar Motor::isManualTouchDetected() (capacitivo) como consumidor
     // FaderTouch::init();
     // FaderTouch::onTouch([]()   { digitalWrite(LED_BUILTIN_PIN, HIGH); });
     // FaderTouch::onRelease([]() { digitalWrite(LED_BUILTIN_PIN, LOW);  });
@@ -288,7 +289,6 @@ void loop() {
     // OTA siempre tiene máxima prioridad, incluso si SAT está abierto
     // Actualizar ADC SIEMPRE (incluso en SAT) para Test Mode live feedback (2026-05-10 21:57)
     faderADC.update();
-    Motor::setADCDelta(faderADC.getFaderPos());  // Detecta movimiento manual (delta ADC rápido) — 2026-05-16
     Motor::setADC(faderADC.getFaderPos());  // Motor recibe ADC ANTES de SAT check
 
     // Autocalibración de boot: diferida hasta tener lecturas reales del ADS1115.

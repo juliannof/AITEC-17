@@ -401,6 +401,13 @@ void processMackieSysEx(byte* payload, int len) {
             // viejo/potencialmente contaminado para cuando Logic reconecte.
             for (uint8_t i = 1; i <= NUM_SLAVES; i++)
                 rs485.setFaderTarget(i, rs485.getChannel(i).faderPos);
+            // Reset AutoMode a READ en desconexión (2026-08-16): sin esto, los 8
+            // canales se quedaban con el último modo real recibido por nota, incluso
+            // con Logic desconectado — mostrando un estado obsoleto. READ es el
+            // default seguro (igual que el boot, línea 71-73) hasta que Logic
+            // reconecte y mande el modo real por nota.
+            for (uint8_t i = 0; i < 8; i++) g_channelAutoMode[i] = AUTO_READ;
+            for (uint8_t i = 1; i <= NUM_SLAVES; i++) rs485.setAutoMode(i, AUTO_READ);
             Transporte::setAllLedsOff();  // LEDs transport off al desconectar (2026-05-27)
             rs485.beginDisconnectSequence();
             g_switchToOffline    = true;
@@ -499,16 +506,15 @@ void processMackieSysEx(byte* payload, int len) {
         }
 
         case 0x0E: {
-            if (len < 7) break;
-            byte channel = payload[5];
-            byte mode    = payload[6];
-            if (channel < 8) {
-                g_channelAutoMode[channel] = mode;
-                // Reenviar al slave — sin esto, un cambio de modo que llegue por este
-                // SysEx (en vez de por notas 74-78) nunca sale de la caché local y el
-                // S2 se queda con el último modo que sí llegó por notas. (2026-07-20)
-                rs485.setAutoMode(channel + 1, (AutoMode)mode);
-            }
+            // AutoMode NO se procesa desde este SysEx (2026-08-16). Confirmado en
+            // banco: Logic lo manda como refresco periódico con valor idéntico para
+            // los 8 canales (no refleja el modo real por pista), y su orden de bytes
+            // resultó ambiguo/no validado frente al de las notas 74-78. Tras el
+            // cambio de DEVICE_FAMILY (0x15→0x14, este mismo config.h) el S3 pasó a
+            // recibir las notas 74-78 igual que el P4 — esas SÍ reflejan el modo real
+            // por pista y ya usan un mapeo correcto (noteToMode[], más abajo). Dejar
+            // este SysEx activo solo arriesgaba pisar con un valor placeholder el
+            // modo correcto que acababa de llegar por nota. Ver CHANGELOG 2026-08-16.
             break;
         }
 

@@ -28,7 +28,6 @@ namespace Motor {
 
     // Entrada ADC (desde FaderADC)
     void setADC(uint16_t raw);
-    void setADCDelta(uint16_t currentADC);  // detecta movimiento manual por delta rápido, detiene motor si >500 cuentas
 
     // Control
     void setTarget(uint16_t midiPB14);  // 0-16383, mapea internamente a ADC
@@ -41,7 +40,7 @@ namespace Motor {
     float      getPosition();  // 0.0–1.0
     uint16_t   getADCMin();
     uint16_t   getADCMax();
-    bool       isManualTouchDetected();  // true si usuario movió fader (delta > umbral) (2026-05-19)
+    bool       isManualTouchDetected();  // SIEMPRE false desde 2026-08-13 (delta ADC eliminado) — gancho reservado para reactivar el capacitivo
 
     // Calibración
     void       startCalib();

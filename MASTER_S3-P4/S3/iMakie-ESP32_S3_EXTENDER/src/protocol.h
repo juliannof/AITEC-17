@@ -20,7 +20,7 @@
 // Slave flags (bits 4-7 en buttons)
 #define SLAVE_FLAG_CALIB_DONE      (1 << 4)   // calibración completa
 #define SLAVE_FLAG_CALIB_ERROR     (1 << 5)   // calibración fallida
-#define SLAVE_FLAG_CALIB_SENDING   (1 << 6)   // enviando datos calibración (min/max en faderPos)  // OBSOLETO 2026-07-20: rango ADC es interno del S2
+#define SLAVE_FLAG_REPORT_FADER    (1 << 6)   // el S2 decide que faderPos debe reenviarse a Logic ahora (reemplaza SLAVE_FLAG_CALIB_SENDING, obsoleto desde 2026-07-20 y nunca activado por ningún S2 — 2026-08-14)
 #define SLAVE_FLAG_CALIB_IS_MIN    (1 << 7)   // si SENDING=1: faderPos=MIN (sin flag: faderPos=MAX)  // OBSOLETO 2026-07-20: rango ADC es interno del S2
 // Nota: NOT_CALIBRATED no se usa en S3 (procesado solo en S2)
 // bits 5-7: modo de automatización (3 bits = 8 valores)

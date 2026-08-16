@@ -467,7 +467,7 @@ void initPWM() {
 void update() {
     // ┌─ Máquina de estados Motor v3 (2026-05-16 18:55) ──────────────────────────────────
     // PRIORIDAD ABSOLUTA:
-    //   1. Usuario mueve/toca → Motor::stop() inmediato (setADCDelta)
+    //   1. Usuario mueve/toca → Motor::stop() inmediato (gancho capacitivo, hoy inactivo — ver isManualTouchDetected())
     //   2. Motor::goToMin() MASTER → baja fader a 0 sin excepciones
     //   3. S3 ordena → Motor se mueve SOLO si usuario NO toca (setTargetFromS3)
     //
@@ -488,10 +488,10 @@ void update() {
     //     → MOVING_TO_TARGET → Motor mueve a target
     //   Llega a target → AT_TARGET → espera nuevo comando S3
     //
-    // FLUJO USUARIO MASTER:
-    //   Usuario mueve fader → setADCDelta() detecta delta OR FaderTouch
-    //     → Motor::stop() INMEDIATO
-    //     → AT_TARGET (usuario define posición)
+    // FLUJO USUARIO MASTER (hoy inactivo — detección por delta ADC eliminada 2026-08-14,
+    // FaderTouch capacitivo desactivado desde 2026-06-14; isManualTouchDetected() siempre
+    // false, ver Motor.h):
+    //   Usuario toca fader → Motor::stop() INMEDIATO → AT_TARGET (usuario define posición)
     //   Usuario suelta (200ms debounce) → S3 puede controlar de nuevo
     //
     // FLUJO DESCONEXIÓN S3:
@@ -641,29 +641,6 @@ void setADC(uint16_t v) {
     // segundo guard aquí era redundante y arriesgaba el mismo patrón de "freeze"
     // que la nota de arriba ya identificó como problemático.
     _motor_adcPos = v;
-}
-
-void setADCDelta(uint16_t currentADC) {
-    // Detección de touch por delta ADC ELIMINADA POR COMPLETO (2026-08-13 15:10,
-    // petición explícita del usuario, confirmada dos veces — incluye el caso
-    // AT_TARGET/IDLE, no solo MOVING_TO_TARGET). Motivo: el motor en marcha
-    // rápido disparaba touchState=1 falso — Logic seleccionaba pistas solo
-    // (SELECT MIDI en S3, ver main.cpp de S3) sin que nadie tocara el fader.
-    // El heurístico por delta/dirección (2026-05-24, con ajustes en 2026-07-22
-    // y 2026-08-13) nunca llegó a ser fiable pese a varias capas de parches.
-    //
-    // CONSECUENCIA DE SEGURIDAD ACEPTADA: _motor_manualTouchDetected ya nunca
-    // se pone a true — con el fader parado, sujetarlo con la mano ya NO cede
-    // el control al motor; perseguirá el target de Logic contra la mano,
-    // cortándose por STALL_PROTECT_MS (~400ms, Motor::update(), independiente
-    // y sigue intacto) y reintentando tras STALL_COOLDOWN_MS.
-    // Motor::isManualTouchDetected() (consumida por RS485Handler para
-    // touchState, y como guard en goToMin()/setTargetFromS3()) siempre
-    // devuelve false a partir de ahora.
-    //
-    // FaderTouch::isTouched() (capacitivo) sigue desactivado por separado
-    // desde 2026-06-14 — no es una alternativa activa hoy.
-    _motor_lastADCForDelta = currentADC;
 }
 
 // setTarget — ancla el target ADC directamente (dominio ADC, no PitchBend).

@@ -149,19 +149,21 @@ F0 00 00 66 15 13 00 F7  ← versión familia 0x15
 
 Esta secuencia se repite **3 veces** — Logic reintenta si no recibe respuesta satisfactoria en el tiempo esperado.
 
-**⚠️ Bug crítico — P4 y S3 responden a CUALQUIER familia:**
+**✅ P4 corregido (2026-08-13 16:48) — ⚠️ S3 pendiente, sin tocar (confirmado OK en Logic tal cual está):**
 
-El código actual en `processMackieSysEx()` responde a cmd `0x00` y `0x13` ANTES de comprobar la familia:
+El código respondía a cmd `0x00` y `0x13` ANTES de comprobar la familia:
 
 ```cpp
-if (command == 0x00) { sendMIDIBytes(reply, ...); return; }  // ← responde a familia 0x10, 0x11, 0x15, 0x17
+if (command == 0x00) { sendMIDIBytes(reply, ...); return; }  // ← respondía a familia 0x10, 0x11, 0x15, 0x17
 if (command == 0x13) { sendMIDIBytes(reply, ...); return; }
 if (device_family != 0x14) return;
 ```
 
-Cuando Logic envía `F0 00 00 66 10 00 F7` (probe a familia 0x10), P4 y S3 responden identificándose como familia `0x14`. Logic recibe respuestas inesperadas a sus probes de otras familias, lo que puede causar confusión y contribuye al **loop de reintento del handshake** (ver 3.4.3).
+Cuando Logic envía `F0 00 00 66 10 00 F7` (probe a familia 0x10), el P4 respondía identificándose como familia `0x14`. Logic recibía respuestas inesperadas a sus probes de otras familias, lo que causaba confusión y contribuía al **loop de reintento del handshake** (ver 3.4.3) — confirmado en captura real de MIDI Monitor el 2026-08-13 16:37: la secuencia `0x21→0x20×8→0x0A→0x0C→0x0B→0x12` se repetía cada ~200-300ms sin estabilizar.
 
-**Fix:** Mover el guard `if (device_family != 0x14) return;` AL INICIO de `processMackieSysEx()`, antes de manejar `0x00` y `0x13`.
+**Fix aplicado en P4** (`MASTER_S3-P4/P4_JC1060P470C/src/midi/MIDIProcessor.cpp`, `processMackieSysEx()`): guard `if (device_family != DEVICE_FAMILY) return;` movido AL INICIO, antes de manejar `0x00`/`0x13`; literales `0x14` sustituidos por `DEVICE_FAMILY`. Pendiente de validar en banco tras reflashear.
+
+**S3 — deliberadamente NO tocado (2026-08-13):** el S3 tiene el mismo patrón de código (guard después de Fase 0, ver `midi/MIDIProcessor.cpp` de S3), pero el usuario confirmó que el S3 conecta bien en Logic tal como está ahora — no se aplica el mismo fix para no arriesgar un comportamiento que ya funciona en banco. Si en el futuro aparecen síntomas de loop de handshake en S3, este es el primer sitio a revisar.
 
 ---
 
@@ -306,6 +308,17 @@ El comando `0x0E [ch] [mode]` llega a P4 cada vez que Logic cambia el modo de au
 **Confirmado en hardware:** P4 muestra en pantalla el modo de grabación de la pista activa (✅ comportamiento deseado). El display de P4 reacciona correctamente a `0x0E`. Esto se gestiona en `MIDIProcessor.cpp` vía `g_channelAutoMode[ch] = value` y `needsButtonsRedraw = true`.
 
 **Nota:** Logic envía `0x0E` para 9 canales (ch=0..8) en cada actualización. El ch=8 es el fader master — P4 actualmente lo ignora (no hay slot 8 en los arrays de 8 elementos). No es un bug funcional hoy, pero hay que tenerlo en cuenta cuando se amplíe a 16 canales.
+
+**⚠️ `0x0E` NO ES FIABLE para AutoMode en tiempo real — hallazgo 2026-08-16, ver `CHANGELOG.md` sesión completa:** confirmado en banco que Logic manda este SysEx como un **refresco periódico con el mismo valor para los 8/9 canales de golpe**, no el modo real e individual de cada pista. La tabla de valores de arriba (documentada en 2026-05-24) nunca se validó más allá del valor de arranque (`0x03`=Touch) — la ambigüedad entre este orden y el de las notas 74-78 (ver más abajo) quedó sin resolver porque la fuente en sí resultó no servir.
+
+**Causa raíz real, y por qué P4 "siempre fue correcto":** el AutoMode fiable en Mackie Control viaja por las **notas 74-78**, no por `0x0E` — y esas notas son una función exclusiva del **Main Unit**. Confirmado en banco: Logic nunca las manda a un dispositivo identificado como **Extender** (ni aunque se seleccione el canal directamente ahí), solo al Main. El P4 siempre reflejó el AutoMode bien porque siempre fue tratado como Main Unit; el S3 (Extender, familia `0x15`) nunca las recibía por diseño del protocolo, no por ningún bug de mapeo.
+
+**Fix aplicado en S3 (2026-08-16):**
+- `S3/config.h`: `DEVICE_FAMILY`/`VERSION_REPLY_CMD` cambiados de `0x15` a `0x14` (idéntico al P4) — tras esto, Logic empezó a mandar las notas 74-78 también al S3. Riesgo conocido y pendiente de validar del todo: banking P4↔S3 y estabilidad de conexión (ver `CHANGELOG.md`).
+- `S3/MIDIProcessor.cpp` `case 0x0E`: el procesamiento de AutoMode por este SysEx se **eliminó** — el AutoMode del S3 depende ahora exclusivamente de las notas 74-78, igual que P4 siempre hizo.
+- `S3/MIDIProcessor.cpp` `case 0x0F` (GoOffline): los 8 canales se resetean a `AUTO_READ` al desconectar Logic, para no dejar un modo obsoleto visible.
+
+**P4 — sin tocar a propósito:** conserva el `case 0x0E` sin usar (código muerto/obsoleto, ver `midi/MIDIProcessor.cpp:575-584`) porque nunca lo necesitó — sus notas 74-78 (`MIDIProcessor.cpp:667`) ya reenvían correctamente por RS485. Cuando se retome el trabajo del bus RS485 A, el `case 0x0E` de P4 debería **eliminarse**, no corregirse — el enfoque correcto es depender solo de notas, como ya se validó en S3.
 
 ---
 

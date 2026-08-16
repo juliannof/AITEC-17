@@ -116,7 +116,7 @@ void setScreenBrightness(uint8_t brightness) {
 //       la calibración termina mientras la splash sigue visible.
 void drawCalibDot() {
     uint16_t calibColor = Motor::isCalibrated() ? TFT_GREEN : TFT_RED;
-    tft.fillCircle(TFT_WIDTH / 2, 205, 6, calibColor);
+    tft.fillCircle(TFT_WIDTH / 2, 232, 12, calibColor);
 }
 
 // ════════════════════════════════════════════════════════════

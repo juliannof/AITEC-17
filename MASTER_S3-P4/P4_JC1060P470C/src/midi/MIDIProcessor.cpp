@@ -356,21 +356,30 @@ void processMackieSysEx(byte* payload, int len) {
 
     log_v("[SYSEX] family=0x%02X cmd=0x%02X len=%d", device_family, command, len);
 
-    // Fase 0: sondeo — responder a cmd 0x00 y 0x13 en cualquier familia
+    // Fix (2026-08-13 16:48): guard de familia movido AL INICIO — Logic sondea 5
+    // familias Mackie distintas (0x10/0x11/0x14/0x15/0x17, ver docs/MIDI.md §3.4.1)
+    // y el P4 respondía a CUALQUIERA de ellas con su propia identidad (0x14) antes
+    // de comprobar qué familia se estaba sondeando — confirmado en MIDI Monitor:
+    // el P4 contestaba a los probes de 0x10/0x11/0x15/0x17 igual que al de 0x14,
+    // lo que confundía a Logic y producía un loop de renegociación (secuencia
+    // 0x21→0x20×8→0x0A→0x0C→0x0B→0x12 repitiéndose cada ~200-300ms sin
+    // estabilizar). Mismo bug ya documentado (nunca aplicado) y mismo patrón que
+    // el fix de S3 del 2026-08-07 (commit a0fb43b) — silencio total si la familia
+    // sondeada no es la propia.
+    if (device_family != DEVICE_FAMILY) return;
+
+    // Fase 0: sondeo de la propia familia
     if (command == 0x00) {
-        byte reply[] = {0xF0, 0x00, 0x00, 0x66, 0x14, 0x01,
+        byte reply[] = {0xF0, 0x00, 0x00, 0x66, DEVICE_FAMILY, 0x01,
                         0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0xF7};
         sendMIDIBytes(reply, sizeof(reply));
         return;
     }
     if (command == 0x13) {
-        byte reply[] = {0xF0, 0x00, 0x00, 0x66, 0x14, 0x14, 0x00, 0xF7};
+        byte reply[] = {0xF0, 0x00, 0x00, 0x66, DEVICE_FAMILY, 0x14, 0x00, 0xF7};
         sendMIDIBytes(reply, sizeof(reply));
         return;
     }
-
-    // Fase 1+: solo familia 0x14
-    if (device_family != 0x14) return;
 
     switch (command) {
 

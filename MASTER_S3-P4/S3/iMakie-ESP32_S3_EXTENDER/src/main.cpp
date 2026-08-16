@@ -74,8 +74,6 @@ TaskHandle_t taskCore1Handle = nullptr;
 // ====================================================================
 // --- HELPER RS485 → MIDI ---
 // ====================================================================
-static uint16_t lastSentPb[9] = {0};  // Track último PitchBend enviado por slave
-
 static void processSlaveResponse(uint8_t slaveId) {
     // Gate de conexión (2026-08-07): simétrico al gate ya existente en la entrada
     // (MIDIProcessor.cpp, PitchBend/CC "Gate de conexión 2026-08-02"). Sin esto, el
@@ -100,29 +98,21 @@ static void processSlaveResponse(uint8_t slaveId) {
         sendMIDIBytes(selMsg, 3);
     }
 
-    // NO ENVIAR si slave está en calibración (CALIB_SENDING activo) — valores raw no son válidos para Logic
-    if (!(ch.buttons & SLAVE_FLAG_CALIB_SENDING)) {
+    // Reporte de posición decidido por el propio S2 (2026-08-14) — S3 es transparente,
+    // no almacena heurística propia (antes: lastSentPb[]/motorSettled/FADER_SYNC_DEADBAND
+    // comparando contra faderTarget, roto en AUTO_WRITE porque faderTarget queda
+    // congelado con el motor inhibido). Ver S2/S2_V1/src/RS485/RS485Handler.cpp
+    // buildResponse() y protocol.h SLAVE_FLAG_REPORT_FADER.
+    if (ch.buttons & SLAVE_FLAG_REPORT_FADER) {
         // faderPos ya llega en PitchBend 0-16383 — el S2 mapea localmente con su rango
         // calibrado (2026-07-20). El S3 solo transporta, sin recalcular nada. El snap a
         // extremos ya no hace falta: el S2 satura su propio rango y entrega 0/16383 exactos.
         uint16_t pb = ch.faderPos;
         if (pb > 16383) pb = 16383;  // clamp defensivo
 
-        // Master hierarchy (2026-05-24):
-        //   touchState=1  → Usuario es master: enviar sin deadband
-        //   motor quieto  → Nadie: sync permitido (confirma posición real)
-        //   motor moviendo → Logic es master: silencio total (no interferir)
-        bool motorSettled = abs((int32_t)ch.faderPos - (int32_t)ch.faderTarget) <= MOTOR_SETTLE_THRESHOLD;
-        bool shouldSend = ch.touchState
-            ? (pb != lastSentPb[slaveId])
-            : (motorSettled && abs((int16_t)pb - (int16_t)lastSentPb[slaveId]) > FADER_SYNC_DEADBAND);
-
-        if (shouldSend) {
-            log_i("[FADER→LOGIC] SEND pb=%d touch=%d (pos=%d lastSent=%d)", pb, ch.touchState, ch.faderPos, lastSentPb[slaveId]);
-            byte msg[3] = { (byte)(0xE0 | midiCh), (byte)(pb & 0x7F), (byte)(pb >> 7) };
-            sendMIDIBytes(msg, 3);
-            lastSentPb[slaveId] = pb;
-        }
+        log_i("[FADER→LOGIC] SEND pb=%d touch=%d (pos=%d)", pb, ch.touchState, ch.faderPos);
+        byte msg[3] = { (byte)(0xE0 | midiCh), (byte)(pb & 0x7F), (byte)(pb >> 7) };
+        sendMIDIBytes(msg, 3);
     }
 
     // --- Botones → Note On/Off ---
@@ -225,6 +215,21 @@ void taskCore0(void* pvParameters) {
             else if (logicConnectionState == ConnectionState::CONNECTED) stateStr = "CONNECTED";
             
             log_v("[STATUS] %s | g_logicConnected=%d", stateStr, g_logicConnected);
+
+            // Diagnóstico temporal (2026-08-16) — resumen de los 8 modos consolidado
+            // en una sola línea, para verlos de un vistazo sin rastrear eventos
+            // dispersos. Nombres en orden del enum interno AutoMode. Quitar tras validar.
+            extern uint8_t g_channelAutoMode[8];
+            static const char* internalNames[6] = {"OFF","READ","WRITE","TRIM","TOUCH","LATCH"};
+            log_i("[AUTOMODE-ALL] ch0-7: %s %s %s %s %s %s %s %s",
+                  internalNames[g_channelAutoMode[0] < 6 ? g_channelAutoMode[0] : 0],
+                  internalNames[g_channelAutoMode[1] < 6 ? g_channelAutoMode[1] : 0],
+                  internalNames[g_channelAutoMode[2] < 6 ? g_channelAutoMode[2] : 0],
+                  internalNames[g_channelAutoMode[3] < 6 ? g_channelAutoMode[3] : 0],
+                  internalNames[g_channelAutoMode[4] < 6 ? g_channelAutoMode[4] : 0],
+                  internalNames[g_channelAutoMode[5] < 6 ? g_channelAutoMode[5] : 0],
+                  internalNames[g_channelAutoMode[6] < 6 ? g_channelAutoMode[6] : 0],
+                  internalNames[g_channelAutoMode[7] < 6 ? g_channelAutoMode[7] : 0]);
         }
         
         vTaskDelay(1);
