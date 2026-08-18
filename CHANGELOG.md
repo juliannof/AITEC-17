@@ -47,6 +47,18 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 ---
 
+### SESIÓN 2026-08-18 20:34 — S3: porteo completo del fix de reconexión + fix LED STOP reencendido + diagnóstico LED REC fantasma (hardware, sin fix de código)
+
+**Origen:** validación en banco del commit `17eb24e` (P4+S3, 20:28) — el usuario reportó que el fix de reconexión funcionaba en P4 pero no en S3.
+
+**Hallazgo 1 — porteo incompleto (`MIDIProcessor.cpp` S3):** el commit `17eb24e` copió a S3 `checkUsbLink()` y la ventana `DISCONNECT_CONFIRM_WINDOW_MS`, pero dejó fuera la línea que realmente resuelve la reconexión en caliente: `connectedSinceTime = millis();` seguía dentro del `if (logicConnectionState != CONNECTED)` en `case 0x21`, en vez de incondicional (mismo bug que P4 tenía antes de la sesión 19:30). Fix: espejo exacto del P4 — `connectedSinceTime`/`fadersAtMinMask` se refrescan siempre en `case 0x21` (tras el guard de firma de cierre). Commit `25b7601`.
+
+**Hallazgo 2 — LED STOP reencendido tras desconectar (`Transporte.cpp`/`MIDIProcessor.cpp` S3):** validado el fix anterior, el usuario reportó que el LED STOP quedaba encendido tras cerrar Logic. Causa: `Transporte::setAllLedsOff()` apaga STOP correctamente en el instante de la heurística de faders-a-0, pero los Note-Off residuales de la propia ráfaga de cierre de Logic (RW/FF/PLAY/REC) llegan justo después y se procesan sin guard de conexión — el Note-Off de PLAY (nota 94) reenciende STOP porque `setLedByNote()` case 94 lo trata como inverso de PLAY. Fix: `Transporte::setLedByNote()` en `processNote()` ahora solo se llama si `logicConnectionState == CONNECTED`. Commit `25b7601`. **Validado en banco:** ambos fixes confirmados por el usuario — reconexión en caliente y cierre de Logic con LEDs de transporte apagados correctamente.
+
+**Hallazgo 3 — LED REC "fantasma" (diagnóstico, SIN cambio de código):** el usuario reportó un brillo fantasma en el LED REC de transporte que **desaparece al desconectar la ATX o el USB del P4**. Esto descarta origen firmware/GPIO-flotante-en-boot (el fix de la sesión 2026-08-16 22:05, `initPins()`, no depende de si ATX/P4 están conectados) — la correlación con dos fuentes de alimentación/referencia externas (ATX de la etapa de motores, y el USB del P4) apunta a una realimentación eléctrica (ground loop) por la tierra compartida: S3LINK usa "cableado cruzado + GND común" entre S3 y P4 (`docs/S3LINK.md` §2). Por directiva del proyecto (hardware locked — nunca proponer cambios de cableado), se documenta el diagnóstico sin intentar fix de firmware, ya que no hay ninguna variable de software que explique una dependencia con la alimentación externa. Pendiente: el usuario decide si aísla la tierra físicamente (fuera de alcance de este repo/firmware).
+
+---
+
 ### SESIÓN 2026-08-18 19:30 — P4: fix reconexión en caliente (VU meters/botones no volvían tras reconectar)
 
 **Origen:** el usuario reportó, en banco, que tras una reconexión en caliente del P4 (desconectar/reconectar USB), el handshake MCU volvía a completarse ("header ok") pero VU meters y botones no volvían a actualizarse ("cuerpo no reconecta").
