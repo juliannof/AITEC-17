@@ -60,7 +60,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 - `display/UIHeader.cpp`: quitada la pestaña "Fa" del header (widgets `s_fa_lbl`/`s_fa_hit`, entrada en `navDefs` — ahora solo Bo/Vu), su extern y su rama en `nav_btn_cb()`.
 - `display/UIMenu.cpp`: quitados los botones "Botones"/"VUMetros"/"Faders" del panel del menú (y sus externs/ramas de `btn_cb()`) — la navegación de páginas sigue viva vía el header Bo/Vu, ya no se duplica en el menú. Queda solo el botón "Reiniciar" (arriba-izquierda) + el slider de brillo, ahora **vertical** (alto > ancho, LVGL lo renderiza vertical automáticamente — el extremo derecho del slider horizontal original, máximo, queda arriba).
 
-**Validación pendiente:** compilar y comprobar en pantalla real que el header solo muestra Bo/Vu, el menú hamburguesa solo muestra Reiniciar + slider vertical de brillo, y que ninguna combinación de navegación deja la UI en un estado inconsistente (page 2 ya no existe).
+**Ajuste 2026-08-18 21:10:** el usuario señaló que quedaba el título "General" del panel (resto de cuando el menú tenía más contenido) — retirado junto con el separador de debajo, reposicionados Reiniciar y el slider verticalmente hacia arriba para ocupar el hueco.
+
+**Validación pendiente:** compilar y comprobar en pantalla real que el header solo muestra Bo/Vu, el menú hamburguesa solo muestra Reiniciar + slider vertical de brillo (sin título), y que ninguna combinación de navegación deja la UI en un estado inconsistente (page 2 ya no existe).
 
 ---
 

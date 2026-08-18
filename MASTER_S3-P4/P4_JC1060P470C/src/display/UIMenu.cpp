@@ -122,33 +122,18 @@ void uiMenuInit(lv_obj_t* parent) {
     lv_obj_set_style_shadow_offset_y(s_panel, 8, 0);
     lv_obj_add_flag(s_panel, LV_OBJ_FLAG_HIDDEN);
 
-    // ── Título ────────────────────────────────────────────
-    lv_obj_t* title = lv_label_create(s_panel);
-    lv_label_set_text(title, "General");
-    lv_obj_set_style_text_color(title, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_16, 0);
-    lv_obj_set_pos(title, 24, 16);
-
-    // Separador
-    lv_obj_t* sep = lv_obj_create(s_panel);
-    lv_obj_set_pos(sep, 0, 48);
-    lv_obj_set_size(sep, P4_W, 1);
-    lv_obj_set_style_bg_color(sep, lv_color_hex(COL_TRACK_SEP), 0);
-    lv_obj_set_style_border_width(sep, 0, 0);
-    lv_obj_set_style_radius(sep, 0, 0);
-    lv_obj_clear_flag(sep, LV_OBJ_FLAG_CLICKABLE);
-
-    // ── Botón Reiniciar — arriba a la izquierda (2026-08-18: únicos botones de
-    // vista Botones/VUMetros/Faders retirados del menú, la navegación de páginas
-    // sigue viva en el header "Bo"/"Vu") ──
-    make_btn(s_panel, 40, 70, 220, 100, "Reiniciar", 0x3A1010, 0xFF4444);
+    // ── Botón Reiniciar — arriba a la izquierda (2026-08-18: título "General" y
+    // separador retirados junto con los botones de vista Botones/VUMetros/Faders
+    // — el panel ya solo tiene Reiniciar + brillo, un título genérico no aporta
+    // nada; la navegación de páginas sigue viva en el header "Bo"/"Vu") ──
+    make_btn(s_panel, 40, 30, 220, 100, "Reiniciar", 0x3A1010, 0xFF4444);
 
     // ── Slider brillo — vertical (2026-08-18: girado 90° a la izquierda; en LVGL
     // un lv_slider es vertical automáticamente cuando alto > ancho — el extremo
     // derecho del slider horizontal original (máximo) queda arriba) ──
-    int32_t slider_h = CONTENT_H - 160;
+    int32_t slider_h = CONTENT_H - 120;
     int32_t slider_x = P4_W - 160;
-    int32_t slider_y = 70;
+    int32_t slider_y = 30;
 
     s_slider_lbl = lv_label_create(s_panel);
     lv_label_set_text_fmt(s_slider_lbl, "%d%%", s_brightness);
