@@ -16,6 +16,7 @@
 - [PitchBend ↔ ADC Mapping](#pitchbend--adc-mapping)
 - [Firmware Modules](#firmware-modules)
 - [Development Environment](#development-environment)
+- [Known Hardware Issues](#known-hardware-issues)
 - [Documentation](#documentation)
 
 ---
@@ -190,10 +191,34 @@ cd S2/S2_V1 && pio run
 
 ---
 
+## Known Hardware Issues
+
+### LED REC de transporte "fantasma" (S3) — realimentación eléctrica, no firmware
+
+**Síntoma:** brillo tenue en el LED REC del transporte del S3 (`GPIO12`, `LED_REC`), sin que Logic ni el firmware lo enciendan.
+
+**Diagnóstico (2026-08-18, confirmado en banco):** desaparece al desconectar la ATX (alimentación de la etapa de motores) o el USB del P4. Esto descarta origen firmware — el fantasma por GPIO flotante en boot ya se corrigió el 2026-08-16 (`Transporte::initPins()`) y ese fix no depende de fuentes de alimentación externas. La correlación con dos referencias externas distintas apunta a una **realimentación eléctrica (ground loop)** por tierra compartida: el enlace `S3LINK` entre S3 y P4 usa cableado cruzado + **GND común** (ver [`docs/S3LINK.md`](docs/S3LINK.md) §2), y la ATX alimenta la misma etapa de motores/S2 que comparte referencia con el S3.
+
+Por la directiva de hardware bloqueado del proyecto (`CLAUDE.md`), el firmware **no** intenta "corregir" esto por software — no hay ninguna variable de código que explique una dependencia con alimentación externa. Se documenta aquí para que el propio usuario evalúe e implemente la solución física que prefiera.
+
+**Propuestas de solución (a evaluar/implementar por el usuario, ninguna aplicada):**
+
+| # | Propuesta | Qué resuelve | Coste/complejidad |
+|---|-----------|--------------|--------------------|
+| 1 | **Medir el lazo primero:** con todo conectado (ATX + S3 + P4), medir con multímetro la diferencia de potencial entre GND del S3 y GND del P4, y entre GND del S3 y GND de la ATX | Confirma la magnitud real del ground loop antes de tocar nada — evita "arreglar a ciegas" | Ninguno (solo medición) |
+| 2 | **Aislamiento galvánico en S3LINK** — sustituir el UART directo por un opto-acoplador (p.ej. par TX/RX vía optoacopladores digitales rápidos) o un transceptor UART aislado (ADuM/ISO7xxx) entre S3 y P4 | Rompe el camino de retorno de tierra compartido entre ambas placas sin perder la comunicación Serial2 | Medio — requiere componente adicional y placa/protoboard |
+| 3 | **Topología de tierra en estrella** — unir GND de ATX, S3 y P4 en un único punto físico (en vez de varios caminos de retorno independientes) | Elimina el bucle de tierra en el origen, sin aislar nada | Bajo — solo recableado del retorno de tierra |
+| 4 | **Choke de modo común (ferrita)** en el cable S3LINK (UART+GND) y/o en la alimentación de la ATX hacia la etapa de motores | Atenúa el ruido de alta frecuencia acoplado por el lazo, sin cambiar la topología | Bajo — pinza de ferrita externa, no invasivo |
+| 5 | **Condensador de desacoplo local** cerca de `LED_REC`/regulador del S3 | Filtra transitorios de baja energía acoplados por la tierra compartida en el nodo del LED | Bajo — un condensador cerámico pequeño |
+
+Orden recomendado: **1 → 3 → 4 → 5 → 2** (de menor a mayor invasión; la medición del punto 1 determina si el resto son necesarios).
+
+---
+
 ## Documentation
 
 Toda la documentación técnica detallada vive en [`docs/`](docs/) y en [`CLAUDE.md`](CLAUDE.md) (directivas de desarrollo). Historial de cambios en [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 
-*Last updated: 2026-07-20.*
+*Last updated: 2026-08-18.*
