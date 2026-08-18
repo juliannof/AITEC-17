@@ -175,9 +175,8 @@ extern char beatsChars_clean[13];
 extern DisplayMode currentTimecodeMode;
 
 extern volatile bool g_switchToPage3;
-extern volatile uint8_t g_currentPage;  // 0=P3A 1=P1 2=P3B
+extern volatile uint8_t g_currentPage;  // 0=P3A 1=P1
 extern volatile bool g_switchToPage3A;
-extern volatile bool g_switchToPage3B;
 extern volatile bool g_switchToOffline;
 extern volatile bool g_sessionActive;
 extern volatile bool g_switchToPage1;

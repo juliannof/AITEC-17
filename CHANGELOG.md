@@ -47,6 +47,23 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 ---
 
+### SESIÓN 2026-08-18 21:06 — P4: eliminación de UIPage3B + simplificación del menú hamburguesa (solo Reiniciar + slider vertical)
+
+**Origen:** el usuario indicó que `UIPage3B.cpp` ya no es necesaria, y por separado, que los botones de vista del menú (Botones/VUMetros/Faders) tampoco — el menú se queda solo con Reiniciar y el potenciómetro de brillo, girado 90° a la izquierda (vertical).
+
+**MCU afectadas:** P4 ✅ (único) · S2 ❌ · S3 ❌.
+
+**Cambios:**
+- Borrados `display/UIPage3B.cpp` y `display/UIPage3B.h` completos.
+- `main.cpp`: quitado el include, la variable `g_switchToPage3B`, el bloque `g_switchToPage3B` en `taskCore1()`, y las 5 ramas `g_currentPage == 2` que quedaban huérfanas (ese valor ya no es alcanzable).
+- `config.h`: quitado `extern volatile bool g_switchToPage3B;`, actualizado el comentario de `g_currentPage`.
+- `display/UIHeader.cpp`: quitada la pestaña "Fa" del header (widgets `s_fa_lbl`/`s_fa_hit`, entrada en `navDefs` — ahora solo Bo/Vu), su extern y su rama en `nav_btn_cb()`.
+- `display/UIMenu.cpp`: quitados los botones "Botones"/"VUMetros"/"Faders" del panel del menú (y sus externs/ramas de `btn_cb()`) — la navegación de páginas sigue viva vía el header Bo/Vu, ya no se duplica en el menú. Queda solo el botón "Reiniciar" (arriba-izquierda) + el slider de brillo, ahora **vertical** (alto > ancho, LVGL lo renderiza vertical automáticamente — el extremo derecho del slider horizontal original, máximo, queda arriba).
+
+**Validación pendiente:** compilar y comprobar en pantalla real que el header solo muestra Bo/Vu, el menú hamburguesa solo muestra Reiniciar + slider vertical de brillo, y que ninguna combinación de navegación deja la UI en un estado inconsistente (page 2 ya no existe).
+
+---
+
 ### SESIÓN 2026-08-18 20:34 — S3: porteo completo del fix de reconexión + fix LED STOP reencendido + diagnóstico LED REC fantasma (hardware, sin fix de código)
 
 **Origen:** validación en banco del commit `17eb24e` (P4+S3, 20:28) — el usuario reportó que el fix de reconexión funcionaba en P4 pero no en S3.

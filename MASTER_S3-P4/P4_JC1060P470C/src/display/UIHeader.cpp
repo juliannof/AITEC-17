@@ -6,14 +6,12 @@
 extern void sendMIDIBytes(const uint8_t* data, size_t len);
 extern volatile bool g_switchToPage1;
 extern volatile bool g_switchToPage3A;
-extern volatile bool g_switchToPage3B;
 
 static void nav_btn_cb(lv_event_t* e) {
     if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
     int idx = (int)(intptr_t)lv_event_get_user_data(e);
     if      (idx == 0) g_switchToPage1  = true;
     else if (idx == 1) g_switchToPage3A = true;
-    else if (idx == 2) g_switchToPage3B = true;
 }
 
 static void header_btn_cb(lv_event_t* e) {
@@ -43,10 +41,8 @@ static lv_obj_t* s_solo_hit   = NULL;
 static lv_obj_t* s_click_hit  = NULL;
 static lv_obj_t* s_bo_lbl     = NULL;
 static lv_obj_t* s_vu_lbl     = NULL;
-static lv_obj_t* s_fa_lbl     = NULL;
 static lv_obj_t* s_bo_hit     = NULL;
 static lv_obj_t* s_vu_hit     = NULL;
-static lv_obj_t* s_fa_hit     = NULL;
 static lv_obj_t* s_vpot_lbl[8] = {};
 static lv_obj_t* s_assign_cont = NULL;
 static lv_obj_t* s_assign_lbl  = NULL;
@@ -96,7 +92,6 @@ static void applyModeState(bool isBeats) {
 static void updateNavButtons() {
     applyNavState(s_bo_lbl, g_currentPage == 1);
     applyNavState(s_vu_lbl, g_currentPage == 0);
-    applyNavState(s_fa_lbl, g_currentPage == 2);
     s_lastPage = g_currentPage;
 }
 
@@ -348,15 +343,15 @@ void uiHeaderCreate(lv_obj_t* parent) {
         }
     }
 
-    // ── Botones navegación Bo/Vu/Fa (izquierda del menú) ─────────
-    // Fa=916, Vu=864, Bo=812 — gap 8px entre sí y hacia hamburguesa
+    // ── Botones navegación Bo/Vu (izquierda del menú) ────────────
+    // Vu=864, Bo=812 — gap 8px entre sí y hacia hamburguesa (2026-08-18: pestaña
+    // "Fa"/Page3B retirada junto con UIPage3B.cpp)
     static const struct { lv_obj_t** lbl; lv_obj_t** hit; int x; const char* txt; int idx; }
-    navDefs[3] = {
+    navDefs[2] = {
         { &s_bo_lbl, &s_bo_hit, 812, "Bo", 0 },
         { &s_vu_lbl, &s_vu_hit, 864, "Vu", 1 },
-        { &s_fa_lbl, &s_fa_hit, 916, "Fa", 2 },
     };
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 2; i++) {
         *navDefs[i].lbl = lv_obj_create(parent);
         lv_obj_set_pos(*navDefs[i].lbl, navDefs[i].x, (HEADER_H - 34) / 2);
         lv_obj_set_size(*navDefs[i].lbl, 44, 34);
@@ -563,10 +558,8 @@ void uiHeaderDestroy() {
     for (int i = 0; i < 3; i++) {
         if (s_beat_dot[i]) { lv_obj_delete(s_beat_dot[i]); s_beat_dot[i] = NULL; }
     }
-    if (s_fa_hit)     { lv_obj_delete(s_fa_hit);     s_fa_hit     = NULL; }
     if (s_vu_hit)     { lv_obj_delete(s_vu_hit);     s_vu_hit     = NULL; }
     if (s_bo_hit)     { lv_obj_delete(s_bo_hit);     s_bo_hit     = NULL; }
-    if (s_fa_lbl)     { lv_obj_delete(s_fa_lbl);     s_fa_lbl     = NULL; }
     if (s_vu_lbl)     { lv_obj_delete(s_vu_lbl);     s_vu_lbl     = NULL; }
     if (s_bo_lbl)     { lv_obj_delete(s_bo_lbl);     s_bo_lbl     = NULL; }
     if (s_assign_cont) { lv_obj_delete(s_assign_cont); s_assign_cont = NULL; s_assign_lbl = NULL; }

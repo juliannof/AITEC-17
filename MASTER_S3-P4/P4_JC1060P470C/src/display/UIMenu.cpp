@@ -19,9 +19,6 @@ static lv_timer_t* s_save_timer = NULL;
 static Preferences prefs;
 
 extern void displaySetBrightness(uint8_t brightness);
-extern volatile bool g_switchToPage1;
-extern volatile bool g_switchToPage3A;
-extern volatile bool g_switchToPage3B;
 extern volatile uint8_t g_currentPage;
 
 static void ham_cb(lv_event_t* e) {
@@ -31,25 +28,7 @@ static void ham_cb(lv_event_t* e) {
 
 static void btn_cb(lv_event_t* e) {
     const char* txt = (const char*)lv_event_get_user_data(e);
-    if (strcmp(txt, "Botones") == 0) {
-        prefs.begin("uimenu", false);
-        prefs.putUChar("lastPage", 1);
-        prefs.end();
-        g_switchToPage1 = true;
-        uiMenuClose();
-    } else if (strcmp(txt, "VUMetros") == 0) {
-        prefs.begin("uimenu", false);
-        prefs.putUChar("lastPage", 0);
-        prefs.end();
-        g_switchToPage3A = true;
-        uiMenuClose();
-    } else if (strcmp(txt, "Faders") == 0) {
-        prefs.begin("uimenu", false);
-        prefs.putUChar("lastPage", 2);
-        prefs.end();
-        g_switchToPage3B = true;
-        uiMenuClose();
-    } else if (strcmp(txt, "Reiniciar") == 0) {
+    if (strcmp(txt, "Reiniciar") == 0) {
         displaySetBrightness(0);
         delay(50);
         ESP.restart();
@@ -159,26 +138,27 @@ void uiMenuInit(lv_obj_t* parent) {
     lv_obj_set_style_radius(sep, 0, 0);
     lv_obj_clear_flag(sep, LV_OBJ_FLAG_CLICKABLE);
 
-    // ── Botones de navegación — 4 en fila horizontal (landscape) ──
-    int32_t bw = (P4_W - 50) / 4;        // ~243px cada uno
-    int32_t bh = 220;
-    int32_t by = 70;
+    // ── Botón Reiniciar — arriba a la izquierda (2026-08-18: únicos botones de
+    // vista Botones/VUMetros/Faders retirados del menú, la navegación de páginas
+    // sigue viva en el header "Bo"/"Vu") ──
+    make_btn(s_panel, 40, 70, 220, 100, "Reiniciar", 0x3A1010, 0xFF4444);
 
-    make_btn(s_panel, 10 + 0 * bw, by, bw - 10, bh, "Botones",  COL_TRACK_SEL, 0xFFFFFF);
-    make_btn(s_panel, 10 + 1 * bw, by, bw - 10, bh, "VUMetros", COL_TRACK_SEL, 0xFFFFFF);
-    make_btn(s_panel, 10 + 2 * bw, by, bw - 10, bh, "Faders",   COL_TRACK_SEL, 0xFFFFFF);
-    make_btn(s_panel, 10 + 3 * bw, by, bw - 10, bh, "Reiniciar",0x3A1010, 0xFF4444);
+    // ── Slider brillo — vertical (2026-08-18: girado 90° a la izquierda; en LVGL
+    // un lv_slider es vertical automáticamente cuando alto > ancho — el extremo
+    // derecho del slider horizontal original (máximo) queda arriba) ──
+    int32_t slider_h = CONTENT_H - 160;
+    int32_t slider_x = P4_W - 160;
+    int32_t slider_y = 70;
 
-    // ── Slider brillo ─────────────────────────────────────
     s_slider_lbl = lv_label_create(s_panel);
     lv_label_set_text_fmt(s_slider_lbl, "%d%%", s_brightness);
     lv_obj_set_style_text_color(s_slider_lbl, lv_color_hex(COL_TEXT_DIM), 0);
     lv_obj_set_style_text_font(s_slider_lbl, &lv_font_montserrat_12, 0);
-    lv_obj_set_pos(s_slider_lbl, P4_W / 2 - 16, CONTENT_H - 56);
+    lv_obj_set_pos(s_slider_lbl, slider_x - 4, slider_y - 24);
 
     s_slider = lv_slider_create(s_panel);
-    lv_obj_set_pos(s_slider, 60, CONTENT_H - 34);
-    lv_obj_set_size(s_slider, P4_W - 120, 22);
+    lv_obj_set_pos(s_slider, slider_x, slider_y);
+    lv_obj_set_size(s_slider, 40, slider_h);
     lv_slider_set_range(s_slider, 2, 100);
     lv_slider_set_value(s_slider, s_brightness, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(s_slider, lv_color_hex(COL_FADER_TRACK), LV_PART_MAIN);
