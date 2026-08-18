@@ -344,7 +344,7 @@ void processChannelPressure(byte channel, byte value) {
                 stateChanged = true;
             }
         }
-        if (stateChanged) needsVUMetersRedraw = true;
+        if (stateChanged) { needsVUMetersRedraw = true; vuDirty[dispCh] = true; }
     }
 }
 
@@ -370,13 +370,24 @@ void processMackieSysEx(byte* payload, int len) {
 
     // Fase 0: sondeo de la propia familia
     if (command == 0x00) {
+        // Serial 7 bytes ASCII "AITEC-M" (M = Main), único frente al S3.
+        // Challenge 4 bytes fijos "AITM". Logic responde con 0x02; confirmamos con 0x03.
         byte reply[] = {0xF0, 0x00, 0x00, 0x66, DEVICE_FAMILY, 0x01,
-                        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0xF7};
+                        'A','I','T','E','C','-','M', 'A','I','T','M', 0xF7};
+        sendMIDIBytes(reply, sizeof(reply));
+        return;
+    }
+    if (command == 0x02) {
+        // Fase 2: Logic confirma el challenge. No lo validamos (patrón BCF, confianza B1).
+        byte reply[] = {0xF0, 0x00, 0x00, 0x66, DEVICE_FAMILY, 0x03,
+                        'A','I','T','E','C','-','M', 0xF7};
         sendMIDIBytes(reply, sizeof(reply));
         return;
     }
     if (command == 0x13) {
-        byte reply[] = {0xF0, 0x00, 0x00, 0x66, DEVICE_FAMILY, 0x14, 0x00, 0xF7};
+        // Version reply: 5 bytes ASCII "V1.00" (antes 2 bytes, incorrecto).
+        byte reply[] = {0xF0, 0x00, 0x00, 0x66, DEVICE_FAMILY, 0x14,
+                        'V','1','.','0','0', 0xF7};
         sendMIDIBytes(reply, sizeof(reply));
         return;
     }
@@ -567,7 +578,7 @@ void processMackieSysEx(byte* payload, int len) {
                     }
                     rs485.setVuLevel(i + 1, (uint8_t)(normalized * 127.0f));
                 }
-                if (stateChanged) needsVUMetersRedraw = true;
+                if (stateChanged) { needsVUMetersRedraw = true; vuDirty[dispCh] = true; }
             }
             break;
         }

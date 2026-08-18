@@ -35,6 +35,7 @@ float vuPeakLevels[16]                 = {};
 unsigned long vuPeakLastUpdateTime[16] = {};
 uint8_t  vuPeakAlpha[16]               = {};
 uint32_t vuPeakFadeTime[16]            = {};
+bool vuDirty[16]                       = {};
 float faderPositions[16]               = {};
 bool needsTOTALRedraw    = false;
 bool needsMainAreaRedraw = false;

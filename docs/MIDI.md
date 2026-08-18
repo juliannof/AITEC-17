@@ -42,17 +42,26 @@ Logic sondea la superficie antes de identificarla. El handshake tiene dos fases.
 Logic pregunta a todos los dispositivos conectados:
 
 ```
-Logic → S3:   F0 00 00 66 XX 00 F7        (XX = cualquier familia)
-S3 → Logic:   F0 00 00 66 14 01 00 00 00 01 00 00 00 00 F7
-              └─ S3 se identifica como familia 0x14
+Logic → S3:   F0 00 00 66 15 00 F7        (familia propia del S3: 0x15)
+S3 → Logic:   F0 00 00 66 15 01 41 49 54 45 43 2D 58 41 49 54 58 F7
+              └─ serial "AITEC-X" (7 bytes) + challenge "AITX" (4 bytes)
+
+Logic → P4:   F0 00 00 66 14 00 F7        (familia propia del P4: 0x14)
+P4 → Logic:   F0 00 00 66 14 01 41 49 54 45 43 2D 4D 41 49 54 4D F7
+              └─ serial "AITEC-M" (7 bytes) + challenge "AITM" (4 bytes)
 ```
 
 ```
-Logic → S3:   F0 00 00 66 XX 13 F7        (petición de versión)
-S3 → Logic:   F0 00 00 66 14 14 00 F7
+Logic → S3/P4: F0 00 00 66 XX 13 F7        (petición de versión)
+S3/P4 → Logic: F0 00 00 66 XX 14 56 31 2E 30 30 F7
+               └─ "V1.00" (5 bytes ASCII)
 ```
 
-A partir de aquí, Logic sabe que hay una superficie familia `0x14` y solo enviará comandos con ese identificador.
+**Serial único por unidad (2026-08-17/18):** hasta esta fecha ambas unidades respondían al `0x00` con el mismo serial hardcodeado (`00 00 00 01 00 00 00`) y al `0x13` con solo 2 bytes — con **una sola unidad** Logic lo toleraba, pero con **P4+S3 simultáneos** el serial idéntico impedía a Logic distinguirlas como conexiones independientes, degradando ambas a MIDI genérico tras un rato de uso. Fix: cada unidad responde con un serial ASCII distinto ("AITEC-M" / "AITEC-X") y un version reply de 5 bytes ASCII real ("V1.00"), en vez de los placeholders anteriores. Ver `CHANGELOG.md` sesión 2026-08-18.
+
+**Fase 1 — confirmación de challenge (`0x02`→`0x03`), implementada pero NO ejercitada por Logic:** el protocolo formal (confirmado con captura real de un BCF2000 en modo Mackie) contempla que Logic responda al `0x01` con `F0 00 00 66 XX 02 <serial> <respuesta 4 bytes> F7`, y que el dispositivo confirme con `F0 00 00 66 XX 03 <serial> F7` sin validar la respuesta (patrón "B1: confianza", igual que hace la BCF). P4 y S3 implementan esta rama (`processMackieSysEx`, `command == 0x02`). **Observado en banco (2026-08-18, captura MIDI Monitor con P4+S3 simultáneos):** Logic **nunca envía el `0x02`** a ninguna de las dos unidades — pasa directo del `0x01` al `0x21` (GoOnline). El manejo de `0x02→0x03` queda como salvaguarda inerte para este cliente concreto de Logic; no es lo que resuelve la estabilidad (eso lo hace el serial único).
+
+A partir de la respuesta a `0x00`, Logic sabe que hay una superficie con esa familia y ese serial concreto, y dirige el resto del handshake a esa identidad.
 
 ### Fase 1 — Conexión (familia 0x14)
 
@@ -530,6 +539,8 @@ Canal N en row 1 → offset `N×7` (N = 0–7). Canal N en row 2 → offset `56 
 | **Borrado** | 56 espacios | Vacía | ✅ Borra nombres correctamente |
 
 > **Bug B2 (2026-05-20):** Cuando Logic muestra parámetros de plugin en row 2 (modo Atmos, spatial audio, inserts), `if (offset >= 56) break;` en `MIDIProcessor.cpp` línea 373 impide que S3 los procese. Caso menos frecuente. Ver sección §7.
+
+> **⚠️ No es un bug del firmware — Logic filtra texto de sus propios diálogos por este canal (2026-08-18):** con la ventana **Control Surfaces → Setup** abierta y en foco, al borrar/reconfigurar un dispositivo, Logic emite por `0x12` el texto literal de su propio diálogo de confirmación (ej. "¿Seguro que quieres eliminar todos los dispositivos sel[eccionados]?... Cancelar / Eliminar"), junto con Note On/CC que no corresponden a ningún control real (resaltados de botones de su propia UI). El P4/S3 lo pintan fielmente porque no hay forma de distinguirlo de un nombre de pista real — no hay nada que corregir en firmware. Si aparece texto sin sentido en la pantalla o VU "fantasma" durante una prueba, comprobar primero si esa ventana de Logic estaba abierta antes de asumir un bug de protocolo. También coincide con las ráfagas de reconexión (`0x21→0x20×8→...`) observadas mientras esa ventana está en uso — cerrarla antes de capturas de validación.
 
 ---
 

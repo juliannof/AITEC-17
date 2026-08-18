@@ -99,11 +99,13 @@ void S3Link::_applyChannelFrame(const uint8_t* buf) {
     if (normalized != vuLevels[ch]) {
         vuLevels[ch] = normalized;
         needsVUMetersRedraw = true;
+        vuDirty[ch] = true;
     }
     if (normalized > vuPeakLevels[ch]) {
         vuPeakLevels[ch]         = normalized;
         vuPeakLastUpdateTime[ch] = millis();
         needsVUMetersRedraw = true;
+        vuDirty[ch] = true;
     }
 }
 

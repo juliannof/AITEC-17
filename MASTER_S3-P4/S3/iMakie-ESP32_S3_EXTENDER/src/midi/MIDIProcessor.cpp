@@ -371,14 +371,25 @@ void processMackieSysEx(byte* payload, int len) {
         // extender (familia 0x15), el S3 igual contestaba 0x14 — Logic nunca lograba
         // identificar el extender como device distinto del P4, y reiniciaba la
         // negociación en bucle. Usar DEVICE_FAMILY (0x15 en el S3) en vez del literal.
+        // Serial 7 bytes ASCII "AITEC-X" (X = Extender), único frente al P4.
+        // Challenge 4 bytes fijos "AITX". Logic responde con 0x02; confirmamos con 0x03.
         byte reply[] = {0xF0, 0x00, 0x00, 0x66, DEVICE_FAMILY, 0x01,
-                        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0xF7};
+                        'A','I','T','E','C','-','X', 'A','I','T','X', 0xF7};
+        sendMIDIBytes(reply, sizeof(reply));
+        return;
+    }
+    if (command == 0x02) {
+        // Fase 2: Logic confirma el challenge. No lo validamos (patrón BCF, confianza B1).
+        byte reply[] = {0xF0, 0x00, 0x00, 0x66, DEVICE_FAMILY, 0x03,
+                        'A','I','T','E','C','-','X', 0xF7};
         sendMIDIBytes(reply, sizeof(reply));
         return;
     }
     if (command == 0x13) {
         // FIX 2026-08-07: mismo bug — familia hardcodeada a 0x14 en vez de DEVICE_FAMILY.
-        byte reply[] = {0xF0, 0x00, 0x00, 0x66, DEVICE_FAMILY, 0x14, 0x00, 0xF7};
+        // Version reply: 5 bytes ASCII "V1.00" (antes 2 bytes, incorrecto).
+        byte reply[] = {0xF0, 0x00, 0x00, 0x66, DEVICE_FAMILY, 0x14,
+                        'V','1','.','0','0', 0xF7};
         sendMIDIBytes(reply, sizeof(reply));
         return;
     }

@@ -112,3 +112,43 @@ case 0x0F: clearClip = true; normalizedLevel = vuLevels[targetChannel]; break;
 - `MASTER_S3-P4/P4_JC1060P470C/src/display/UIPage3.cpp` — handleVUMeterDecay (~línea 287) + vu_draw_cb (~línea 234)
 - `MASTER_S3-P4/P4_JC1060P470C/src/config.h` — arrays vuLevels, vuPeakLevels, vuLastUpdateTime (extern)
 - `MASTER_S3-P4/P4_JC1060P470C/src/main.cpp` — definición arrays VU
+
+---
+
+## BUG 2 (2026-08-18): timecode se retrasa en cuanto los VU meters empiezan a dibujar
+
+### Síntoma
+Reportado por el usuario: en la vista de VU meters (`UIPage3`), en cuanto los VU empiezan a redibujarse (playback activo), el código de tiempo (timecode) de la cabecera tarda en actualizar.
+
+### Causa raíz confirmada (lectura de código, sin necesidad de banco)
+`uiPage3Update()` (`UIPage3.cpp`) invalidaba **las 16 columnas VU completas** cada vez que `needsVUMetersRedraw` estaba a `true` — aunque solo hubiera cambiado 1 canal:
+```cpp
+if (needsVUMetersRedraw) {
+    for (int i = 0; i < NUM_CH; i++) lv_obj_invalidate(s_vu[i]);  // ← TODAS, sin filtrar
+    needsVUMetersRedraw = false;
+}
+```
+`needsVUMetersRedraw` es un flag único compartido entre `MIDIProcessor.cpp` (VU propio del P4, canales 8-15), `S3Link.cpp` (VU reenviado del S3, canales 0-7) y `handleVUMeterDecay()` — durante playback se dispara casi constantemente.
+
+Con `VU_H≈296px` y el buffer LVGL de solo 100 líneas (PSRAM, `RENDER_MODE_PARTIAL`, `Display.cpp:171-179`), invalidar las 16 columnas (hasta 1024×296px) obliga a ≥3 pasadas de render+flush bloqueantes por ciclo (`esp_lcd_panel_draw_bitmap()` síncrono, sin callback DMA async). Esto ocurre dentro del mismo bucle de `taskCore1` (`main.cpp`) que llama a `uiHeaderUpdate()` (timecode) — el bucle entero se retrasa, y el timecode, aunque ya tiene el valor correcto esperando, no se pinta hasta que termina esa cadena de flushes.
+
+### Fix aplicado
+Nuevo array `vuDirty[16]` (`config.h`/`main.cpp`) — cada punto que marca `needsVUMetersRedraw = true` ahora también marca `vuDirty[canal] = true` solo para el canal que cambió:
+- `MIDIProcessor.cpp::processChannelPressure()` y `case 0x72` — `vuDirty[dispCh]`
+- `S3Link.cpp::_applyChannelFrame()` — `vuDirty[ch]` (nivel y peak)
+- `UIPage3.cpp::handleVUMeterDecay()` — `vuDirty[i]` en sus 3 puntos de cambio (decay, fade de peak, peak-nunca-menor-que-nivel)
+
+`uiPage3Update()` ahora solo invalida columnas con `vuDirty[i]==true`, limpiando el flag tras invalidar:
+```cpp
+if (needsVUMetersRedraw) {
+    for (int i = 0; i < NUM_CH; i++) {
+        if (vuDirty[i]) { lv_obj_invalidate(s_vu[i]); vuDirty[i] = false; }
+    }
+    needsVUMetersRedraw = false;
+}
+```
+
+**Estado:** aplicado, **sin validar en banco todavía** — pendiente confirmar visualmente que el timecode ya no se retrasa con audio sonando y que los VU meters se siguen viendo correctamente (sin "colas" de segmentos sin refrescar en canales que cambian simultáneamente).
+
+### Archivos adicionales implicados en este fix
+- `MASTER_S3-P4/P4_JC1060P470C/src/S3Link/S3Link.cpp` — `_applyChannelFrame()`

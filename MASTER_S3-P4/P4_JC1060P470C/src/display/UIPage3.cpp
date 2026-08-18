@@ -226,8 +226,16 @@ void uiPage3Update() {
     }
 
     if (needsVUMetersRedraw) {
+        // Invalidación selectiva (2026-08-18): antes se invalidaban las 16 columnas
+        // VU en cada tick aunque solo una hubiera cambiado — con el buffer LVGL de
+        // 100 líneas (VU_H=296px) eso forzaba varias pasadas de flush bloqueantes
+        // por ciclo, retrasando uiHeaderUpdate() (timecode) en el mismo bucle de
+        // taskCore1. Ahora solo se invalida el canal que realmente cambió.
         for (int i = 0; i < NUM_CH; i++) {
-            lv_obj_invalidate(s_vu[i]);
+            if (vuDirty[i]) {
+                lv_obj_invalidate(s_vu[i]);
+                vuDirty[i] = false;
+            }
         }
         needsVUMetersRedraw = false;
     }
@@ -318,6 +326,7 @@ void handleVUMeterDecay() {
             if (vuLevels[i] < 0.01f) vuLevels[i] = 0.0f;
             vuLastUpdateTime[i] = now;
             changed = true;
+            vuDirty[i] = true;
         }
 
         // 2. Peak — hold 1s + fade 4 pasos × 25ms
@@ -338,6 +347,7 @@ void handleVUMeterDecay() {
                         vuPeakLevels[i] = 0.0f;
                     }
                     changed = true;
+                    vuDirty[i] = true;
                 }
             }
         } else {
@@ -352,6 +362,7 @@ void handleVUMeterDecay() {
             vuPeakAlpha[i]          = 255;
             vuPeakFadeTime[i]       = 0;
             changed = true;
+            vuDirty[i] = true;
         }
     }
 

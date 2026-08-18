@@ -24,9 +24,11 @@
     // extender" (ver arriba) — no se conoce el síntoma exacto de aquella vez. Si el
     // S3 deja de conectar bien, de mantener banking sincronizado con el P4, o de
     // recibir transport/LCD con normalidad, revertir a 0x15 inmediatamente.
+    // REVERTIDO 2026-08-17: el experimento 0x14 rompía el handshake y no resolvía
+    // el AutoMode. Identidad distinta Main(0x14)/Extender(0x15) es obligatoria.
     #define DEVICE_FAMILY       0x14
     #define VERSION_REPLY_CMD   0x14
-    #define NUM_SLAVES          8   // TESTING= 61 a 8 | PRODUCCIÓN=8 — no cambiar aquí sin hardware real
+    #define NUM_SLAVES          0   // TESTING= 61 a 8 | PRODUCCIÓN=8 — no cambiar aquí sin hardware real
 
 #else
     #error "DEBE DEFINIR: DEVICE_P4_MASTER o DEVICE_S3_EXTENDER en platformio.ini build_flags"
