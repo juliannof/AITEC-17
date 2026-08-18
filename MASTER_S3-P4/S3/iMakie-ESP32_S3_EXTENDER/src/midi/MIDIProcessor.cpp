@@ -543,6 +543,20 @@ void processMackieSysEx(byte* payload, int len) {
             // Fase 2 CRÍTICA — echo inmediato
             byte echo[] = {0xF0, 0x00, 0x00, 0x66, DEVICE_FAMILY, 0x21, 0x01, 0xF7};
             sendMIDIBytes(echo, sizeof(echo));
+            // connectedSinceTime SIEMPRE se refresca, incondicional (2026-08-18 20:34).
+            // Espejo del fix aplicado en P4 el mismo día: un corte USB físico no genera
+            // ningún byte MIDI (ni 0x0F, ni la heurística de faders a 0), así que
+            // logicConnectionState se queda "congelado" en CONNECTED durante todo el
+            // corte. Al reconectar, Logic repite el handshake (incluye 0x21) de todas
+            // formas, pero antes el guard de abajo saltaba entero este case porque el
+            // firmware ya "creía" estar CONNECTED — connectedSinceTime nunca se
+            // refrescaba, el periodo de gracia (CONNECT_GRACE_MS) quedaba agotado desde
+            // el origen y el burst de resync de faders que sigue a cada GoOnline
+            // disparaba una desconexión fantasma (heurística de faders a 0) que tumbaba
+            // VU meters/botones/LEDs de transporte. Ver CHANGELOG sesión 2026-08-18.
+            // fadersAtMinMask también se limpia siempre: evita arrastrar cuentas del
+            // ciclo anterior al heurístico de faders a 0 justo tras cada GoOnline.
+            fadersAtMinMask = 0;
             // Firma de cierre real de Logic = faders-a-0 + 0x21 pegados (2026-08-18 20:26).
             // Si este 0x21 llega dentro de DISCONNECT_CONFIRM_WINDOW_MS desde la última
             // desconexión por heurística de faders, es la confirmación del cierre — no
@@ -553,10 +567,10 @@ void processMackieSysEx(byte* payload, int len) {
                 log_i("[MCU] 0x21 tras faders-a-0 (firma cierre) — permanece DISCONNECTED");
                 break;
             }
+            connectedSinceTime = millis();
             if (logicConnectionState != ConnectionState::CONNECTED) {
                 logicConnectionState = ConnectionState::CONNECTED;
                 g_logicConnected     = 1;
-                connectedSinceTime   = millis();
                 // _calibPendingFrom = 1;   // ELIMINADO — boot auto-calib ya lo hizo (2026-05-19)
                 // _calibNextTime    = millis();
                 // Diagnóstico (2026-08-02): timestamp para correlacionar con [HANDSHAKE] 0x00
@@ -697,7 +711,14 @@ void processNote(byte status, byte note, byte velocity) {
         }
     }
    
-    Transporte::setLedByNote(note, is_on);  // ← AÑADIDO
+    // Guard conexión (2026-08-18 20:43): sin esto, Note-Off residuales de la ráfaga
+    // de cierre de Logic (llegan DESPUÉS de que la heurística de faders ya marcó
+    // DISCONNECTED y apagó los LEDs vía Transporte::setAllLedsOff()) volvían a
+    // encender LEDs de transporte — en particular STOP, por su lógica de inverso
+    // de PLAY en Transporte::setLedByNote() case 94.
+    if (logicConnectionState == ConnectionState::CONNECTED) {
+        Transporte::setLedByNote(note, is_on);
+    }
 }
 
 void processPitchBend(byte channel, int bendValue) {
