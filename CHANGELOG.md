@@ -42,6 +42,130 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 | 🟢 Baja | **S3LINK: diseño de selección remota de pistas P4→S3, SIN IMPLEMENTAR (2026-08-16 22:35)** | Objetivo del usuario: seleccionar desde la pantalla del P4 una pista de las columnas 0-7 (pertenecientes al S3). Diseño completo en `docs/S3LINK.md` §8: nuevo `S3LinkSelectFrame` (4 bytes, P4→S3), el S3 reenvía como Note On de SELECT a Logic (mismo camino que `Transporte.cpp::onButtonPressed()`) y dejar que Logic confirme — el retorno ya existe vía `s3Link.setFlags()`. Baudrate 115200 confirmado suficiente (~30% de uso actual, tráfico de selección negligible). Falta: implementar el frame en `s3_link_protocol.h`, el envío en `S3Link.cpp`(P4) al detectar toque en columna 0-7 de `UIPage3.cpp`, y la recepción+reenvío MIDI en `S3Link.cpp`(S3). |
 | 🟡 Media | **P4+S3: validación completa de estabilidad de handshake dual, SIN TERMINAR (2026-08-18)** | Tras el fix de serial único (fila arriba), solo se validó una captura corta (~10.5s) con ambas unidades conectadas. Checklist pendiente del brief de estabilidad: (1) sesión abierta >5 min con actividad de faders sin degradar a MIDI genérico; (2) cambiar de proyecto / cerrar y reabrir Logic → reconexión limpia; (3) confirmar en monitor MIDI que cada unidad reporta su serial distinto y version reply. Solo tras cerrar esto: aplicar el brief de AutoMode del Extender (`BRIEF_automode_extender_s3link.md`). |
 | 🟡 Media | **P4: fix de invalidación selectiva de VU meters (timecode lag), SIN VALIDAR EN BANCO (2026-08-18)** | Nuevo array `vuDirty[16]` para que `uiPage3Update()` solo invalide columnas VU que realmente cambiaron, en vez de las 16 siempre — evita que el timecode de la cabecera se retrase durante playback. Detalle completo (causa raíz, código exacto) en `docs/BUG_VU_P4.md` §"BUG 2". Pendiente confirmar visualmente en pantalla real: timecode fluido con audio sonando, VU meters sin colas de segmentos sin refrescar. |
+| 🔴 Alta | **P4: fix de reconexión en caliente (VU/botones no volvían) + reemplazo de detección de desconexión por `tud_mounted()`, SIN VALIDAR EN BANCO (2026-08-18 19:43)** | Historia en 3 pasos, misma sesión: (1) VU meters/botones no volvían tras reconectar en caliente aunque el handshake sí — causa: `logicConnectionState` quedaba "congelado" en `CONNECTED` durante el corte, fix en `case 0x21` (refresca `connectedSinceTime` siempre). (2) Al reactivar `checkMidiTimeout()` como parte de ese fix, apareció un bucle real "conecta y se desconecta" — causa: timeout por silencio MIDI, incompatible con que Logic no manda tráfico garantizado en reposo. (3) Sustituido por completo: `checkUsbLink()` usa `tud_mounted()` (TinyUSB) para detectar el estado físico real del USB, sin heurísticas de tiempo. Ver sesión 2026-08-18 19:30 y optimización 19:43 abajo. Pendiente: sesión larga con Logic en pausa (confirmar que no aparece offline) + desconexión/reconexión USB real (confirmar que `checkUsbLink()` detecta el corte y VU/botones vuelven). |
+| 🔴 Alta | **P4+S3: ni el P4 ni el S3 detectaban el cierre de Logic Pro — Logic manda faders-a-0 + `0x21` pegados y el `0x21` revertía la desconexión, SIN VALIDAR EN BANCO (2026-08-18 20:28)** | Diagnosticado con capturas MIDI Monitor reales del cierre de Logic (dos veces, mismo patrón exacto): al cerrar, Logic manda el burst de reset (VU + Pitch Wheel a 0 en 10 canales + CC a 0) que sí dispara la heurística de "faders a mínimo" (`DISCONNECT_THRESHOLD=9`/`DISCONNECT_WINDOW_MS`) — pero milisegundos después manda `0x21` (GoOnline) otra vez, y `case 0x21` en ambos firmwares reconectaba de forma incondicional en cuanto el estado no era ya `CONNECTED`, deshaciendo la desconexión que la propia heurística acababa de marcar. Confirmado por descarte: `DEVICE_FAMILY` igual en ambas unidades (0x14, directiva explícita del usuario) no es la causa — la guarda de familia (`device_family != DEVICE_FAMILY`) nunca bloqueaba nada. Fix: nueva firma compuesta "faders-a-0 + 0x21 pegados" = confirmación real de cierre (no reconexión) — `lastFaderDisconnectTime` se marca cuando la heurística dispara `DISCONNECTED`; si el `0x21` siguiente llega dentro de `DISCONNECT_CONFIRM_WINDOW_MS=500ms` desde esa marca, `case 0x21` NO reconecta (solo manda el eco `21 01` que Logic espera siempre). Un `0x21` fuera de esa ventana (reconexión real, sin faders-a-0 precediéndolo) sigue reconectando igual que antes — no se toca el fix de reconexión silenciosa de la sesión 19:30. Ver sesión 2026-08-18 20:28 abajo. Pendiente: cerrar Logic en banco y confirmar `DISCONNECTED` estable en ambas unidades (log `[MCU] 0x21 tras faders-a-0 (firma cierre) — permanece DISCONNECTED`); reabrir Logic y confirmar reconexión normal sin regresión. |
+
+---
+
+### SESIÓN 2026-08-18 19:30 — P4: fix reconexión en caliente (VU meters/botones no volvían tras reconectar)
+
+**Origen:** el usuario reportó, en banco, que tras una reconexión en caliente del P4 (desconectar/reconectar USB), el handshake MCU volvía a completarse ("header ok") pero VU meters y botones no volvían a actualizarse ("cuerpo no reconecta").
+
+**MCU afectadas:** P4 ✅ (único punto del bug) · S3 ❌ · S2 ❌ (no participan del handshake Mackie del P4).
+
+---
+
+**Diagnóstico (leído directamente en código, sin necesidad de banco):**
+
+1. `checkMidiTimeout()` existe (`MIDIProcessor.cpp`) pero su llamada estaba **comentada** en `main.cpp:128` — no había ningún mecanismo de timeout por silencio MIDI.
+2. Un corte físico de USB no genera ningún byte MIDI durante el corte — ni el `0x0F` (GoOffline) explícito de Logic, ni la heurística de "9 faders a 0" (necesita datos para evaluarse). Resultado: `logicConnectionState` se quedaba **congelado en `CONNECTED`** durante todo el corte.
+3. Al reconectar, Logic repite el handshake completo (`0x00→0x02/0x03→0x13→0x21`). El P4 respondía bien a nivel de protocolo (por eso "el header iba bien"), pero en `case 0x21` el guard `if (logicConnectionState != CONNECTED)` se saltaba porque el firmware ya "creía" estar conectado — todo el bloque de reset se ignoraba, y en particular **`connectedSinceTime` no se refrescaba**.
+4. Justo tras el handshake, Logic reenvía un burst de resincronización de faders. Con `connectedSinceTime` obsoleto, el periodo de gracia (`CONNECT_GRACE_MS=1500ms`) ya estaba agotado desde el origen — si 9 de los 9 canales del P4 reportaban PitchBend=0 dentro de 150ms (`DISCONNECT_WINDOW_MS`), el firmware se autodiagnosticaba desconexión fantasma y disparaba `g_switchToOffline=true`, destruyendo Page3 (VU meters + botones).
+
+**Hallazgo colateral durante el diagnóstico (`docs/MIDI.md` "Fase 2"):** Logic Pro emite **3 iteraciones de GoOnline (`0x21`) en ~2.5 segundos** en CADA conexión normal (no solo en reconexiones) — solo la 3ª trae el estado real del proyecto. Esto implica que, con el diseño original (`connectedSinceTime` solo se fijaba en la 1ª iteración, a t≈0), el periodo de gracia de 1500ms ya estaba agotado antes de que llegase el burst de datos reales de la 3ª iteración (t≈2471ms) — el mismo riesgo de desconexión fantasma existía latente en toda conexión nueva, no solo en reconexiones, simplemente no se había manifestado o no se había atribuido a esta causa.
+
+---
+
+**Fix aplicado:**
+
+1. **`MIDIProcessor.cpp` (`case 0x21`):** `connectedSinceTime = millis();` y `fadersAtMinMask = 0;` ahora se ejecutan **siempre**, de forma incondicional, en cada `0x21` recibido — fuera del guard. El resto del bloque de reset (recrear UI vía `g_switchToPage3`, relanzar cascada de calibración RS485 vía `_calibPendingFrom`, `needsTOTALRedraw`, echo de select-off) se **mantiene guardado** (`if (logicConnectionState != CONNECTED)`) para no destruir/recrear la UI 3 veces por conexión normal — en un reconecte silencioso la UI nunca llegó a destruirse, así que no hace falta recrearla, solo refrescar el reloj de gracia.
+2. **`main.cpp:128`:** `checkMidiTimeout();` reactivado (antes comentado) — un corte USB real sin `0x0F` explícito ahora sí lleva el firmware a `DISCONNECTED` tras un timeout de silencio MIDI, en vez de quedar en limbo indefinido.
+3. **`config.h`:** las 4 constantes de timing de conexión (`MIDI_TIMEOUT_MS`, `DISCONNECT_THRESHOLD`, `DISCONNECT_WINDOW_MS`, `CONNECT_GRACE_MS`) movidas desde `static const` locales en `MIDIProcessor.cpp` a `#define` en `config.h` (fuente única de verdad, violación de directiva detectada y corregida). `MIDI_TIMEOUT_MS` estaba en `0` (inerte, sin uso real) — fijado a **5000ms** como valor inicial de arranque, pendiente de afinar en banco.
+
+**Archivos modificados:**
+- `MASTER_S3-P4/P4_JC1060P470C/src/config.h` — 4 constantes de timing de conexión nuevas
+- `MASTER_S3-P4/P4_JC1060P470C/src/midi/MIDIProcessor.cpp` — `case 0x21` refactorizado, constantes movidas a config.h
+- `MASTER_S3-P4/P4_JC1060P470C/src/main.cpp` — `checkMidiTimeout()` reactivado
+
+**PENDIENTE VALIDAR EN BANCO:** desconectar/reconectar USB en caliente y confirmar que VU meters y botones vuelven a actualizarse sin pasar por la pantalla offline; sesión larga sin actividad de fader/VU para confirmar que `MIDI_TIMEOUT_MS=5000` no genera falsos positivos de desconexión.
+
+---
+
+### SESIÓN 2026-08-18 20:28 — P4+S3: ninguna de las dos unidades detectaba el cierre de Logic Pro
+
+**Origen:** el usuario reportó que, al cerrar Logic Pro, ni el P4 ni el S3 transicionan a `DISCONNECTED` — investigado con capturas MIDI Monitor reales del momento exacto del cierre (dos capturas independientes, mismo patrón exacto en ambas).
+
+**MCU afectadas:** P4 ✅ · S3 ✅ · S2 ❌ (no participa en el SysEx de conexión Mackie).
+
+---
+
+**Diagnóstico (a partir de dos capturas MIDI Monitor del cierre de Logic):**
+
+1. Al cerrar, Logic manda un burst de reset: SysEx `0x72` (VU 8 canales a nivel medio), Pitch Wheel a 0 (`-8192`) en **10 canales simultáneos**, y CC (`General Purpose 1-4 fine`, `Controller 52-55`) a 0. Este burst **sí satisface** la heurística de "faders a mínimo" (`DISCONNECT_THRESHOLD=9` canales dentro de `DISCONNECT_WINDOW_MS=150ms`) y marca `logicConnectionState = DISCONNECTED` correctamente.
+2. **Milisegundos después** (17-28ms en la captura), Logic manda `0x21` (GoOnline) otra vez. Se confirma con certeza porque el eco `21 01` visto en ambas capturas (`From iMakie-P4-Master`/`From iMakie-Extender`) solo puede producirlo `case 0x21` — no hay otro punto del código que emita ese patrón de bytes.
+3. `case 0x21`, tal como estaba, trataba **cualquier** `0x21` entrante como reconexión: si `logicConnectionState != CONNECTED`, lo ponía en `CONNECTED` de forma incondicional. Esto deshacía, en el mismo burst, la desconexión que el paso 1 acababa de marcar — el estado final tras el cierre completo de Logic quedaba en `CONNECTED`, nunca en `DISCONNECTED`.
+4. Hipótesis descartada durante el diagnóstico: diferencia de `DEVICE_FAMILY` entre P4 y S3 bloqueando el `0x0F`/heurística vía el guard `device_family != DEVICE_FAMILY`. **Directiva del usuario:** ambas unidades usan `DEVICE_FAMILY=0x14` a propósito (decisión ya tomada en la sesión 2026-08-16/17 por el problema de AutoMode del Extender) — con ambas familias iguales, esa guarda nunca bloquea nada entre P4 y S3, así que no es la causa de este bug.
+
+---
+
+**Fix aplicado — nueva firma compuesta "faders-a-0 + 0x21 pegados" = confirmación de cierre real:**
+
+1. Nueva constante `DISCONNECT_CONFIRM_WINDOW_MS = 500` (P4: `config.h`; S3: local a `MIDIProcessor.cpp`, seguiendo el patrón ya existente en ese archivo — S3 no centraliza estas constantes en `config.h` como sí lo hace el P4 desde la sesión 19:30, inconsistencia preexistente no tocada en este fix).
+2. Nueva variable de estado `lastFaderDisconnectTime`, marcada con el timestamp exacto en el momento en que la heurística de faders confirma `DISCONNECTED` (en `processPitchBend()`, ambos MCU).
+3. `case 0x21`: si el estado no es `CONNECTED` **y** `millis() - lastFaderDisconnectTime <= DISCONNECT_CONFIRM_WINDOW_MS`, el `0x21` se interpreta como confirmación del cierre (no como reconexión) — se sigue mandando el eco `21 01` (Logic lo espera siempre), pero el firmware permanece en `DISCONNECTED`. Fuera de esa ventana, el `0x21` reconecta exactamente igual que antes (no se toca el fix de reconexión silenciosa de la sesión 19:30).
+
+**Archivos modificados:**
+- `MASTER_S3-P4/P4_JC1060P470C/src/config.h` — `DISCONNECT_CONFIRM_WINDOW_MS`
+- `MASTER_S3-P4/P4_JC1060P470C/src/midi/MIDIProcessor.cpp` — `lastFaderDisconnectTime`, marca en heurística, guarda en `case 0x21`
+- `MASTER_S3-P4/S3/iMakie-ESP32_S3_EXTENDER/src/midi/MIDIProcessor.cpp` — mismo patrón
+
+**PENDIENTE VALIDAR EN BANCO:** cerrar Logic y confirmar que P4 y S3 quedan en `DISCONNECTED` estable (LEDs off, UI offline, log `[MCU] 0x21 tras faders-a-0 (firma cierre) — permanece DISCONNECTED`); reabrir Logic y confirmar reconexión normal sin regresión (3× GoOnline, solo el 3º con estado real); confirmar que la reconexión silenciosa tras corte de cable corto sigue funcionando como en la sesión 19:30.
+
+**Riesgo:** MEDIO — cambio acotado a la máquina de estados de conexión MIDI del P4, no toca RS485/Motor/Calibración de S2 ni el protocolo binario del bus. Requiere validación en banco antes de dar por cerrado.
+
+---
+
+**CORRECCIÓN 2026-08-18 19:37 — regresión propia detectada en log real de banco:** el usuario probó el fix de arriba y reportó bucle "conecta y se desconecta" continuo — log serie confirmó ciclos `[MCU] 0x21 — CONNECTED` → `uiOfflineCreate()` cada pocos segundos (uno de ellos a solo ~490ms de haber reconectado). Causa: `checkMidiTimeout()` (recién reactivado en el fix de arriba) usa `lastMidiActivityTime`, que **solo se actualizaba dentro del `case 0x72`** de `processMackieSysEx()` (un bloque VU muy concreto) — Note On/Off (botones), Control Change (V-Pot, visible machacando el log real) y PitchBend (faders) nunca lo tocaban. Con tráfico real pero sin ese `0x72` puntual, los 5000ms de `MIDI_TIMEOUT_MS` se cumplían igualmente y el firmware se autodesconectaba en bucle.
+
+**Fix:** `lastMidiActivityTime = millis();` añadido en dos puntos que cubren TODO el tráfico MIDI real: (1) `processMidiByte()`, justo antes de despachar cualquier mensaje de canal (Note/CC/PitchBend/ChannelPressure); (2) `processMackieSysEx()`, justo después del guard de familia (cubre handshake/GoOnline/nombres de pista). El punto original en `case 0x72` se deja intacto (redundante, inofensivo).
+
+**Archivo:** `MASTER_S3-P4/P4_JC1060P470C/src/midi/MIDIProcessor.cpp` (`processMidiByte()` y `processMackieSysEx()`).
+
+**PENDIENTE VALIDAR EN BANCO (mismo test que arriba, repetir tras este fix):** confirmar que ya NO hay bucle conecta/desconecta con uso normal, y que la reconexión tras un corte USB real sigue funcionando.
+
+---
+
+**OPTIMIZACIÓN 2026-08-18 19:43 — reemplazo completo del mecanismo de timeout por silencio:** el usuario probó la corrección anterior y el bucle persistió — log de banco: última CC en t=36581ms, `uiOfflineCreate()` en t=42422ms, delta ≈5841ms, justo por encima de `MIDI_TIMEOUT_MS=5000`. Esta vez no era un bug de tracking: **realmente no llegó ningún byte MIDI en 5.8s**. Conclusión: el protocolo Mackie de Logic no garantiza tráfico periódico en reposo genuino (sin reproducción/automatización/toque) — cualquier timeout fijo por silencio MIDI es estructuralmente incompatible con el uso normal.
+
+**Decisión de diseño (a petición del usuario, "optimiza"):** sustituir el mecanismo de silencio por completo, no ajustar su valor. Nueva función `checkUsbLink()` (reemplaza `checkMidiTimeout()`) usa `tud_mounted()` de TinyUSB — consulta directamente si el sistema operativo tiene el P4 enumerado como dispositivo USB, sin depender de ningún patrón de tráfico. El proyecto ya llamaba a la API TinyUSB directamente (`tud_midi_stream_read()` en `main.cpp`), así que `tud_mounted()` está disponible por la misma cadena de includes (`<USBMIDI.h>`), sin nuevo include.
+
+**Cambios:**
+- `MIDIProcessor.h`: `checkMidiTimeout()` → `checkUsbLink()`.
+- `MIDIProcessor.cpp`: función reescrita — `if (logicConnectionState == CONNECTED && !tud_mounted())` fuerza `DISCONNECTED` (mismas acciones que antes: `needsTOTALRedraw`, `fadersAtMinMask=0`, `g_switchToOffline=true`). Eliminado `lastMidiActivityTime` y sus 3 puntos de actualización (los 2 añadidos en la corrección de las 19:37 y el original de `case 0x72`) — ya no hace falta rastrear actividad por tipo de mensaje.
+- `config.h`: `MIDI_TIMEOUT_MS` eliminado (dead code). `DISCONNECT_THRESHOLD`/`DISCONNECT_WINDOW_MS`/`CONNECT_GRACE_MS` se mantienen (heurística de faders a 0, sin relación con este mecanismo).
+- `main.cpp:128`: `checkMidiTimeout();` → `checkUsbLink();`.
+
+**Por qué esto NO afecta el fix original de las 19:30:** el problema reportado inicialmente (VU/botones no volvían tras reconectar) se resolvía con el fix de `case 0x21` (refresco incondicional de `connectedSinceTime`), independiente de este mecanismo. `checkUsbLink()` cubre un caso distinto y más específico: el cable USB se queda desenchufado indefinidamente sin que Logic llegue a mandar un `0x0F` explícito — antes de la sesión de hoy este caso ya se quedaba en limbo (comportamiento preexistente), ahora se detecta de forma inmediata y sin falsos positivos.
+
+**PENDIENTE VALIDAR EN BANCO:** (1) sesión larga con Logic en pausa/sin tocar nada — confirmar que NO aparece la pantalla offline; (2) desconectar/reconectar el cable USB físico — confirmar que `checkUsbLink()` detecta el corte y VU/botones vuelven correctamente al reconectar.
+
+---
+
+### SESIÓN 2026-08-18 19:57 — S3: mismo reemplazo `checkMidiTimeout()` → `checkUsbLink()`, encontrado durante diagnóstico de ráfaga VU
+
+**Origen:** al validar el fix del P4 de las 19:30-19:43, el usuario capturó en MIDI Monitor una ráfaga de 8 mensajes Channel Pressure (VU) hacia `iMakie-Extender` (device USB-MIDI propio del S3, independiente del P4) apareciendo "de pronto" con Logic parado. Se investigó como posible reconexión fantasma del S3 (mismo mecanismo que el bug del P4).
+
+**MCU afectadas:** S3 ✅ (único punto del cambio) · P4 ❌ (ya corregido a las 19:43) · S2 ❌ (no participa del handshake Mackie).
+
+**Diagnóstico:** la ráfaga VU **no** estaba causada por una reconexión — `checkMidiTimeout()` existía en `MIDIProcessor.cpp` del S3 pero **no se llamaba desde ningún sitio** (código muerto, sin ninguna llamada en `main.cpp` ni otro archivo). El patrón de valores (8 canales, nivel ~4/11 con jitter frame a frame) apunta a señal de entrada real/monitorización activa en las pistas del banco del Extender, no a un artefacto de protocolo.
+
+**Decisión:** aunque no era la causa de la ráfaga, `checkMidiTimeout()` en S3 comparte el mismo defecto estructural ya descartado en el P4 (timeout por silencio MIDI incompatible con reposo genuino de Logic) y además tenía `MIDI_TIMEOUT_MS = 0` (dispararía en cada ciclo si se llegase a llamar). El usuario pidió aplicar el mismo criterio: eliminarlo y sustituirlo por `checkUsbLink()` vía `tud_mounted()`, igual que en el P4.
+
+**Cambios:**
+- `MIDIProcessor.h`: `checkMidiTimeout()` → `checkUsbLink()`.
+- `MIDIProcessor.cpp`: eliminado `lastMidiActivityTime`/`MIDI_TIMEOUT_MS` y su único punto de escritura (`case 0x72`). Función reescrita igual que el P4: `if (logicConnectionState == CONNECTED && !tud_mounted())` → `DISCONNECTED` + `fadersAtMinMask=0` + `g_switchToOffline=true`.
+- `main.cpp`: añadida la llamada `checkUsbLink();` en `taskCore0()` — antes no existía ninguna llamada al mecanismo viejo, así que este es el primer chequeo de desconexión física real que tiene el S3.
+
+**Fuera de alcance de este cambio (hallazgo colateral, sin tocar):** el S3 tiene el mismo patrón de `connectedSinceTime` solo refrescado dentro del guard `if (logicConnectionState != CONNECTED)` en `case 0x21` (línea ~540) que causaba el bug original del P4 (VU/botones no vuelven tras reconexión en caliente). No se ha tocado — pendiente de decisión explícita del usuario.
+
+**Archivos modificados:**
+- `MASTER_S3-P4/S3/iMakie-ESP32_S3_EXTENDER/src/midi/MIDIProcessor.h`
+- `MASTER_S3-P4/S3/iMakie-ESP32_S3_EXTENDER/src/midi/MIDIProcessor.cpp`
+- `MASTER_S3-P4/S3/iMakie-ESP32_S3_EXTENDER/src/main.cpp`
+
+**PENDIENTE VALIDAR EN BANCO:** desconectar/reconectar el USB del S3 y confirmar que `checkUsbLink()` detecta el corte; sesión larga con Logic en pausa para confirmar que no aparece falso offline (antes no había ningún chequeo, así que este es un comportamiento nuevo, no una regresión).
+
+**Riesgo:** BAJO — cambio acotado a la máquina de estados de conexión MIDI del S3, no toca RS485/Motor/Calibración de S2 ni el protocolo binario del bus.
 
 ---
 

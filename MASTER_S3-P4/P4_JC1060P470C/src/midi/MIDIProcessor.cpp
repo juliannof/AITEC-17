@@ -17,17 +17,21 @@ namespace {
     static uint16_t fadersAtMinMask = 0;
     static unsigned long firstFaderMinTime = 0;
     static const uint16_t ALL_FADERS_MIN_MASK = 0x01FF;
-    static unsigned long lastMidiActivityTime = 0;
-    
-    static const unsigned long MIDI_TIMEOUT_MS = 0;
-    static const int DISCONNECT_THRESHOLD = 9;
-    static const unsigned long DISCONNECT_WINDOW_MS = 150;
+    // Firma de cierre real de Logic = faders-a-0 + 0x21 pegados (2026-08-18 20:26).
+    // Ver DISCONNECT_CONFIRM_WINDOW_MS en config.h.
+    static unsigned long lastFaderDisconnectTime = 0;
+
+    // DISCONNECT_THRESHOLD / DISCONNECT_WINDOW_MS / CONNECT_GRACE_MS movidos a
+    // config.h (fuente única de verdad, 2026-08-18). MIDI_TIMEOUT_MS/lastMidiActivityTime
+    // (silencio MIDI como señal de desconexión) se probaron y se descartaron el mismo día:
+    // el protocolo Mackie de Logic no garantiza tráfico periódico en reposo (sin
+    // reproducción/automatización/toque), así que cualquier timeout fijo genera falsos
+    // positivos. Sustituido por checkUsbLink() (detección física real vía tud_mounted()).
     static const int16_t PITCHBEND_DEADBAND = 150;
     static int16_t lastSentPitchBend[9] = {INT16_MIN, INT16_MIN, INT16_MIN, INT16_MIN, INT16_MIN, INT16_MIN, INT16_MIN, INT16_MIN, INT16_MIN};
 
     static int8_t  g_selectedChannel    = -1;
     static unsigned long connectedSinceTime  = 0;
-    static const unsigned long CONNECT_GRACE_MS = 1500;
     static uint8_t  _calibPendingFrom = 0;
     static uint32_t _calibNextTime    = 0;
 
@@ -429,12 +433,41 @@ void processMackieSysEx(byte* payload, int len) {
             // Fase 2 CRÍTICA — echo inmediato
             byte echo[] = {0xF0, 0x00, 0x00, 0x66, DEVICE_FAMILY, 0x21, 0x01, 0xF7};
             sendMIDIBytes(echo, sizeof(echo));
+            // connectedSinceTime SIEMPRE se refresca, incondicional (2026-08-18).
+            // Motivo: un corte USB físico no genera ningún byte MIDI (ni 0x0F, ni la
+            // heurística de faders a 0), así que logicConnectionState se queda "congelado"
+            // en CONNECTED durante todo el corte. Al reconectar, Logic repite el handshake
+            // (incluye 0x21) de todas formas, pero antes el guard de abajo saltaba entero
+            // este case porque el firmware ya "creía" estar CONNECTED — connectedSinceTime
+            // nunca se refrescaba, el periodo de gracia (CONNECT_GRACE_MS) quedaba agotado
+            // desde el origen y el burst de resync de faders que sigue a cada GoOnline
+            // disparaba una desconexión fantasma (heurística de faders a 0) que destruía
+            // Page3 (VU meters + botones). Ver CHANGELOG sesión 2026-08-18.
+            // fadersAtMinMask también se limpia siempre: evita arrastrar cuentas del ciclo
+            // anterior al heurístico de faders a 0 justo tras cada GoOnline.
+            fadersAtMinMask    = 0;
+            // Firma de cierre real de Logic = faders-a-0 + 0x21 pegados (2026-08-18 20:26).
+            // Logic manda este GoOnline unos ms después del burst de faders a 0 al cerrar
+            // la app — sin esta guarda, el bloque de abajo reconectaba SIEMPRE, deshaciendo
+            // la desconexión que la heurística de faders (processPitchBend) acababa de
+            // marcar. Si este 0x21 llega dentro de DISCONNECT_CONFIRM_WINDOW_MS desde esa
+            // marca, es la confirmación del cierre — no se reconecta.
+            if (logicConnectionState != ConnectionState::CONNECTED &&
+                millis() - lastFaderDisconnectTime <= DISCONNECT_CONFIRM_WINDOW_MS) {
+                log_i("[MCU] 0x21 tras faders-a-0 (firma cierre) — permanece DISCONNECTED");
+                break;
+            }
+            connectedSinceTime = millis();
+            // El resto del reset (recrear UI, recalibrar RS485, redraw total) se mantiene
+            // GUARDADO — Logic emite 3× GoOnline en ~2.5s en cada conexión normal (solo el
+            // 3º trae el estado real, ver docs/MIDI.md "Fase 2"); sin el guard, la UI se
+            // destruiría/recrearía y se relanzaría la cascada de calibración 3 veces por
+            // conexión. En un reconecte silencioso (el caso de este fix) la UI nunca llegó
+            // a destruirse tampoco, así que no hace falta recrearla.
             if (logicConnectionState != ConnectionState::CONNECTED) {
                 logicConnectionState = ConnectionState::CONNECTED;
                 g_logicConnected     = 1;
-                connectedSinceTime   = millis();
                 needsTOTALRedraw     = true;
-                fadersAtMinMask      = 0;
                 for (uint8_t i = 0; i < 8; i++) {
                     if (selectStates[P4_CH_OFFSET + i]) {
                         byte offMsg[3] = { 0x80, (uint8_t)(24 + i), 0x00 };
@@ -556,7 +589,6 @@ void processMackieSysEx(byte* payload, int len) {
 
         case 0x72: {
             if (len < 13) break;
-            lastMidiActivityTime = millis();
             for (int i = 0; i < 8; i++) {
                 byte mcu_level = payload[5 + i] & 0x0F;
                 int  dispCh    = i + P4_CH_OFFSET;
@@ -724,6 +756,7 @@ void processPitchBend(byte channel, int bendValue) {
                 g_logicConnected     = 0;
                 fadersAtMinMask      = 0;
                 firstFaderMinTime    = 0;
+                lastFaderDisconnectTime = now;
                 for (uint8_t i = 1; i <= NUM_SLAVES; i++)
                     rs485.setFaderTarget(i, rs485.getChannel(i).faderPos);
                 g_switchToOffline = true;
@@ -757,14 +790,19 @@ void processPitchBend(byte channel, int bendValue) {
     }
 }
 
-void checkMidiTimeout() {
-    if (logicConnectionState == ConnectionState::CONNECTED) {
-        if (millis() - lastMidiActivityTime > MIDI_TIMEOUT_MS) {
-            logicConnectionState = ConnectionState::DISCONNECTED;
-            needsTOTALRedraw     = true;
-            fadersAtMinMask      = 0;
-            g_switchToOffline    = true;
-        }
+// Detección de desconexión física real (2026-08-18) — reemplaza el intento anterior
+// de timeout por silencio MIDI (MIDI_TIMEOUT_MS/lastMidiActivityTime), descartado el
+// mismo día: Logic no manda tráfico MIDI garantizado cuando está genuinamente inactivo
+// (sin reproducción/automatización/toque), así que cualquier timeout fijo por silencio
+// generaba desconexiones falsas en banco. tud_mounted() consulta el estado real del
+// enlace USB (TinyUSB) — exacto, inmediato, sin heurísticas de tiempo.
+void checkUsbLink() {
+    if (logicConnectionState == ConnectionState::CONNECTED && !tud_mounted()) {
+        logicConnectionState = ConnectionState::DISCONNECTED;
+        needsTOTALRedraw     = true;
+        fadersAtMinMask      = 0;
+        g_switchToOffline    = true;
+        log_i("[MCU] USB desmontado — forzando DISCONNECTED");
     }
 }
 

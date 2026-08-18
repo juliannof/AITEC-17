@@ -196,6 +196,8 @@ void taskCore0(void* pvParameters) {
         // Enlace serie hacia P4: procesa PING entrante y responde PONG (2026-08-16)
         s3Link.update();
 
+        checkUsbLink();  // detección física real vía tud_mounted() (2026-08-18)
+
         // VU timeout — Logic deja de enviar Channel Pressure cuando no hay audio.
         // S3 mantiene el último vuLevel indefinidamente → S2 nunca decae.
         // Fix: reset a 0 si no llega Channel Pressure en >200ms. (2026-05-26)

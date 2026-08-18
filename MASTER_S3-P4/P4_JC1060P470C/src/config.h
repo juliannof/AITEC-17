@@ -60,6 +60,25 @@
 #define LOGIC_PITCHBEND_MAX   14845
 #define BTN_PG1_COUNT         50
 
+// ── Timing conexión Logic (handshake / detección de desconexión) (2026-08-18) ──
+// Nota: MIDI_TIMEOUT_MS (timeout por silencio MIDI) se probó y se descartó el mismo
+// día — Logic no garantiza tráfico periódico en reposo, generaba falsos positivos en
+// banco. La desconexión física real se detecta con checkUsbLink() (tud_mounted()).
+// DISCONNECT_THRESHOLD/WINDOW_MS: heurística legacy — infiere desconexión si N faders
+// caen a 0 dentro de una ventana corta (sin 0x0F explícito de Logic).
+#define DISCONNECT_THRESHOLD   9
+#define DISCONNECT_WINDOW_MS   150
+// CONNECT_GRACE_MS: tras pasar a CONNECTED, ignora la heurística de arriba durante este
+// margen — evita que el burst de resync de faders tras el handshake dispare un falso positivo.
+#define CONNECT_GRACE_MS       1500
+// DISCONNECT_CONFIRM_WINDOW_MS (2026-08-18 20:26): firma real de cierre de Logic =
+// faders-a-0 + 0x21 pegados. Logic manda GoOnline (0x21) unos ms después del burst
+// de faders a 0 al cerrar la app — antes esto revertía la desconexión (case 0x21
+// reconectaba siempre que el 0x21 llegara). Si el 0x21 llega dentro de esta ventana
+// tras la heurística de faders, se interpreta como CONFIRMACIÓN del cierre, no como
+// reconexión real.
+#define DISCONNECT_CONFIRM_WINDOW_MS 500
+
 
 // ── Dimensiones display (JD9165 1024×600 landscape nativo) (2026-06-09) ──
 #define P4_W    1024

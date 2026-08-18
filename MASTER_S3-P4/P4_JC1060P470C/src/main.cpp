@@ -125,7 +125,7 @@ void taskCore0(void* pvParameters) {
         // Enlace serie hacia S3: aplica canales recibidos + heartbeat (2026-08-16)
         s3Link.update();
 
-        // checkMidiTimeout();
+        checkUsbLink();  // detección física real vía tud_mounted() (2026-08-18)
         vTaskDelay(1);
     }
 }

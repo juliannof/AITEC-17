@@ -21,9 +21,10 @@ namespace {
     static uint16_t fadersAtMinMask = 0;
     static unsigned long firstFaderMinTime = 0;
     static const uint16_t ALL_FADERS_MIN_MASK = 0x01FF;
-    static unsigned long lastMidiActivityTime = 0;
-    
-    static const unsigned long MIDI_TIMEOUT_MS = 0;
+    // MIDI_TIMEOUT_MS/lastMidiActivityTime (timeout por silencio MIDI) descartado
+    // (2026-08-18) — mismo defecto estructural diagnosticado en el P4 el mismo día:
+    // Logic no garantiza tráfico periódico en reposo genuino, generaba falsos
+    // positivos de desconexión. Sustituido por checkUsbLink() (tud_mounted()).
     static const int DISCONNECT_THRESHOLD = 9;
     static const unsigned long DISCONNECT_WINDOW_MS = 150;
     static const int16_t PITCHBEND_DEADBAND = 80;  // ~0.5% rango, filtra ruido ±5 con margen seguro
@@ -31,6 +32,12 @@ namespace {
     static int8_t  g_selectedChannel    = -1;
     static unsigned long connectedSinceTime  = 0;
     static const unsigned long CONNECT_GRACE_MS = 1500;
+    // Firma de cierre real de Logic = faders-a-0 + 0x21 pegados (2026-08-18 20:26).
+    // Logic manda GoOnline (0x21) unos ms después del burst de faders a 0 al cerrar
+    // la app — sin esto, case 0x21 reconectaba siempre, deshaciendo la desconexión
+    // que la heurística de faders acababa de marcar. Ver case 0x21 más abajo.
+    static unsigned long lastFaderDisconnectTime = 0;
+    static const unsigned long DISCONNECT_CONFIRM_WINDOW_MS = 500;
     static uint8_t  _calibPendingFrom = 0;
     static uint32_t _calibNextTime    = 0;
     static int16_t lastSentPitchBend[9] = {INT16_MIN, INT16_MIN, INT16_MIN, INT16_MIN, INT16_MIN, INT16_MIN, INT16_MIN, INT16_MIN, INT16_MIN};
@@ -502,7 +509,6 @@ void processMackieSysEx(byte* payload, int len) {
 
         case 0x72: {
             if (len < 13) break;
-            lastMidiActivityTime = millis();
             for (int i = 0; i < 8; i++) {
                 byte raw     = payload[5 + i];
                 byte channel = raw & 0x0F;
@@ -537,6 +543,16 @@ void processMackieSysEx(byte* payload, int len) {
             // Fase 2 CRÍTICA — echo inmediato
             byte echo[] = {0xF0, 0x00, 0x00, 0x66, DEVICE_FAMILY, 0x21, 0x01, 0xF7};
             sendMIDIBytes(echo, sizeof(echo));
+            // Firma de cierre real de Logic = faders-a-0 + 0x21 pegados (2026-08-18 20:26).
+            // Si este 0x21 llega dentro de DISCONNECT_CONFIRM_WINDOW_MS desde la última
+            // desconexión por heurística de faders, es la confirmación del cierre — no
+            // se reconecta. Ver DISCONNECT_CONFIRM_WINDOW_MS arriba y el bloque de
+            // processPitchBend que fija lastFaderDisconnectTime.
+            if (logicConnectionState != ConnectionState::CONNECTED &&
+                millis() - lastFaderDisconnectTime <= DISCONNECT_CONFIRM_WINDOW_MS) {
+                log_i("[MCU] 0x21 tras faders-a-0 (firma cierre) — permanece DISCONNECTED");
+                break;
+            }
             if (logicConnectionState != ConnectionState::CONNECTED) {
                 logicConnectionState = ConnectionState::CONNECTED;
                 g_logicConnected     = 1;
@@ -713,6 +729,7 @@ void processPitchBend(byte channel, int bendValue) {
                 g_logicConnected     = 0;
                 fadersAtMinMask      = 0;
                 firstFaderMinTime    = 0;
+                lastFaderDisconnectTime = now;
                 Transporte::setAllLedsOff();  // LEDs transport off al desconectar (2026-05-27)
                 for (uint8_t i = 1; i <= NUM_SLAVES; i++)
                     rs485.setFaderTarget(i, rs485.getChannel(i).faderPos);
@@ -791,13 +808,18 @@ void processPitchBend(byte channel, int bendValue) {
     }
 }
 
-void checkMidiTimeout() {
-    if (logicConnectionState == ConnectionState::CONNECTED) {
-        if (millis() - lastMidiActivityTime > MIDI_TIMEOUT_MS) {
-            logicConnectionState = ConnectionState::DISCONNECTED;
-            fadersAtMinMask      = 0;
-            g_switchToOffline    = true;
-        }
+// Detección de desconexión física real (2026-08-18) — reemplaza el intento anterior
+// de timeout por silencio MIDI (MIDI_TIMEOUT_MS/lastMidiActivityTime, nunca llegó a
+// llamarse desde main.cpp). Mismo criterio aplicado al P4 el mismo día: Logic no
+// manda tráfico MIDI garantizado en reposo genuino, así que cualquier timeout fijo
+// por silencio genera falsos positivos. tud_mounted() consulta el estado real del
+// enlace USB (TinyUSB) — exacto, inmediato, sin heurísticas de tiempo.
+void checkUsbLink() {
+    if (logicConnectionState == ConnectionState::CONNECTED && !tud_mounted()) {
+        logicConnectionState = ConnectionState::DISCONNECTED;
+        fadersAtMinMask      = 0;
+        g_switchToOffline    = true;
+        log_i("[MCU] USB desmontado — forzando DISCONNECTED");
     }
 }
 
