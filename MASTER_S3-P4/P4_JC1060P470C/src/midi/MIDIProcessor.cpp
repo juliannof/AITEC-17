@@ -799,6 +799,9 @@ void processPitchBend(byte channel, int bendValue) {
 void checkUsbLink() {
     if (logicConnectionState == ConnectionState::CONNECTED && !tud_mounted()) {
         logicConnectionState = ConnectionState::DISCONNECTED;
+        g_logicConnected     = 0;   // BUG FIX (2026-08-20): faltaba — sin esto los S2
+                                     // seguían recibiendo connected=1 y nunca entraban
+                                     // en Splash al cerrar Logic (USB desmontado).
         needsTOTALRedraw     = true;
         fadersAtMinMask      = 0;
         g_switchToOffline    = true;

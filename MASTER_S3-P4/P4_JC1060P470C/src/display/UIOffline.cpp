@@ -21,6 +21,7 @@ static uint8_t        s_blink_cnt   = 0;
 static uint32_t       s_lastTick    = 0;
 static uint32_t       s_lastLetter  = 0;
 static bool           s_offline_active = false;
+static bool           s_screenOff      = false;
 static lv_image_dsc_t s_img_dsc;
 
 void uiOfflineCreate(lv_obj_t* parent) {
@@ -79,6 +80,7 @@ void uiOfflineCreate(lv_obj_t* parent) {
     s_lastTick       = 0;
     s_lastLetter     = 0;
     s_offline_active = true;
+    s_screenOff      = false;
 
     // lv_scr_load eliminado — Display.cpp ya cargó la pantalla raíz
     log_i("[Offline] uiOfflineCreate OK");
@@ -87,6 +89,18 @@ void uiOfflineCreate(lv_obj_t* parent) {
 void uiOfflineTick() {
     if (!s_offline_active) return;
     uint32_t now = millis();
+
+    uint32_t inactiveMs = lv_display_get_inactive_time(getDisplay());
+    if (!s_screenOff && inactiveMs >= SPLASH_SCREEN_OFF_MS) {
+        s_screenOff = true;
+        displaySetBrightness(0);
+        log_i("[Offline] pantalla apagada por inactividad (%lu ms)", (unsigned long)inactiveMs);
+    } else if (s_screenOff && inactiveMs < SPLASH_SCREEN_OFF_MS) {
+        s_screenOff = false;
+        displaySetBrightness(SPLASH_BRIGHTNESS_PERCENT);
+        log_i("[Offline] pantalla reactivada por touch");
+    }
+
     if (now - s_lastTick < 33) return;
     s_lastTick = now;
 

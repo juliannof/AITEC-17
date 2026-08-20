@@ -502,6 +502,20 @@ void update() {
     // ─── Protección global topes mecánicos (2026-05-19) ──────────
     // Motor HW activo + ADC sin cambio en STALL_PROTECT_MS → fader en tope → apagar
     // CALIBRATING excluido: usa CALIB_STUCK_TIMEOUT propio por fase
+    //
+    // Zona de frenado fino (2026-08-20): en MOVING_TO_TARGET con absErr <
+    // POSITION_CRUISE_ERR, _positionTick() reduce el PWM a propósito (ver
+    // POSITION_FINE_PWM_K) — el movimiento es más lento por diseño, no por
+    // atasco. Con STALL_PROTECT_MS normal esto disparaba falso STALL
+    // sistemáticamente justo donde Logic pide parar (confirmado en campo:
+    // el fader nunca llegaba a acercarse a los topes reales aunque la propia
+    // calibración —PWM alto y sostenido— sí los alcanza sin problema). Se
+    // amplía el timeout en vez de eliminar la protección: sigue cortando el
+    // motor ante un atasco físico real, solo le da más margen al frenado.
+    bool _inFineBraking = (_motor_state == MotorState::MOVING_TO_TARGET) &&
+                           (abs((int)_motor_targetADC - (int)_motor_adcPos) < POSITION_CRUISE_ERR);
+    uint32_t _stallTimeoutMs = _inFineBraking ? (STALL_PROTECT_MS * 4) : STALL_PROTECT_MS;
+
     if (_motor_hw_active && _motor_state != MotorState::CALIBRATING) {
         if (abs((int)_motor_adcPos - (int)_stallProtectLastADC) > 10) {
             _stallProtectLastADC = _motor_adcPos;
@@ -514,7 +528,7 @@ void update() {
             // Arrancar la cuenta aquí garantiza que STALL_PROTECT_MS después SIEMPRE
             // se evalúa, se haya movido el fader o no.
             _stallProtectStart = millis();
-        } else if (millis() - _stallProtectStart > STALL_PROTECT_MS) {
+        } else if (millis() - _stallProtectStart > _stallTimeoutMs) {
             _hwOff();  // _motor_hw_active = false → no refire inmediato
             log_e("[MOTOR] STALL — tope físico, motor apagado (adc=%d)", _motor_adcPos);
             _stallProtectStart  = 0;  // evitar refire inmediato al reactivarse

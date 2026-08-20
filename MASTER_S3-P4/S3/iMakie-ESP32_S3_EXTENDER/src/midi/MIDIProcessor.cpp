@@ -27,7 +27,9 @@ namespace {
     // positivos de desconexión. Sustituido por checkUsbLink() (tud_mounted()).
     static const int DISCONNECT_THRESHOLD = 9;
     static const unsigned long DISCONNECT_WINDOW_MS = 150;
-    static const int16_t PITCHBEND_DEADBAND = 80;  // ~0.5% rango, filtra ruido ±5 con margen seguro
+    static const int16_t PITCHBEND_DEADBAND = 150;  // alineado con P4 (2026-08-20) — 80 dejaba pasar
+    // demasiado jitter de PitchBend al target del S2, causando vibración/falsos STALL
+    // reproducibles con cualquier S2 conectado al S3 (ver CHANGELOG 2026-08-20)
 
     static int8_t  g_selectedChannel    = -1;
     static unsigned long connectedSinceTime  = 0;
@@ -838,6 +840,9 @@ void processPitchBend(byte channel, int bendValue) {
 void checkUsbLink() {
     if (logicConnectionState == ConnectionState::CONNECTED && !tud_mounted()) {
         logicConnectionState = ConnectionState::DISCONNECTED;
+        g_logicConnected     = 0;   // BUG FIX (2026-08-20): faltaba — sin esto los S2
+                                     // seguían recibiendo connected=1 y nunca entraban
+                                     // en Splash al cerrar Logic (USB desmontado).
         fadersAtMinMask      = 0;
         g_switchToOffline    = true;
         log_i("[MCU] USB desmontado — forzando DISCONNECTED");

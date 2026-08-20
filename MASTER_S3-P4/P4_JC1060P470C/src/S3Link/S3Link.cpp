@@ -17,17 +17,18 @@ void S3Link::update() {
     }
 
     uint32_t now = millis();
-    if (now - _lastPingSentMs >= S3LINK_HEARTBEAT_MS) {
+    if (logicConnectionState == ConnectionState::CONNECTED &&
+        now - _lastPingSentMs >= S3LINK_HEARTBEAT_MS) {
         _lastPingSentMs = now;
         _sendPing();
         _pingSentCount++;
     }
     g_s3Connected = (now - _lastRxMs) < S3LINK_TIMEOUT_MS;
 
-    // Diagnóstico heartbeat (2026-08-16) — quitar tras validar en banco
-    if (now - _lastLogMs >= 2000) {
+    // Diagnóstico heartbeat (2026-08-16) — intervalo ampliado a 30s (2026-08-19)
+    if (now - _lastLogMs >= 30000) {
         _lastLogMs = now;
-        log_i("[S3LINK] connected=%d ping=%lu pong=%lu lastRx=%lums",
+        log_d("[S3LINK] connected=%d ping=%lu pong=%lu lastRx=%lums",
               g_s3Connected, (unsigned long)_pingSentCount,
               (unsigned long)_pongRecvCount, (unsigned long)(now - _lastRxMs));
     }

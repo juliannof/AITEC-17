@@ -156,6 +156,7 @@ void taskCore0(void* pvParameters) {
     log_e("MIDI task arrancando en Core %d", xPortGetCoreID());
     static unsigned long lastStatusLog = 0;  // ← MOVER AQUÍ
     static unsigned long lastTempLog = 0;  // Log temperatura chip cada 1s (2026-08-16)
+    static unsigned long lastStatsLog = 0;  // BRIEF_C: printStats() cada 5s
 
     for (;;) {
         // ── Apagar LED verde después de 200ms (2026-05-16 21:30) ──
@@ -177,6 +178,12 @@ void taskCore0(void* pvParameters) {
                 if (rs485.hasNewSlaveData(id))
                     processSlaveResponse(id);
             }
+        }
+
+        // BRIEF_C: estadísticas de bus cada 5s (TX/RX/TIMEOUT/CRC)
+        if (millis() - lastStatsLog >= 5000) {
+            lastStatsLog = millis();
+            rs485.printStats();
         }
 
         // Esperar a que DISCONNECT SEQUENCE se complete antes de cambiar a offline

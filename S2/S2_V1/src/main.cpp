@@ -271,6 +271,21 @@ void setup() {
 static unsigned long g_bootTime = 0;
 static bool g_calibStarted = false;
 
+// ────────────────────────────────────────────────────────────────────
+// INSTRUMENTACIÓN micros() — BRIEF A (2026-08-20). Peor caso por bloque.
+// Solo mide. Quitar o bajar a log_v cuando se cierre el saneamiento del bus.
+// ────────────────────────────────────────────────────────────────────
+static uint32_t _instrMaxOnMaster   = 0;  // onMasterData()
+static uint32_t _instrMaxBuildResp  = 0;  // buildResponse()
+static uint32_t _instrMaxSendResp   = 0;  // sendResponse()
+static uint32_t _instrMaxRxToSend   = 0;  // gap: hasNewData TRUE → sendResponse hecho
+static uint32_t _instrMaxMotor      = 0;  // Motor::update()
+static uint32_t _instrMaxDisplay    = 0;  // updateDisplay()
+static uint32_t _instrMaxNeopixel   = 0;  // updateAllNeopixels()+tickNeopixelShow()
+static uint32_t _instrLastReport    = 0;
+
+static inline void _instrKeepMax(uint32_t& slot, uint32_t v) { if (v > slot) slot = v; }
+
 // =============================================================
 //  loop
 // =============================================================
@@ -354,10 +369,21 @@ void loop() {
 
         if (rs485.hasNewData()) {
             lastRxTime = millis();
-            RS485Handler::onMasterData(rs485.getData());
+            uint32_t _tRxStart = micros();
 
+            uint32_t _t0 = micros();
+            RS485Handler::onMasterData(rs485.getData());
+            _instrKeepMax(_instrMaxOnMaster, micros() - _t0);
+
+            _t0 = micros();
             SlavePacket resp = RS485Handler::buildResponse(faderADC, *satMenu);
+            _instrKeepMax(_instrMaxBuildResp, micros() - _t0);
+
+            _t0 = micros();
             rs485.sendResponse(resp);
+            _instrKeepMax(_instrMaxSendResp, micros() - _t0);
+
+            _instrKeepMax(_instrMaxRxToSend, micros() - _tRxStart);
 
             ButtonManager::clearButtonFlags();
             ButtonManager::clearEncoderButton();
@@ -369,7 +395,9 @@ void loop() {
 
     // Motor::update() SOLO si SAT no está en Test Mode activo (2026-05-10 20:35)
     if (!(satMenu && satMenu->isOpen())) {
+        uint32_t _tm = micros();
         Motor::update();
+        _instrKeepMax(_instrMaxMotor, micros() - _tm);
     }
 
     // FaderTouch::update();  // DESACTIVADO (2026-06-14) — ver setup()
@@ -391,7 +419,26 @@ void loop() {
 
     updateButtons();
     handleVUMeterDecay();
+
+    uint32_t _td = micros();
     updateDisplay();
+    _instrKeepMax(_instrMaxDisplay, micros() - _td);
+
+    uint32_t _tn = micros();
     updateAllNeopixels();
     tickNeopixelShow();  // aplica el .show() diferido por throttle (2026-08-13 15:10)
+    _instrKeepMax(_instrMaxNeopixel, micros() - _tn);
+
+    // ── Reporte de peor caso cada 5s (BRIEF A) ──
+    if (millis() - _instrLastReport >= 5000) {
+        _instrLastReport = millis();
+        log_i("[INSTR] MAX(us) onMaster=%lu build=%lu send=%lu rx2send=%lu motor=%lu disp=%lu neo=%lu",
+              (unsigned long)_instrMaxOnMaster, (unsigned long)_instrMaxBuildResp,
+              (unsigned long)_instrMaxSendResp, (unsigned long)_instrMaxRxToSend,
+              (unsigned long)_instrMaxMotor,    (unsigned long)_instrMaxDisplay,
+              (unsigned long)_instrMaxNeopixel);
+        // Reset de máximos para ver el peor caso de cada ventana de 5s
+        _instrMaxOnMaster = _instrMaxBuildResp = _instrMaxSendResp = 0;
+        _instrMaxRxToSend = _instrMaxMotor = _instrMaxDisplay = _instrMaxNeopixel = 0;
+    }
 }

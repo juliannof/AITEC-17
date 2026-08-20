@@ -103,6 +103,7 @@ static void processSlaveResponse(uint8_t slaveId) {
 
 void taskCore0(void* pvParameters) {
     log_e("MIDI task en Core %d", xPortGetCoreID());
+    static unsigned long lastStatsLog = 0;  // BRIEF_C: printStats() cada 5s
     for (;;) {
         uint8_t rx_buf[64];
         uint32_t count = tud_midi_stream_read(rx_buf, sizeof(rx_buf));
@@ -116,6 +117,12 @@ void taskCore0(void* pvParameters) {
                 if (rs485.hasNewSlaveData(id))
                     processSlaveResponse(id);
             }
+        }
+
+        // BRIEF_C: estadísticas de bus cada 5s (TX/RX/TIMEOUT/CRC)
+        if (millis() - lastStatsLog >= 5000) {
+            lastStatsLog = millis();
+            rs485.printStats();
         }
 
         tickCalibracion();
@@ -158,6 +165,7 @@ void taskCore1(void* pvParameters) {
             if      (g_currentPage == 1) uiPage1Destroy();
             else                         uiPage3Destroy();
             uiHeaderDestroy();
+            displaySetBrightness(SPLASH_BRIGHTNESS_PERCENT);
             uiOfflineCreate(displayGetRoot());
 
         } else if (logicConnectionState == ConnectionState::DISCONNECTED) {
@@ -224,13 +232,7 @@ void setup() {
     // 4. Display + LVGL
     log_i("4. initDisplay()...");
     initDisplay();
-    {
-        Preferences bprefs;
-        bprefs.begin("uimenu", true);
-        uint8_t brightness = bprefs.getUChar("brightness", 80);
-        bprefs.end();
-        displaySetBrightness(brightness);
-    }
+    displaySetBrightness(SPLASH_BRIGHTNESS_PERCENT);
     log_i("   Display OK");
 
     // 5. Preferences

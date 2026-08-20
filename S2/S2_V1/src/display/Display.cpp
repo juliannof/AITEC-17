@@ -124,10 +124,18 @@ void drawCalibDot() {
 // ════════════════════════════════════════════════════════════
 
 void drawSplashScreen() {
+    // INSTRUMENTACIÓN micros() — BRIEF A extendido (2026-08-20). Separa coste
+    // de acceso NVS (Preferences) del coste de renderizado de fuentes.
+    uint32_t _tsAll = micros();
+
+    uint32_t _ts0 = micros();
     Preferences prefs;
     prefs.begin("ptxx", true);
     uint8_t trackId = prefs.getUChar("trackId", 0);
     prefs.end();
+    uint32_t _tsNvs = micros() - _ts0;
+
+    _ts0 = micros();
     tft.fillScreen(TFT_BLACK);
     tft.setTextDatum(MC_DATUM);
 
@@ -153,12 +161,19 @@ void drawSplashScreen() {
     char pwmBuf[32];
     snprintf(pwmBuf, sizeof(pwmBuf), "PWM %u-%u", Motor::getPWMMin(), Motor::getPWMMax());
     tft.drawString(pwmBuf, TFT_WIDTH / 2, 185);
+    uint32_t _tsFonts = micros() - _ts0;
 
+    _ts0 = micros();
     drawCalibDot();
+    uint32_t _tsDot = micros() - _ts0;
 
     // DESACTIVADO: círculo NVS validator
     // uint16_t circleColor = (NVSValidator::getLastStatus() == NVSStatus::VALID) ? TFT_GREEN : TFT_RED;
     // tft.fillCircle(TFT_WIDTH / 2, 200, 6, circleColor);
+
+    log_i("[INSTR-SPLASH] total=%lu nvs=%lu fonts=%lu dot=%lu",
+          (unsigned long)(micros() - _tsAll), (unsigned long)_tsNvs,
+          (unsigned long)_tsFonts, (unsigned long)_tsDot);
 }
 
 
@@ -277,18 +292,46 @@ void updateDisplay() {
 
     // Primera vez o redraw forzado
     if (needsTOTALRedraw) {
+        // INSTRUMENTACIÓN micros() — BRIEF A extendido (2026-08-20). Sub-tiempos
+        // del redraw total, para localizar qué sub-función domina el bloqueo.
+        uint32_t _trAll = micros();
+        uint32_t _tr0;
+
+        _tr0 = micros();
         tft.setBrightness(screenBrightness);   // ← AÑADIR ESTO
+        uint32_t _trBright = micros() - _tr0;
+
+        _tr0 = micros();
         tft.fillScreen(TFT_BG_COLOR);
+        uint32_t _trFill = micros() - _tr0;
+
+        _tr0 = micros();
         drawHeaderSprite();
+        uint32_t _trHeader = micros() - _tr0;
+
+        _tr0 = micros();
         drawMainArea();
+        uint32_t _trMain = micros() - _tr0;
+
         VU::lastActive = -1;   // fuerza fondo completo del VU tras fillScreen
+        _tr0 = micros();
         drawVUMeters();
+        uint32_t _trVU = micros() - _tr0;
+
+        _tr0 = micros();
         drawVPotDisplay();
+        uint32_t _trVPot = micros() - _tr0;
+
         needsTOTALRedraw    = false;
         needsMainAreaRedraw = false;
         needsHeaderRedraw   = false;
         needsVUMetersRedraw = false;
         needsVPotRedraw     = false;
+        log_i("[INSTR-REDRAW] total=%lu bright=%lu fill=%lu header=%lu main=%lu vu=%lu vpot=%lu",
+              (unsigned long)(micros() - _trAll), (unsigned long)_trBright,
+              (unsigned long)_trFill,   (unsigned long)_trHeader,
+              (unsigned long)_trMain,   (unsigned long)_trVU,
+              (unsigned long)_trVPot);
         Serial.println("[Display] Redraw total OK");
         return;
     }

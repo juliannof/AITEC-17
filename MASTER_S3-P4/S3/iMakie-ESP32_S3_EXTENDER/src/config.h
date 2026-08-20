@@ -28,7 +28,7 @@
     // el AutoMode. Identidad distinta Main(0x14)/Extender(0x15) es obligatoria.
     #define DEVICE_FAMILY       0x14
     #define VERSION_REPLY_CMD   0x14
-    #define NUM_SLAVES          0   // TESTING= 61 a 8 | PRODUCCIÓN=8 — no cambiar aquí sin hardware real
+    #define NUM_SLAVES          8   // TESTING= 61 a 8 | PRODUCCIÓN=8 — no cambiar aquí sin hardware real
 
 #else
     #error "DEBE DEFINIR: DEVICE_P4_MASTER o DEVICE_S3_EXTENDER en platformio.ini build_flags"
@@ -109,7 +109,7 @@ extern volatile ConnectionState logicConnectionState;
 #define BTN_RW     3
 
 // Brillo LEDs transporte — PWM 8-bit, invertido por ánodo común (2026-08-16 21:59)
-#define TRANSPORT_LED_BRIGHTNESS 40   // 0-255: 0=apagado, 255=brillo máximo
+#define TRANSPORT_LED_BRIGHTNESS 50   // 0-255: 0=apagado, 255=brillo máximo
 
 // ====================================================================
 // --- NOTAS MIDI TRANSPORTE ---

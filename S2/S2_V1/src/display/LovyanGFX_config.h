@@ -12,8 +12,14 @@ public:
             auto cfg = _bus_instance.config();
             cfg.spi_host    = SPI3_HOST;
             cfg.spi_mode    = 0;
-            cfg.freq_write  = 10000000;
-            cfg.freq_read   = 8000000;
+            // SPI a 80MHz — máximo típico ESP32+ST7789 (2026-08-20, confirmado
+            // tras diagnóstico). Bajado a 40MHz temporalmente por saltos de
+            // posición físicamente imposibles del fader — CAUSA REAL: unidad
+            // buck defectuosa en la ATX del banco (rail 5V, lógica), no el SPI.
+            // Sustituida la unidad buck → problema desaparece. Ver CHANGELOG
+            // sesión 2026-08-20 17:39. fillScreen() ~110ms a 10MHz → ~14ms aquí.
+            cfg.freq_write  = 80000000;
+            cfg.freq_read   = 20000000;
             cfg.spi_3wire   = false;
             cfg.use_lock    = true;
             cfg.dma_channel = SPI_DMA_CH_AUTO;

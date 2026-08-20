@@ -47,6 +47,7 @@ static void _onRecReleased(Button2& btn) {
     if (now - lastRecTime >= 300) {
         lastRecTime = now;
         _flags |= FLAG_REC;
+        _flags |= FLAG_SELECT;  // cualquier botón selecciona la pista (2026-08-20)
     }
 }
 
@@ -66,11 +67,13 @@ static void _onButtonEvent(ButtonId id) {
             if (now - lastSoloTime < DEBOUNCE_MS) break;
             lastSoloTime = now;
             _flags |= FLAG_SOLO;
+            _flags |= FLAG_SELECT;  // cualquier botón selecciona la pista (2026-08-20)
             break;
         case ButtonId::MUTE:
             if (now - lastMuteTime < DEBOUNCE_MS) break;
             lastMuteTime = now;
             _flags |= FLAG_MUTE;
+            _flags |= FLAG_SELECT;  // cualquier botón selecciona la pista (2026-08-20)
             break;
         case ButtonId::SELECT:
             if (now - lastSelectTime < DEBOUNCE_MS) break;
@@ -90,6 +93,7 @@ static void _onButtonEvent(ButtonId id) {
             } else {
                 _encoderBtnCount++;
                 needsVPotRedraw = true;
+                _flags |= FLAG_SELECT;  // cualquier botón selecciona la pista (2026-08-20)
             }
             break;
         default: break;

@@ -8,12 +8,12 @@
 #if defined(DEVICE_P4_MASTER)
     #define DEVICE_FAMILY       0x14
     #define VERSION_REPLY_CMD   0x14
-    #define NUM_SLAVES          0
+    #define NUM_SLAVES          3
 
 #elif defined(DEVICE_S3_EXTENDER)
     #define DEVICE_FAMILY       0x15
     #define VERSION_REPLY_CMD   0x15
-    #define NUM_SLAVES          8
+    #define NUM_SLAVES          1
 
 #else
     #error "DEBE DEFINIR: DEVICE_P4_MASTER o DEVICE_S3_EXTENDER en platformio.ini build_flags"
@@ -22,11 +22,9 @@
 
 
 // --- RS485 pines P4 ---
-// ⚠️ PENDIENTE confirmar contra esquemático JC1060P470C (conector JST MX 1.25 4P)
-//    Valores heredados de la placa antigua JC4880P433C (2026-06-09)
-#define RS485_TX_PIN      52
-#define RS485_RX_PIN      51
-#define RS485_ENABLE_PIN  50
+#define RS485_TX_PIN      3
+#define RS485_RX_PIN      4
+#define RS485_ENABLE_PIN  5
 #define RS485_BAUD       500000
 
 // ── Enlace serie P4↔S3 (Serial2, independiente del RS485 propio) (2026-08-16) ──
@@ -41,6 +39,8 @@
 // ── Display JD9165 (MIPI-DSI, 1024×600 landscape nativo) (2026-06-09) ──
 #define LCD_RST_PIN    27
 #define LCD_BL_PIN     23
+#define SPLASH_BRIGHTNESS_PERCENT  20   // Brillo reducido durante splash/offline (2026-08-19)
+#define SPLASH_SCREEN_OFF_MS  120000    // Apaga backlight tras 2 min inactivo en splash (2026-08-19)
 
 // ── Touch GT911 (I2C) — como la placa pequeña: RST/INT en NC (2026-06-09) ──
 #define TOUCH_INT_PIN  -1

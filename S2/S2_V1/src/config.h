@@ -47,7 +47,7 @@ enum class ConnectionState {
 //     • pre-commit     →  sube en cada commit con cambios S2
 //     Modificarlo a mano rompe el historial de versiones
 // ⚠️ ============================================================ ⚠️
-#define FW_REVISION 47
+#define FW_REVISION 49
 
 
 // ===================================
@@ -144,9 +144,15 @@ static constexpr uint16_t POSITION_CRUISE_ERR       = 2000;  // cuentas: por enc
 // Fracción de (pwm_max-pwm_min) que se resta a pwm_min para el suelo del frenado
 // fino en _positionTick() — separado del pwm_min usado para vencer fricción
 // ESTÁTICA en el arranque (KICK_UP/DOWN, calibración, que NO se tocan).
-// TODO BANCO: punto de partida 0.5 — ajustar hasta que el frenado se sienta
-// fino sin perder capacidad de asentar cerca de los extremos. (2026-08-13 15:10)
-static constexpr float    POSITION_FINE_PWM_K       = 0.5f;
+// Ajuste (2026-08-20): 0.5 daba pwmFineFloor=70 (por debajo de PWM_MIN=100) —
+// insuficiente para vencer fricción DINÁMICA real cerca del target, causando
+// falso STALL sistemático justo donde Logic pide parar (motor casi inmóvil,
+// nunca llega a DEAD_ZONE, dispara STALL_PROTECT). Confirmado con [INSTR]/logs
+// de campo: el arranque (PWM_MIN, sin tocar) siempre funciona bien: el STALL
+// ocurre SIEMPRE en la zona de frenado fino, nunca en el arranque. 0.2 sube
+// pwmFineFloor a 88 (antes 70) — VALIDAR EN BANCO: si el frenado pierde
+// suavidad (overshoot) o si el STALL sigue, ajustar de nuevo.
+static constexpr float    POSITION_FINE_PWM_K       = 0.2f;
 
 // Motor — calibración (constantes)
 static constexpr uint16_t DEAD_ZONE                = 80;      // error < esto → apagar motor (S1 ruido=60, margen 20)
