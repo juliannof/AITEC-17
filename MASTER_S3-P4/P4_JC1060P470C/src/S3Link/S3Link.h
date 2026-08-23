@@ -14,6 +14,7 @@ class S3Link {
 public:
     void begin();
     void update();  // llamar en loop: procesa RX + heartbeat saliente
+    void notifyGoOffline();  // avisa al S3 de que el P4 detectó desconexión de Logic (2026-08-23)
 
 private:
     uint8_t  _rxBuf[16] = {};

@@ -12,7 +12,6 @@ void processChannelPressure(byte channel, byte value);
 void processControlChange(byte channel, byte controller, byte value);
 void processPitchBend(byte channel, int bendValue);
 void checkUsbLink();       // detecta desconexión física real vía tud_mounted() (2026-08-18)
-void checkLogicCloseSignature();  // detecta cierre "silencioso" de Logic sin 0x0F ni faders-a-0 (2026-08-23)
 void tickCalibracion();    // ← AÑADIR
 String formatBeatString();
 String formatTimecodeString();

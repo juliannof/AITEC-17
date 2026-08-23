@@ -117,6 +117,21 @@ void setScreenBrightness(uint8_t brightness) {
 void drawCalibDot() {
     uint16_t calibColor = Motor::isCalibrated() ? TFT_GREEN : TFT_RED;
     tft.fillCircle(TFT_WIDTH / 2, 232, 12, calibColor);
+
+    // Valores reales MIN/MAX calibrados (2026-08-23) — diagnóstico visual del
+    // rango que usa _pbToADC() en este canal, sin depender del monitor serie.
+    // Debajo de la línea "PWM x-y" (Y=185), antes del punto de calibración (Y=232).
+    tft.fillRect(0, 196, TFT_WIDTH, 22, TFT_BLACK);
+    if (Motor::isCalibrated()) {
+        tft.setFont(&fonts::FreeSans9pt7b);
+        tft.setTextSize(0.9f);
+        tft.setTextColor(TFT_GREEN);
+        tft.setTextDatum(MC_DATUM);
+        char calBuf[32];
+        snprintf(calBuf, sizeof(calBuf), "MIN %u  MAX %u", Motor::getADCMin(), Motor::getADCMax());
+        tft.drawString(calBuf, TFT_WIDTH / 2, 207);
+        tft.setTextSize(1);  // restaurar tamaño normal para el resto de la UI
+    }
 }
 
 // ════════════════════════════════════════════════════════════

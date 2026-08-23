@@ -117,3 +117,13 @@ void S3Link::_sendPing() {
     f.crc   = s3link_crc8(&f.type, 1);
     Serial2.write((uint8_t*)&f, sizeof(f));
 }
+
+// Reenvía al S3 la desconexión de Logic que el P4 acaba de detectar (2026-08-23) —
+// ver hooks en MIDIProcessor.cpp (case 0x0F, heurística de faders, checkUsbLink()).
+void S3Link::notifyGoOffline() {
+    S3LinkPingPongFrame f;
+    f.start = S3LINK_START;
+    f.type  = S3LINK_TYPE_GOOFFLINE;
+    f.crc   = s3link_crc8(&f.type, 1);
+    Serial2.write((uint8_t*)&f, sizeof(f));
+}

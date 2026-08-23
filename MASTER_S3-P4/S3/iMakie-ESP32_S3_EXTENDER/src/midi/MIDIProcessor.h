@@ -44,7 +44,7 @@ void processChannelPressure(byte channel, byte value);
 void processControlChange(byte channel, byte controller, byte value);
 void processPitchBend(byte channel, int bendValue);
 void checkUsbLink();       // detecta desconexión física real vía tud_mounted() (2026-08-18)
-void checkLogicCloseSignature();  // detecta cierre "silencioso" de Logic sin 0x0F ni faders-a-0 (2026-08-23)
+void forceLogicDisconnect();  // reset completo de desconexión de Logic — reutilizable (case 0x0F, GOOFFLINE remoto vía S3Link) (2026-08-23)
 void tickCalibracion();    // ← AÑADIR
 void tickTrackNameDebounce();  // debounce anti-flash de nombres de pista (2026-08-13 15:10)
 String formatBeatString();

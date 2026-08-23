@@ -16,9 +16,10 @@
 
 #define S3LINK_START         0xA5
 
-#define S3LINK_TYPE_CHANNEL  0x01   // S3 → P4
-#define S3LINK_TYPE_PING     0x02   // P4 → S3
-#define S3LINK_TYPE_PONG     0x03   // S3 → P4
+#define S3LINK_TYPE_CHANNEL   0x01   // S3 → P4
+#define S3LINK_TYPE_PING      0x02   // P4 → S3
+#define S3LINK_TYPE_PONG      0x03   // S3 → P4
+#define S3LINK_TYPE_GOOFFLINE 0x04   // P4 → S3: P4 detectó desconexión de Logic (2026-08-23)
 
 // --- CRC8 (mismo polinomio que rs485_crc8 en protocol.h) ---
 inline uint8_t s3link_crc8(const uint8_t* data, size_t len) {

@@ -131,7 +131,6 @@ void taskCore0(void* pvParameters) {
         s3Link.update();
 
         checkUsbLink();  // detección física real vía tud_mounted() (2026-08-18)
-        checkLogicCloseSignature();  // detecta cierre "silencioso" de Logic sin 0x0F ni faders-a-0 (2026-08-23)
         vTaskDelay(1);
     }
 }

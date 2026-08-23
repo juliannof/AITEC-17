@@ -272,6 +272,11 @@ void onMasterData(const MasterPacket& pkt) {
         _rsLatchFrozen    = false;
         _rsTouchActive    = false;
         _rsLastTouchTime  = 0;
+        // Sync inicial WRITE (2026-08-23): al entrar en WRITE (ej. abrir proyecto
+        // con el canal ya en ese modo), el fader debe viajar UNA VEZ a la posición
+        // real de Logic — si no, se queda huérfano donde estaba desde el boot,
+        // porque _applyFaderTarget() en WRITE nunca mueve el motor.
+        if (pktMode == AUTO_WRITE) _rsNeedsWriteSync = true;
     }
     // DAW absoluto: en OFF/READ el usuario no puede fijar la posición. (2026-07-20)
     Motor::setDawAbsolute(pktMode == AUTO_OFF || pktMode == AUTO_READ);
@@ -306,6 +311,11 @@ void onMasterData(const MasterPacket& pkt) {
     Internal::_rsWasCalibrated = calibNow;
 
     if (calibNow) {
+        if (_rsNeedsWriteSync) {
+            Motor::setTargetForced(Internal::_pbToADC(pkt.faderTarget));
+            _rsNeedsWriteSync = false;
+            log_i("[AUTOMODE] WRITE sync inicial → pb=%d", pkt.faderTarget);
+        }
         Internal::_applyFaderTarget(pktMode, Internal::_pbToADC(pkt.faderTarget));  // enrutado por modo
     }
     // Si no está calibrado: no se enruta target (el motor lo ignoraría igual). El PB

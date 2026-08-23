@@ -2,6 +2,7 @@
 #include "../config.h"
 #include "../protocol.h"
 #include "../s3_link_protocol.h"
+#include "../midi/MIDIProcessor.h"
 
 S3Link s3Link;
 
@@ -25,8 +26,13 @@ void S3Link::_feed(uint8_t b) {
     }
     if (_rxLen == 1) {
         _rxBuf[_rxLen++] = b;
-        _rxExpected = (b == S3LINK_TYPE_PING) ? sizeof(S3LinkPingPongFrame)
-                                                : sizeof(S3LinkChannelFrame);
+        // Fix (2026-08-23): el caso especial es CHANNEL (13 bytes, único tipo largo,
+        // solo viaja S3→P4) — todo lo demás en P4→S3 (PING, GOOFFLINE, futuros tipos)
+        // es un S3LinkPingPongFrame de 3 bytes. Antes solo existía PING en este sentido,
+        // así que el default a 13 bytes nunca se ejercitaba; al añadir GOOFFLINE (3 bytes)
+        // caía en el default equivocado y la trama nunca se completaba (se perdía).
+        _rxExpected = (b == S3LINK_TYPE_CHANNEL) ? sizeof(S3LinkChannelFrame)
+                                                   : sizeof(S3LinkPingPongFrame);
         return;
     }
     if (_rxLen < sizeof(_rxBuf)) _rxBuf[_rxLen++] = b;
@@ -44,6 +50,11 @@ void S3Link::_processFrame() {
 
     if (type == S3LINK_TYPE_PING) {
         _sendPong();
+    } else if (type == S3LINK_TYPE_GOOFFLINE) {
+        // El P4 detectó la desconexión de Logic y la reenvía (2026-08-23) — mismo
+        // reset que usa el S3 al recibir su propio 0x0F.
+        forceLogicDisconnect();
+        log_i("[MCU] GoOffline recibido vía S3Link (P4) — DISCONNECTED");
     }
     // S3LINK_TYPE_CHANNEL/PONG no se esperan en este sentido (P4→S3) — se ignoran
 }

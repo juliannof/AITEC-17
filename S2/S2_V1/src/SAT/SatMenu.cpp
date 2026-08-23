@@ -26,8 +26,7 @@ const SatMenu::Item SatMenu::_mainItems[] = {
 const SatMenu::Item SatMenu::_motorItems[] = {
     {"MX","PWM Maximo",    Scr::EDIT_PWMMAX},
     {"MN","PWM Minimo",    Scr::EDIT_PWMMIN},
-    {"CA","Calibrar",      Scr::MOTOR_CALIB},
-    {"TE","Test Mode",     Scr::MOTOR_TEST},
+    {"PO","Tiempo Min/Max",Scr::MOTOR_POS},
 };
 
 const SatMenu::Item SatMenu::_touchItems[] = {
@@ -41,7 +40,7 @@ const SatMenu::Item SatMenu::_diagItems[] = {
     {"TC","Test Touch",    Scr::TEST_TOUCH    },
 };
 const int SatMenu::_mainN  = 6;
-const int SatMenu::_motorN = 4;  // PWM Max, PWM Min, Calibrar, Test Mode (2026-08-13 — quitado Motor ON/OFF, sin efecto real)
+const int SatMenu::_motorN = 3;  // PWM Max, PWM Min, Tiempo Min/Max (2026-08-23 — Calibrar y Test Mode eliminados, ya no necesarios)
 const int SatMenu::_touchN = 2;
 const int SatMenu::_diagN  = 5;
 
@@ -115,12 +114,10 @@ void SatMenu::update() {
              _scr == Scr::TEST_FADER     ||
              _scr == Scr::TEST_NEOPIXEL  ||
              _scr == Scr::TEST_TOUCH     ||
-             _scr == Scr::MOTOR_CALIB    ||  // ← añadir
-             _scr == Scr::MOTOR_POS);         // ← añadir
-
+             _scr == Scr::MOTOR_POS);
 
     // ADC + Motor frescos en pantallas de motor
-    if (_scr == Scr::MOTOR_CALIB || _scr == Scr::MOTOR_POS) {
+    if (_scr == Scr::MOTOR_POS) {
         faderADC.update();
         /* Motor::setADC(faderADC.getFaderPos()); */
     }
@@ -139,9 +136,7 @@ void SatMenu::update() {
     switch (_scr) {
         case Scr::MAIN:          _hMain(b);            break;
         case Scr::MOTOR:         _hMotor(b);           break;
-        case Scr::MOTOR_CALIB:   _tickMotorCalib(b); break;
         case Scr::MOTOR_POS:     _tickMotorPos(b);   break;
-        case Scr::MOTOR_TEST:    _tickMotorTest(b);  break;
         case Scr::TOUCH:         _hTouch(b);           break;
         case Scr::DIAG:          _hDiag(b);            break;
         case Scr::EDIT_TRACKID:
@@ -217,9 +212,7 @@ void SatMenu::_render() {
         case Scr::TEST_FADER:    _tickTestFader(Btn::NONE);    return;
         case Scr::TEST_NEOPIXEL: _tickTestNeopixel(Btn::NONE); return;
         case Scr::TEST_TOUCH:    _tickTestTouch(Btn::NONE);    return;
-        case Scr::MOTOR_CALIB:   _tickMotorCalib(Btn::NONE); return;
         case Scr::MOTOR_POS:     _tickMotorPos(Btn::NONE);   return;
-        case Scr::MOTOR_TEST:    _tickMotorTest(Btn::NONE);  return;
         default: break;
     }
 
@@ -631,8 +624,16 @@ void SatMenu::_hMotor(Btn b) {
                 _eTitle="PWM Minimo"; _eVal=_tmp.pwmMin; _eMin=0; _eMax=200;
                 _goto(Scr::EDIT_PWMMIN);
                 break;
-            case 2: _goto(Scr::MOTOR_CALIB); break;
-            case 3: _goto(Scr::MOTOR_TEST);  break;
+            case 2:
+                // Test automático total (2026-08-23): arranca solo al entrar, sin
+                // teclas salvo BACK — ver _tickMotorPos().
+                _goto(Scr::MOTOR_POS);
+                _testPhase      = 0;
+                _toMaxMs        = -1;
+                _toMinMs        = -1;
+                _testPhaseStart = millis();
+                Motor::setTargetForced(Motor::getADCMax());
+                break;
         }
     }
 }
@@ -928,192 +929,98 @@ void SatMenu::showStatus(const char* msg) {
 
 
 // ─────────────────────────────────────────────────────────────
-//  MOTOR CALIB
+//  MOTOR POSICIÓN
 // ─────────────────────────────────────────────────────────────
-void SatMenu::_tickMotorCalib(Btn b) {
+// MOTOR POS — sweep MIN/MAX calibrado (NVS) + cronómetro de tránsito (2026-08-23)
+// WHAT: envía el motor al mínimo o máximo ya calibrados (Motor::getADCMin/Max,
+//       origen NVS) y mide cuánto tarda en llegar, para diagnosticar si el PWM
+//       mínimo actual es insuficiente en algún tramo del recorrido real.
+// WHY:  usa API pública de Motor (setTargetForced/getState/getRawADC). Llama
+//       Motor::update() explícitamente (2026-08-23) — main.cpp NO lo hace
+//       mientras el SAT está abierto (return temprano en loop()), así que sin
+//       esto el target armado por setTargetForced() nunca movía el PWM real.
+//       Seguro aquí (a diferencia del extinto Test Mode) porque este test solo
+//       usa la máquina de estados normal, no control manual de bajo nivel.
+void SatMenu::_tickMotorPos(Btn b) {
     int W = _spr.width(), H = _spr.height();
 
     if (b == Btn::BACK) { _goto(Scr::MOTOR); return; }
 
-    // Replicar loop: actualizar FaderADC y Motor cada frame (2026-05-12 20:55)
-    faderADC.update();
+    // main.cpp NO llama Motor::update() mientras el SAT está abierto (return
+    // temprano en loop()) — faderADC.update()/Motor::setADC() sí siguen corriendo
+    // ahí (ver comentario "SIEMPRE, incluso en SAT" en main.cpp), pero sin esta
+    // llamada el target armado por setTargetForced() nunca se traduce en PWM real.
+    // Único caso hoy que necesita el motor realmente en movimiento dentro del SAT.
     Motor::update();
 
-    // SAT solo DIBUJA el estado actual
-    // Motor::update() lo maneja aquí en SAT (sincronización) (2026-05-12 20:55)
-    Motor::CalibState cs = Motor::getCalibState();
+    uint16_t adcMin = Motor::getADCMin();
+    uint16_t adcMax = Motor::getADCMax();
+    uint16_t pos    = Motor::getRawADC();
+    uint16_t span   = (adcMax > adcMin) ? (adcMax - adcMin) : 1;
+    float    pct    = constrain((float)(pos - adcMin) / span, 0.f, 1.f);
+
+    Motor::MotorState st       = Motor::getState();
+    bool               atTarget = (st == Motor::MotorState::AT_TARGET);
+    bool               timedOut = (millis() - _testPhaseStart > SAT_MOTOR_SWEEP_TIMEOUT_MS);
+
+    // Máquina de 3 fases, 100% automática — solo BACK interrumpe (2026-08-23).
+    if (_testPhase == 0) {              // yendo a MAX
+        Motor::setTargetForced(adcMax);
+        if (atTarget || timedOut) {
+            _toMaxMs        = timedOut ? -1 : (long)(millis() - _testPhaseStart);
+            _testPhase      = 1;
+            _testPhaseStart = millis();
+            Motor::setTargetForced(adcMin);
+        }
+    } else if (_testPhase == 1) {       // yendo a MIN
+        Motor::setTargetForced(adcMin);
+        if (atTarget || timedOut) {
+            _toMinMs   = timedOut ? -1 : (long)(millis() - _testPhaseStart);
+            _testPhase = 2;              // terminado
+        }
+    }
 
     _spr.fillScreen(C_BG);
-    _drawHdr("MOTOR CALIB");
-
-    int y = SAT_HDR_H + 8;
-    char buf[32];
-
-    const char* stateStr = "IDLE";
-    uint16_t stateCol = C_GRAY;
-    switch (cs) {
-        case Motor::CalibState::IDLE:      stateStr="◯ IDLE";       stateCol=C_GRAY;   break;
-        case Motor::CalibState::CALIB_UP:  stateStr="▲ SUBIENDO";   stateCol=C_CYAN;   break;
-        case Motor::CalibState::CALIB_DOWN:stateStr="▼ BAJANDO";    stateCol=C_CYAN;   break;
-        case Motor::CalibState::DONE:      stateStr="✓ OK";         stateCol=C_GREEN;  break;
-        case Motor::CalibState::ERROR:     stateStr="✗ ERROR";      stateCol=C_ACCENT; break;
-        default: break;
-    }
-    _spr.setTextColor(stateCol, C_BG); _spr.setTextSize(2);
-    _spr.setTextDatum(textdatum_t::middle_center);
-    _spr.drawString(stateStr, W/2, y+10); y+=30;
-
-    // Mostrar mensaje "🔄 RECALIBRANDO" durante 600ms tras presionar UP (2026-05-12 18:36)
-    uint32_t msElapsed = millis() - _calibRecalib_ms;
-    if (_calibRecalib_ms > 0 && msElapsed < 600) {
-        _spr.setTextSize(1); _spr.setTextColor(C_YELLOW, C_BG);
-        _spr.setTextDatum(textdatum_t::middle_center);
-        _spr.drawString("(recalibrado)", W/2, y-5);
-    }
-
-    uint16_t pos = Motor::getRawADC();
-    float pct = Motor::getPosition();
-    _spr.setTextSize(1); _spr.setTextColor(C_TEXT, C_BG);
-    _spr.setTextDatum(textdatum_t::top_left);
-    snprintf(buf, 32, "pos=%d  (%.1f%%)", pos, pct*100.f);
-    _spr.drawString(buf, 4, y); y+=14;
-    _drawHBar(4, y, W-8, 12, pct, C_CYAN); y+=18;
-
-    snprintf(buf, 32, "min=%d  max=%d", Motor::getADCMin(), Motor::getADCMax());
-    _spr.setTextColor(C_GRAY, C_BG);
-    _spr.drawString(buf, 4, y); y+=14;
-    snprintf(buf, 32, "span=%d", Motor::getADCMax() - Motor::getADCMin());
-    _spr.drawString(buf, 4, y);
-
-    _drawHints("Calibrar","","Atras","");
-    _push();
-}
-
-// ─────────────────────────────────────────────────────────────
-//  MOTOR POSICIÓN
-// ─────────────────────────────────────────────────────────────
-void SatMenu::_tickMotorPos(Btn b) {
-    int W = _spr.width(), H = _spr.height();
-
-    if (b == Btn::BACK)  { /* Motor::stop(); */ _goto(Scr::MOTOR); return; }
-    if (b == Btn::UP)    { _motorTarget = (uint16_t)constrain((int)_motorTarget + 100, 0, 8191); /* Motor::setTarget(_motorTarget); */ }
-    if (b == Btn::DOWN)  { _motorTarget = (uint16_t)constrain((int)_motorTarget - 100, 0, 8191); /* Motor::setTarget(_motorTarget); */ }
-
-    //faderADC.update();
-    /* Motor::setADC(faderADC.getFaderPos()); */
-    /* Motor::update(); */
-
-    /* uint16_t pos    = Motor::getRawADC(); */
-    /* float    pct    = Motor::getPosition(); */
-    uint16_t pos    = 0;
-    float    pct    = 0.0f;
-    float    tgtPct = constrain((float)_motorTarget / 8191.f, 0.f, 1.f);
-    int      err    = (int)_motorTarget - (int)pos;
-
-    _spr.fillScreen(C_BG);
-    _drawHdr("MOTOR POSICION");
-
-    int y = SAT_HDR_H + 8;
-    char buf[32];
-
-    _spr.setTextColor(C_CYAN, C_BG); _spr.setTextSize(1);
-    _spr.setTextDatum(textdatum_t::top_left);
-    snprintf(buf, 32, "target=%d", _motorTarget);
-    _spr.drawString(buf, 4, y); y+=14;
-    _drawHBar(4, y, W-8, 12, tgtPct, C_CYAN); y+=18;
-
-    snprintf(buf, 32, "pos=%d  err=%+d", pos, err);
-    _spr.setTextColor(C_TEXT, C_BG);
-    _spr.drawString(buf, 4, y); y+=14;
-    _drawHBar(4, y, W-8, 12, pct, C_GREEN); y+=18;
-
-    /* if (!Motor::isCalibrated()) {
-        _spr.setTextColor(C_ACCENT, C_BG);
-        _spr.drawString("!! SIN CALIBRAR !!", 4, y);
-    } */
-
-    _drawHints("tgt+100","tgt-100","Atras","");
-    _push();
-}
-
-//  MOTOR TEST — Control con botones (2026-05-10 19:54)
-void SatMenu::_tickMotorTest(Btn b) {
-    int W = _spr.width(), H = _spr.height();
-
-    // CRÍTICO: actualizar Button2 cada frame antes de leer estado (2026-05-10 20:05)
-    updateButtons();
-
-    // MUTE presionado = salir
-    if (buttonMute.wasPressed()) {
-        Motor::testOff();
-        log_i("[MOTOR_TEST] Saliendo por MUTE");
-        _goto(Scr::MOTOR);
-        return;
-    }
-
-    if (b == Btn::BACK) {
-        Motor::testOff();
-        log_i("[MOTOR_TEST] Apagado, volviendo a Motor");
-        _goto(Scr::MOTOR);
-        return;
-    }
-
-    // Control directo: REC=UP, SOLO=DOWN, solo mientras presionados (2026-05-10 20:00)
-    bool recPressed  = buttonRec.isPressed();
-    bool soloPressed = buttonSolo.isPressed();
-
-    uint8_t pwmMax = Motor::getPWMMax();  // Lee de NVS (2026-05-10 20:25)
-
-    if (recPressed) {
-        Motor::testUp(pwmMax);
-    } else if (soloPressed) {
-        Motor::testDown(pwmMax);
-    } else {
-        Motor::testOff();  // Suelta cualquier botón → para
-    }
-
-    // Pantalla
-    _spr.fillScreen(C_BG);
-    _drawHdr("MOTOR TEST");
+    _drawHdr("TIEMPO MIN/MAX");
 
     int y = SAT_HDR_H + 8;
     char buf[48];
 
-    // ADC real + posición (desde faderADC directamente, no filtrado por Motor)
-    _spr.setTextColor(C_CYAN, C_BG);
-    _spr.setTextSize(1);
+    _spr.setTextColor(C_CYAN, C_BG); _spr.setTextSize(1);
     _spr.setTextDatum(textdatum_t::top_left);
-    uint16_t adc = faderADC.getFaderPos();
-    uint16_t adcMin = Motor::getADCMin();
-    uint16_t adcMax = Motor::getADCMax();
-    uint16_t adcSpan = (adcMax > adcMin) ? (adcMax - adcMin) : 1;
-    float pos = (adc >= adcMin) ? (float)(adc - adcMin) / adcSpan : 0.0f;
-    pos = constrain(pos, 0.0f, 1.0f);
-    snprintf(buf, 48, "ADC=%u (%.1f%%)", adc, pos * 100.0f);
-    _spr.drawString(buf, 4, y); y+=18;
-
-    // Rango calibrado
-    snprintf(buf, 48, "Min=%u Max=%u", Motor::getADCMin(), Motor::getADCMax());
-    _spr.drawString(buf, 4, y); y+=18;
-
-    // Estado de botones
-    _spr.setTextColor(recPressed ? C_RED : C_GRAY, C_BG);
-    snprintf(buf, 48, "REC(UP): %s", recPressed ? "ACTIVO" : "---");
+    snprintf(buf, 48, "Min=%u Max=%u  pos=%u", adcMin, adcMax, pos);
     _spr.drawString(buf, 4, y); y+=14;
+    _drawHBar(4, y, W-8, 12, pct, C_GREEN); y+=18;
 
-    _spr.setTextColor(soloPressed ? C_RED : C_GRAY, C_BG);
-    snprintf(buf, 48, "SOLO(DN): %s", soloPressed ? "ACTIVO" : "---");
-    _spr.drawString(buf, 4, y); y+=18;
-
-    // PWM actual y estado (usa valores de NVS)
     _spr.setTextColor(C_YELLOW, C_BG);
-    const char* state = "IDLE";
-    if (recPressed) state = "UP";
-    else if (soloPressed) state = "DOWN";
-    uint8_t pwmVal = recPressed ? pwmMax : (soloPressed ? pwmMax : 0);
-    snprintf(buf, 48, "PWM=%d (%s)", pwmVal, state);
-    _spr.drawString(buf, 4, y);
+    if (_testPhase == 0) {
+        snprintf(buf, 48, "-> MAX: en curso %lu ms", millis() - _testPhaseStart);
+        _spr.drawString(buf, 4, y); y+=16;
+    } else {
+        if (_toMaxMs >= 0) snprintf(buf, 48, "-> MAX: %ld ms", _toMaxMs);
+        else               snprintf(buf, 48, "-> MAX: TIMEOUT");
+        _spr.drawString(buf, 4, y); y+=16;
+    }
+    if (_testPhase == 1) {
+        snprintf(buf, 48, "MAX -> MIN: en curso %lu ms", millis() - _testPhaseStart);
+        _spr.setTextColor(C_YELLOW, C_BG);
+        _spr.drawString(buf, 4, y); y+=16;
+    } else if (_testPhase == 2) {
+        if (_toMinMs >= 0) snprintf(buf, 48, "MAX -> MIN: %ld ms", _toMinMs);
+        else               snprintf(buf, 48, "MAX -> MIN: TIMEOUT");
+        _spr.setTextColor(C_YELLOW, C_BG);
+        _spr.drawString(buf, 4, y); y+=16;
+    }
+    if (_testPhase == 2) {
+        _spr.setTextColor(C_GREEN, C_BG);
+        _spr.drawString("TEST COMPLETO", 4, y); y+=16;
+    }
 
-    _drawHints("REC=UP","SOLO=DN","MUTE=exit","");
+    if (!Motor::isCalibrated()) {
+        _spr.setTextColor(C_ACCENT, C_BG);
+        _spr.drawString("!! SIN CALIBRAR !!", 4, y);
+    }
+
+    _drawHints("","","Atras","");
     _push();
 }

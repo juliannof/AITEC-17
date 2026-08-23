@@ -340,14 +340,6 @@ void loop() {
 
     ButtonManager::update();
 
-    // REC reinicia calibración en SAT > Motor > Calibración (2026-05-12 19:07)
-    if (satMenu && satMenu->isOpen() && satMenu->isMotorCalibScreen()) {
-        if (ButtonManager::getButtonFlags() & FLAG_REC) {
-            Motor::startCalib();
-            log_i("[MAIN] REC: reiniciando calibración");
-        }
-    }
-
     if (satMenu && satMenu->isOpen()) return;
 
     // ┌─ Procesar encoder ANTES de RS485 para capturar delta actualizado
@@ -393,7 +385,11 @@ void loop() {
         RS485Handler::checkTimeout(lastRxTime);
     }
 
-    // Motor::update() SOLO si SAT no está en Test Mode activo (2026-05-10 20:35)
+    // Motor::update() SOLO si SAT no está abierto (2026-05-10 20:35) — este bloque
+    // es inalcanzable mientras el SAT está abierto de todas formas (return
+    // temprano más arriba en este mismo loop() si satMenu->isOpen()). El test
+    // "Tiempo Min/Max" del SAT llama Motor::update() por su cuenta — ver
+    // SatMenu.cpp::_tickMotorPos() (2026-08-23).
     if (!(satMenu && satMenu->isOpen())) {
         uint32_t _tm = micros();
         Motor::update();

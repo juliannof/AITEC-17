@@ -228,6 +228,12 @@ static uint16_t           _stallProtectLastADC = 0;
 //      en bucle indefinido. Riesgo térmico real (motor + DRV8833).
 static constexpr uint32_t STALL_COOLDOWN_MS    = 2000;  // ms de reposo obligatorio tras un STALL
 static uint32_t           _stallCooldownUntil  = 0;      // timestamp: no re-armar movimiento antes de esto
+
+// SAT — test automático MIN/MAX (2026-08-23): límite por tramo antes de marcarlo
+// TIMEOUT en vez de esperar indefinidamente — tras un STALL real, Motor::_motor_state
+// se queda en MOVING_TO_TARGET para siempre (nunca pasa a AT_TARGET), así que el test
+// necesita un límite propio, independiente del estado del Motor.
+static constexpr uint32_t SAT_MOTOR_SWEEP_TIMEOUT_MS = 8000;
 // WHY: si el STALL fue por el usuario resistiendo al motor (AUTO_READ/OFF,
 //      "DAW absoluto"), en cuanto suelta ya no hay obstáculo — no tiene
 //      sentido esperar el cooldown completo. Si el STALL fue solo (tope
@@ -271,6 +277,11 @@ static bool      _rsLatchFrozen      = false;
 static uint16_t  _rsLatchFrozenADC   = 0;
 static bool      _rsTouchActive      = false;
 static uint32_t  _rsLastTouchTime    = 0;
+// _rsNeedsWriteSync ─ armada al entrar en AUTO_WRITE (flanco de modo). Aplica el
+// target real de Logic UNA VEZ (Motor::setTargetForced) en cuanto el motor esté
+// calibrado, para que el fader viaje a la posición del proyecto al abrir con el
+// canal ya en WRITE — luego se baja y el motor queda inhibido como siempre. (2026-08-23)
+static bool      _rsNeedsWriteSync   = false;
 
 // ─── Reporte de posición S2→Logic (2026-08-14) ────────────────
 // WHAT: decisión de "reportar faderPos ahora" — antes vivía en S3 como heurística
@@ -471,7 +482,7 @@ static constexpr uint32_t TOUCH_BASE_MIN_VALUE     = 50;      // valor mínimo i
 #define TFT_MCU_DARKGRAY 0x0842 // Gris oscuro MCU
 #define TFT_AUTO_OFF    0x0842   // gris oscuro (= TFT_MCU_DARKGRAY)
 #define TFT_AUTO_READ   0x2500   // verde (= TFT_MCU_GREEN)
-#define TFT_AUTO_WRITE  0x500A// lila
+#define TFT_AUTO_WRITE  0xB81F   // lila vivo (2026-08-23, antes 0x500A demasiado tenue)
 #define TFT_AUTO_TRIM   0x07FF   // cian — color propio, antes aliasado a TFT_AUTO_OFF (2026-08-13 15:10)
 #define TFT_AUTO_TOUCH  0xFD20   // naranja vivo
 #define TFT_AUTO_LATCH  0xA900   // naranja oscuro

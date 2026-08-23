@@ -68,7 +68,6 @@ public:
     bool isOpen() const { return _open; }
     bool isEncoderConsumed() const { return _encoderConsumed; }
     const SatConfig& getConfig() const { return _cfg; }
-    bool isMotorCalibScreen() const { return _scr == Scr::MOTOR_CALIB; }
 
 private:
     enum class Scr {
@@ -78,9 +77,7 @@ private:
         EDIT_PWMMIN, EDIT_PWMMAX,
         CONFIRM, TOAST,
         TEST_DISPLAY, TEST_ENCODER, TEST_FADER, TEST_NEOPIXEL, TEST_TOUCH,
-        MOTOR_CALIB,
         MOTOR_POS,
-        MOTOR_TEST,
     };
 
     struct Item { const char* badge; const char* label; Scr target; };
@@ -181,9 +178,7 @@ private:
     void _toast(const char* msg, Scr ret);
     void _confirm(const char* msg, Scr yes);
 
-    void _tickMotorCalib(Btn b);
     void _tickMotorPos(Btn b);
-    void _tickMotorTest(Btn b);
 
     int           _fadCalMin  = 8191;
     int           _fadCalMax  = 0;
@@ -193,8 +188,6 @@ private:
     unsigned long _stopT      = 0;
     bool          _reported   = false;
 
-    uint32_t      _calibRecalib_ms = 0;    // Timestamp para mostrar "(recalibrado)" 600ms (2026-05-12 18:36)
-
     static const Item _mainItems[];
     static const Item _identItems[];
     static const Item _motorItems[];
@@ -202,5 +195,10 @@ private:
     static const Item _diagItems[];
     static const int  _mainN, _identN, _motorN, _touchN, _diagN;
     unsigned long _neoMuteHoldT = 0;
-    uint16_t      _motorTarget = 4096;   // posición manual 0–8191
+    // MOTOR_POS — test automático total MIN/MAX (2026-08-23): sin teclas salvo
+    // BACK. Al entrar arranca solo: va a MAX, mide, vuelve a MIN, mide, reporta.
+    uint8_t       _testPhase = 0;              // 0=yendo a MAX, 1=yendo a MIN, 2=terminado
+    unsigned long _testPhaseStart = 0;         // millis() al arrancar la fase actual
+    long          _toMaxMs = -1;               // ms del tramo inicio→MAX, -1 = aún no medido/timeout
+    long          _toMinMs = -1;               // ms del tramo MAX→MIN, -1 = aún no medido/timeout
 };

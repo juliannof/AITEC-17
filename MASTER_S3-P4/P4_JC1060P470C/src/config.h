@@ -8,7 +8,7 @@
 #if defined(DEVICE_P4_MASTER)
     #define DEVICE_FAMILY       0x14
     #define VERSION_REPLY_CMD   0x14
-    #define NUM_SLAVES          3
+    #define NUM_SLAVES          0
 
 #elif defined(DEVICE_S3_EXTENDER)
     #define DEVICE_FAMILY       0x15
@@ -78,12 +78,6 @@
 // tras la heurística de faders, se interpreta como CONFIRMACIÓN del cierre, no como
 // reconexión real.
 #define DISCONNECT_CONFIRM_WINDOW_MS 500
-// CLOSE_CONFIRM_WINDOW_MS (2026-08-23): firma de cierre "silencioso" de Logic — Cmd+Q
-// con USB conectado no manda 0x0F ni fuerza faders a 0 de forma fiable (verificado con
-// MIDI Monitor). Logic blanquea los 8 nombres de canal a la vez tanto al abrir como al
-// cerrar (case 0x12 arma awaitingCloseConfirm); solo en apertura llegan nombres reales
-// después. Si no llegan dentro de esta ventana, se asume cierre real.
-#define CLOSE_CONFIRM_WINDOW_MS 4000
 
 
 // ── Dimensiones display (JD9165 1024×600 landscape nativo) (2026-06-09) ──

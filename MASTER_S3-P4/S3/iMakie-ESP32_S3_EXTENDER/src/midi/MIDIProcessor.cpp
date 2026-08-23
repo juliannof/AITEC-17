@@ -40,14 +40,6 @@ namespace {
     // que la heurística de faders acababa de marcar. Ver case 0x21 más abajo.
     static unsigned long lastFaderDisconnectTime = 0;
     static const unsigned long DISCONNECT_CONFIRM_WINDOW_MS = 500;
-    // Firma de cierre "silencioso" de Logic (2026-08-23) — verificado con MIDI Monitor:
-    // Cmd+Q con USB conectado no manda 0x0F ni fuerza faders a 0 de forma fiable. Único
-    // patrón distinto entre apertura y cierre: Logic blanquea los 8 nombres de canal en
-    // AMBOS casos (case 0x12 arma awaitingCloseConfirm), pero solo en apertura llegan
-    // nombres reales después. Si expira la ventana sin nombres reales, se asume cierre.
-    static bool awaitingCloseConfirm = false;
-    static unsigned long fullBlankSignatureTime = 0;
-    static const unsigned long CLOSE_CONFIRM_WINDOW_MS = 4000;
     static uint8_t  _calibPendingFrom = 0;
     static uint32_t _calibNextTime    = 0;
     static int16_t lastSentPitchBend[9] = {INT16_MIN, INT16_MIN, INT16_MIN, INT16_MIN, INT16_MIN, INT16_MIN, INT16_MIN, INT16_MIN, INT16_MIN};
@@ -424,26 +416,7 @@ void processMackieSysEx(byte* payload, int len) {
     switch (command) {
 
         case 0x0F: {
-            logicConnectionState = ConnectionState::DISCONNECTED;
-            g_logicConnected     = 0;   // Todos los slaves recibirán connected=0
-            fadersAtMinMask      = 0;
-            firstFaderMinTime    = 0;
-            awaitingCloseConfirm = false;  // evita disparo obsoleto de checkLogicCloseSignature() tras esta desconexión
-            // Fijar target a la posición actual del fader (2026-08-02): igual que ya hacía
-            // la desconexión automática por fadersAtMinMask — evita dejar armado un target
-            // viejo/potencialmente contaminado para cuando Logic reconecte.
-            for (uint8_t i = 1; i <= NUM_SLAVES; i++)
-                rs485.setFaderTarget(i, rs485.getChannel(i).faderPos);
-            // Reset AutoMode a READ en desconexión (2026-08-16): sin esto, los 8
-            // canales se quedaban con el último modo real recibido por nota, incluso
-            // con Logic desconectado — mostrando un estado obsoleto. READ es el
-            // default seguro (igual que el boot, línea 71-73) hasta que Logic
-            // reconecte y mande el modo real por nota.
-            for (uint8_t i = 0; i < 8; i++) g_channelAutoMode[i] = AUTO_READ;
-            for (uint8_t i = 1; i <= NUM_SLAVES; i++) rs485.setAutoMode(i, AUTO_READ);
-            Transporte::setAllLedsOff();  // LEDs transport off al desconectar (2026-05-27)
-            rs485.beginDisconnectSequence();
-            g_switchToOffline    = true;
+            forceLogicDisconnect();
             log_i("[MCU] GoOffline recibido — iniciando DISCONNECT SEQUENCE");
             break;
         }
@@ -474,20 +447,6 @@ void processMackieSysEx(byte* payload, int len) {
                 if (offset >= 56) break;
                 nameBufs[offset / 7][offset % 7] = (char)payload[6 + i];
                 nameChanged[offset / 7] = true;
-            }
-
-            // Firma de cierre (2026-08-23): un blanqueo de los 8 canales A LA VEZ en este
-            // mismo mensaje arma la confirmación de cierre; cualquier nombre real recibido
-            // aquí (en este mensaje o en uno posterior) la desarma. Ver checkLogicCloseSignature().
-            bool allChannelsBlanked = true;
-            for (int t = 0; t < 8; t++) {
-                if (!(nameChanged[t] && nameBufs[t][0] == '\0')) allChannelsBlanked = false;
-                if (nameChanged[t] && nameBufs[t][0] != '\0') awaitingCloseConfirm = false;
-            }
-            if (allChannelsBlanked && logicConnectionState == ConnectionState::CONNECTED) {
-                awaitingCloseConfirm    = true;
-                fullBlankSignatureTime  = millis();
-                log_i("[MCU] Blanqueo de 8 canales — armando confirmacion de cierre (%lums)", CLOSE_CONFIRM_WINDOW_MS);
             }
 
             for (int t = 0; t < 8; t++) {
@@ -776,7 +735,6 @@ void processPitchBend(byte channel, int bendValue) {
                 fadersAtMinMask      = 0;
                 firstFaderMinTime    = 0;
                 lastFaderDisconnectTime = now;
-                awaitingCloseConfirm = false;  // evita disparo obsoleto de checkLogicCloseSignature() tras esta desconexión
                 Transporte::setAllLedsOff();  // LEDs transport off al desconectar (2026-05-27)
                 for (uint8_t i = 1; i <= NUM_SLAVES; i++)
                     rs485.setFaderTarget(i, rs485.getChannel(i).faderPos);
@@ -868,35 +826,38 @@ void checkUsbLink() {
                                      // seguían recibiendo connected=1 y nunca entraban
                                      // en Splash al cerrar Logic (USB desmontado).
         fadersAtMinMask      = 0;
-        awaitingCloseConfirm = false;  // evita disparo obsoleto de checkLogicCloseSignature() tras esta desconexión
         g_switchToOffline    = true;
         log_i("[MCU] USB desmontado — forzando DISCONNECTED");
     }
 }
 
-// Detección de cierre "silencioso" de Logic (2026-08-23) — Cmd+Q con cable USB conectado
-// no manda 0x0F ni fuerza faders a 0 de forma fiable (verificado con MIDI Monitor, sesión
-// 2026-08-23). case 0x12 arma awaitingCloseConfirm cuando Logic blanquea los 8 canales a
-// la vez (pasa tanto al abrir como al cerrar); si no llega ningún nombre real dentro de
-// CLOSE_CONFIRM_WINDOW_MS, se asume cierre y se replica el mismo reset que case 0x0F.
-void checkLogicCloseSignature() {
-    if (awaitingCloseConfirm &&
-        logicConnectionState == ConnectionState::CONNECTED &&
-        millis() - fullBlankSignatureTime >= CLOSE_CONFIRM_WINDOW_MS) {
-        awaitingCloseConfirm = false;
-        logicConnectionState = ConnectionState::DISCONNECTED;
-        g_logicConnected     = 0;
-        fadersAtMinMask      = 0;
-        firstFaderMinTime    = 0;
-        for (uint8_t i = 1; i <= NUM_SLAVES; i++)
-            rs485.setFaderTarget(i, rs485.getChannel(i).faderPos);
-        for (uint8_t i = 0; i < 8; i++) g_channelAutoMode[i] = AUTO_READ;
-        for (uint8_t i = 1; i <= NUM_SLAVES; i++) rs485.setAutoMode(i, AUTO_READ);
-        Transporte::setAllLedsOff();
-        rs485.beginDisconnectSequence();
-        g_switchToOffline    = true;
-        log_i("[MCU] Cierre de Logic confirmado (sin contenido real tras blanqueo, %lums) — DISCONNECTED", CLOSE_CONFIRM_WINDOW_MS);
-    }
+// Reset completo de desconexión de Logic (2026-08-23) — extraído de case 0x0F para
+// reutilizarlo cuando el P4 detecta la desconexión y la reenvía por S3Link (ver
+// S3Link.cpp::_processFrame(), S3LINK_TYPE_GOOFFLINE). Antes el S3 intentaba detectar
+// por su cuenta el cierre "silencioso" de Logic (blanqueo de 8 canales, checkLogicCloseSignature(),
+// heurística descartada 2026-08-23 tras fallar en banco en el P4) — ahora confía en que
+// el P4 ya lo detecta de forma fiable (0x0F / heurística de faders / checkUsbLink) y se
+// lo notifica.
+void forceLogicDisconnect() {
+    logicConnectionState = ConnectionState::DISCONNECTED;
+    g_logicConnected     = 0;   // Todos los slaves recibirán connected=0
+    fadersAtMinMask      = 0;
+    firstFaderMinTime    = 0;
+    // Fijar target a la posición actual del fader (2026-08-02): igual que ya hacía
+    // la desconexión automática por fadersAtMinMask — evita dejar armado un target
+    // viejo/potencialmente contaminado para cuando Logic reconecte.
+    for (uint8_t i = 1; i <= NUM_SLAVES; i++)
+        rs485.setFaderTarget(i, rs485.getChannel(i).faderPos);
+    // Reset AutoMode a READ en desconexión (2026-08-16): sin esto, los 8
+    // canales se quedaban con el último modo real recibido por nota, incluso
+    // con Logic desconectado — mostrando un estado obsoleto. READ es el
+    // default seguro (igual que el boot) hasta que Logic reconecte y mande
+    // el modo real por nota.
+    for (uint8_t i = 0; i < 8; i++) g_channelAutoMode[i] = AUTO_READ;
+    for (uint8_t i = 1; i <= NUM_SLAVES; i++) rs485.setAutoMode(i, AUTO_READ);
+    Transporte::setAllLedsOff();  // LEDs transport off al desconectar (2026-05-27)
+    rs485.beginDisconnectSequence();
+    g_switchToOffline    = true;
 }
 
 bool isLogicConnected() {
