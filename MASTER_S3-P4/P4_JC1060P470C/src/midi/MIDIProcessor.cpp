@@ -32,6 +32,10 @@ namespace {
 
     static int8_t  g_selectedChannel    = -1;
     static unsigned long connectedSinceTime  = 0;
+    // Firma de cierre "silencioso" de Logic (2026-08-23) — ver CLOSE_CONFIRM_WINDOW_MS
+    // en config.h. Estado armado por case 0x12, consumido por checkLogicCloseSignature().
+    static bool awaitingCloseConfirm = false;
+    static unsigned long fullBlankSignatureTime = 0;
     static uint8_t  _calibPendingFrom = 0;
     static uint32_t _calibNextTime    = 0;
 
@@ -403,6 +407,7 @@ void processMackieSysEx(byte* payload, int len) {
             g_logicConnected     = 0;
             fadersAtMinMask      = 0;
             firstFaderMinTime    = 0;
+            awaitingCloseConfirm = false;  // evita disparo obsoleto de checkLogicCloseSignature() tras esta desconexión
             g_switchToOffline    = true;
             memset(recStates,    0, sizeof(recStates));
             memset(soloStates,   0, sizeof(soloStates));
@@ -542,6 +547,20 @@ void processMackieSysEx(byte* payload, int len) {
                     vpotBufs[s][p] = (char)payload[6 + i];
                     vpotChanged[s] = true;
                 }
+            }
+
+            // Firma de cierre (2026-08-23): un blanqueo de los 8 canales A LA VEZ en este
+            // mismo mensaje arma la confirmación de cierre; cualquier nombre real recibido
+            // aquí (en este mensaje o en uno posterior) la desarma. Ver checkLogicCloseSignature().
+            bool allChannelsBlanked = true;
+            for (int t = 0; t < 8; t++) {
+                if (!(nameChanged[t] && nameBufs[t][0] == '\0')) allChannelsBlanked = false;
+                if (nameChanged[t] && nameBufs[t][0] != '\0') awaitingCloseConfirm = false;
+            }
+            if (allChannelsBlanked && logicConnectionState == ConnectionState::CONNECTED) {
+                awaitingCloseConfirm    = true;
+                fullBlankSignatureTime  = millis();
+                log_i("[MCU] Blanqueo de 8 canales — armando confirmacion de cierre (%lums)", CLOSE_CONFIRM_WINDOW_MS);
             }
 
             for (int t = 0; t < 8; t++) {
@@ -757,6 +776,7 @@ void processPitchBend(byte channel, int bendValue) {
                 fadersAtMinMask      = 0;
                 firstFaderMinTime    = 0;
                 lastFaderDisconnectTime = now;
+                awaitingCloseConfirm = false;  // evita disparo obsoleto de checkLogicCloseSignature() tras esta desconexión
                 for (uint8_t i = 1; i <= NUM_SLAVES; i++)
                     rs485.setFaderTarget(i, rs485.getChannel(i).faderPos);
                 g_switchToOffline = true;
@@ -804,8 +824,49 @@ void checkUsbLink() {
                                      // en Splash al cerrar Logic (USB desmontado).
         needsTOTALRedraw     = true;
         fadersAtMinMask      = 0;
+        awaitingCloseConfirm = false;  // evita disparo obsoleto de checkLogicCloseSignature() tras esta desconexión
         g_switchToOffline    = true;
         log_i("[MCU] USB desmontado — forzando DISCONNECTED");
+    }
+}
+
+// Detección de cierre "silencioso" de Logic (2026-08-23) — Cmd+Q con cable USB conectado
+// no manda 0x0F ni fuerza faders a 0 de forma fiable (verificado con MIDI Monitor, sesión
+// 2026-08-23). case 0x12 arma awaitingCloseConfirm cuando Logic blanquea los 8 canales a
+// la vez (pasa tanto al abrir como al cerrar); si no llega ningún nombre real dentro de
+// CLOSE_CONFIRM_WINDOW_MS (config.h), se asume cierre y se replica el mismo reset que case 0x0F.
+void checkLogicCloseSignature() {
+    if (awaitingCloseConfirm &&
+        logicConnectionState == ConnectionState::CONNECTED &&
+        millis() - fullBlankSignatureTime >= CLOSE_CONFIRM_WINDOW_MS) {
+        awaitingCloseConfirm = false;
+        logicConnectionState = ConnectionState::DISCONNECTED;
+        g_logicConnected     = 0;
+        fadersAtMinMask      = 0;
+        firstFaderMinTime    = 0;
+        g_switchToOffline    = true;
+        memset(recStates,    0, sizeof(recStates));
+        memset(soloStates,   0, sizeof(soloStates));
+        memset(muteStates,   0, sizeof(muteStates));
+        memset(selectStates, 0, sizeof(selectStates));
+        memset(vuLevels,     0, sizeof(vuLevels));
+        memset(vuClipState,  0, sizeof(vuClipState));
+        memset(vuPeakLevels, 0, sizeof(vuPeakLevels));
+        memset(vuPeakFadeTime, 0, sizeof(vuPeakFadeTime));
+        memset(vuPeakAlpha, 255, sizeof(vuPeakAlpha));
+        memset(faderPositions, 0, sizeof(faderPositions));
+        memset(btnStatePG1,  0, sizeof(bool) * BTN_PG1_COUNT);
+        memset(btnFlashPG1,  0, sizeof(bool) * BTN_PG1_COUNT);
+        memset(g_channelAutoMode, 0, sizeof(g_channelAutoMode));
+        g_selectedChannel = -1;
+        rudeSoloActive = false;
+        cycleActive    = false;
+        g_clickActive  = false;
+        for (int i = 0; i < 8; i++) trackNames[P4_CH_OFFSET + i] = "";
+        _calibPendingFrom = 0;
+        for (uint8_t i = 1; i <= NUM_SLAVES; i++) rs485.setFlags(i, 0);
+        rs485.beginDisconnectSequence();
+        log_i("[MCU] Cierre de Logic confirmado (sin contenido real tras blanqueo, %lums) — DISCONNECTED", CLOSE_CONFIRM_WINDOW_MS);
     }
 }
 

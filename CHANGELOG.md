@@ -45,6 +45,49 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 | 🟡 Media | **P4: fix de invalidación selectiva de VU meters (timecode lag), SIN VALIDAR EN BANCO (2026-08-18)** | Nuevo array `vuDirty[16]` para que `uiPage3Update()` solo invalide columnas VU que realmente cambiaron, en vez de las 16 siempre — evita que el timecode de la cabecera se retrase durante playback. Detalle completo (causa raíz, código exacto) en `docs/BUG_VU_P4.md` §"BUG 2". Pendiente confirmar visualmente en pantalla real: timecode fluido con audio sonando, VU meters sin colas de segmentos sin refrescar. |
 | 🔴 Alta | **P4: fix de reconexión en caliente (VU/botones no volvían) + reemplazo de detección de desconexión por `tud_mounted()`, SIN VALIDAR EN BANCO (2026-08-18 19:43)** | Historia en 3 pasos, misma sesión: (1) VU meters/botones no volvían tras reconectar en caliente aunque el handshake sí — causa: `logicConnectionState` quedaba "congelado" en `CONNECTED` durante el corte, fix en `case 0x21` (refresca `connectedSinceTime` siempre). (2) Al reactivar `checkMidiTimeout()` como parte de ese fix, apareció un bucle real "conecta y se desconecta" — causa: timeout por silencio MIDI, incompatible con que Logic no manda tráfico garantizado en reposo. (3) Sustituido por completo: `checkUsbLink()` usa `tud_mounted()` (TinyUSB) para detectar el estado físico real del USB, sin heurísticas de tiempo. Ver sesión 2026-08-18 19:30 y optimización 19:43 abajo. Pendiente: sesión larga con Logic en pausa (confirmar que no aparece offline) + desconexión/reconexión USB real (confirmar que `checkUsbLink()` detecta el corte y VU/botones vuelven). |
 | 🔴 Alta | **P4+S3: ni el P4 ni el S3 detectaban el cierre de Logic Pro — Logic manda faders-a-0 + `0x21` pegados y el `0x21` revertía la desconexión, SIN VALIDAR EN BANCO (2026-08-18 20:28)** | Diagnosticado con capturas MIDI Monitor reales del cierre de Logic (dos veces, mismo patrón exacto): al cerrar, Logic manda el burst de reset (VU + Pitch Wheel a 0 en 10 canales + CC a 0) que sí dispara la heurística de "faders a mínimo" (`DISCONNECT_THRESHOLD=9`/`DISCONNECT_WINDOW_MS`) — pero milisegundos después manda `0x21` (GoOnline) otra vez, y `case 0x21` en ambos firmwares reconectaba de forma incondicional en cuanto el estado no era ya `CONNECTED`, deshaciendo la desconexión que la propia heurística acababa de marcar. Confirmado por descarte: `DEVICE_FAMILY` igual en ambas unidades (0x14, directiva explícita del usuario) no es la causa — la guarda de familia (`device_family != DEVICE_FAMILY`) nunca bloqueaba nada. Fix: nueva firma compuesta "faders-a-0 + 0x21 pegados" = confirmación real de cierre (no reconexión) — `lastFaderDisconnectTime` se marca cuando la heurística dispara `DISCONNECTED`; si el `0x21` siguiente llega dentro de `DISCONNECT_CONFIRM_WINDOW_MS=500ms` desde esa marca, `case 0x21` NO reconecta (solo manda el eco `21 01` que Logic espera siempre). Un `0x21` fuera de esa ventana (reconexión real, sin faders-a-0 precediéndolo) sigue reconectando igual que antes — no se toca el fix de reconexión silenciosa de la sesión 19:30. Ver sesión 2026-08-18 20:28 abajo. Pendiente: cerrar Logic en banco y confirmar `DISCONNECTED` estable en ambas unidades (log `[MCU] 0x21 tras faders-a-0 (firma cierre) — permanece DISCONNECTED`); reabrir Logic y confirmar reconexión normal sin regresión. |
+| 🟡 Media | **S2: OTA WiFi — 1 de 4 unidades sigue sin levantar WiFi tras reinsertar el fix anti back-feed, sospecha de brown-out por sag de 3V3 (HARDWARE), SIN CONFIRMAR CON OSCILOSCOPIO (2026-08-21 20:23)** | Ver sesión 2026-08-21 abajo — el fix de `CHANGELOG_20260413` (neutralizar back-feed RS485 en GPIO8 antes de `WiFi.begin()`) se reinsertó en `OtaManager.cpp::enableForUpload()` tras haberse perdido en la reescritura de mayo. En una de las unidades con WiFi marginal, el log serie muestra reset completo del MCU (USB CDC se desenumera y reenumera, seguido de logs de arranque normal — calibración de Motor) justo al iniciar `WiFi.begin()`, no un simple timeout. Coincide con el segundo escenario anticipado en el brief: sag del riel 3V3 en el pico de consumo RF provocando brown-out. **No es un fallo del fix aplicado** — el back-feed de GPIO8 ya no bloquea, esto es un problema de alimentación/desacoplo distinto. Pendiente (hardware, no tocar por firmware): osciloscopio en 3V3 durante `WiFi.begin()` en esa unidad para confirmar el sag antes de decidir si se añade un bulk cap (220–470µF). Repetir la prueba en las otras 3 unidades problemáticas. |
+| 🔴 Alta | **P4+S3: detección de cierre "silencioso" de Logic Pro (Cmd+Q con USB conectado, sin `0x0F` ni faders-a-0), SIN VALIDAR EN BANCO (2026-08-23 11:04)** | Verificado con MIDI Monitor: al cerrar Logic con el cable USB conectado, ninguna de las dos firmas previas (mensaje `0x0F` explícito, o heurística de faders-a-mínimo de la sesión 2026-08-18 20:28) se dispara de forma fiable. Único patrón común encontrado entre apertura y cierre: Logic blanquea los 8 nombres de canal a la vez en ambos casos (`case 0x12`) — la diferencia es que en apertura llegan nombres reales justo después, y en cierre no llega nada más. Fix: `case 0x12` arma `awaitingCloseConfirm` al detectar blanqueo total de los 8 canales; nueva función `checkLogicCloseSignature()` (llamada cada ciclo en `taskCore0()`) fuerza `DISCONNECTED` (mismo reset que `case 0x0F`) si no llega ningún nombre real dentro de `CLOSE_CONFIRM_WINDOW_MS=4000` desde el blanqueo. Cualquier nombre real recibido, o cualquier otra vía de desconexión ya existente (heurística de faders, `checkUsbLink()`, `case 0x0F`), desarma `awaitingCloseConfirm` para evitar disparos obsoletos. Implementado en paralelo en P4 (`MIDIProcessor.cpp/.h`, `config.h`, `main.cpp`) y S3 (mismos ficheros, `CLOSE_CONFIRM_WINDOW_MS` como `static const` local por no tener el mismo `config.h`). Pendiente: cerrar Logic en banco con USB conectado y confirmar `DISCONNECTED` estable en ambas unidades tras ~4s (log `[MCU] Cierre de Logic confirmado...`); confirmar que abrir un proyecto nuevo (blanqueo + nombres reales) NO dispara una desconexión falsa. |
+
+---
+
+### SESIÓN 2026-08-23 11:04 — P4+S3: detección de cierre "silencioso" de Logic Pro (sin `0x0F` ni faders-a-0)
+
+**Origen:** la sesión 2026-08-18 20:28 ya había cubierto el caso "Logic manda faders-a-0 antes de cerrar", pero con USB conectado (a diferencia de desconectar el cable) ese burst de reset no siempre aparece — capturas MIDI Monitor del cierre real de Logic (Cmd+Q, USB conectado) mostraron cierres donde ni `0x0F` ni faders-a-0 se producían, dejando P4 y S3 congelados en `CONNECTED` indefinidamente.
+
+**MCU afectadas:** S2 ❌ · S3 ✅ · P4 ✅ (no aplica a S2 — la detección de conexión con Logic vive únicamente en P4/S3).
+
+**Hallazgo (MIDI Monitor):** comparando capturas de apertura y cierre de proyecto, el único patrón MIDI presente en ambos casos y ausente en el resto del tráfico es que Logic blanquea los 8 nombres de canal (`case 0x12`, SysEx de nombre de pista) a la vez. En apertura, esos nombres en blanco van seguidos casi inmediatamente por los nombres reales del proyecto nuevo. En cierre, no llega nada más — el blanqueo es lo último que se recibe.
+
+**Fix aplicado (idéntico en `MASTER_S3-P4/P4_JC1060P470C/` y `MASTER_S3-P4/S3/iMakie-ESP32_S3_EXTENDER/`):**
+- `config.h` (P4) / constante local (S3): `CLOSE_CONFIRM_WINDOW_MS = 4000`.
+- `MIDIProcessor.cpp`: `case 0x12` detecta si los 8 canales fueron blanqueados en el mismo mensaje (`nameChanged[t] && nameBufs[t][0]=='\0'` para los 8) y arma `awaitingCloseConfirm` + `fullBlankSignatureTime = millis()`. Si en ese mismo mensaje o en uno posterior llega un nombre real, desarma la confirmación.
+- Nueva función `checkLogicCloseSignature()`: si `awaitingCloseConfirm` sigue activo tras `CLOSE_CONFIRM_WINDOW_MS` sin nombres reales, replica el mismo reset de estado que `case 0x0F` (fuerza `DISCONNECTED`, limpia REC/SOLO/MUTE/SELECT/VU/AutoMode/nombres, relanza `beginDisconnectSequence()` en RS485) y loguea `[MCU] Cierre de Logic confirmado...`.
+- Añadida llamada a `checkLogicCloseSignature()` en `taskCore0()` de `main.cpp`, junto a `checkUsbLink()`.
+- `awaitingCloseConfirm = false` añadido en los 4 puntos donde ya existía una vía de desconexión (heurística de faders-a-0, `checkUsbLink()`, `case 0x0F`) para que una desconexión detectada por otra vía no deje viva una confirmación de cierre obsoleta que dispare `checkLogicCloseSignature()` más tarde sobre un estado ya reseteado.
+
+**Diferencia P4 vs S3:** en P4 `CLOSE_CONFIRM_WINDOW_MS` está en `config.h` (fuente única de verdad del proyecto); en S3 es `static const` local al `.cpp` porque el mecanismo es idéntico pero el `config.h` de S3 es independiente y no se tocó para esto.
+
+**Riesgo:** ALTO — toca la máquina de estados de conexión de Logic en P4 y S3, con ventana de 4s que si es demasiado corta podría disparar una desconexión falsa en un cambio de proyecto lento, o si es demasiado larga tarda en reflejar un cierre real en la UI. Sin validar en banco.
+
+**Próximo paso:** cerrar Logic (USB conectado) en banco y confirmar el log de cierre en ambas unidades tras ~4s; abrir un proyecto nuevo y confirmar que el blanqueo+nombres reales NO dispara una desconexión falsa; actualizar CHANGELOG con el resultado.
+
+---
+
+### SESIÓN 2026-08-21 20:23 — S2: reinserción del fix anti back-feed RS485 en OTA WiFi + hallazgo de posible brown-out 3V3 en una unidad
+
+**Origen:** el fix documentado en `CHANGELOG_20260413` (neutralizar back-feed de RS485 en GPIO8 antes de arrancar WiFi) se perdió en la reescritura de `OtaManager.cpp` de finales de mayo de 2026. Brief específico para reinsertarlo con aviso-ancla en el código.
+
+**MCU afectadas:** S2 ✅ · S3 ❌ · P4 ❌ (fichero exclusivo de `S2/S2_V1`).
+
+**Cambios aplicados en `S2/S2_V1/src/OTA/Otamanager.cpp` (`enableForUpload()`):**
+- Antes de `WiFi.mode(WIFI_STA)`: `Serial1.end()` + `RS485_TX_PIN` (GPIO8) a `OUTPUT/LOW` + `RS485_ENABLE_PIN` (GPIO35) a `OUTPUT/HIGH` (transceptor deshabilitado) — mata el back-feed de ~4.6V que el pull-up del bus inyecta en GPIO8 y que bloqueaba el arranque de la radio en unidades con desacoplo marginal. Bloque marcado con aviso "NO BORRAR" para que no se vuelva a perder en una futura reescritura.
+- En la rama de fallo (WiFi no conecta tras 10s): restaura el bus llamando a `rs485.begin(trackId)` (`trackId` leído de NVS, namespace `"ptxx"`) — verificado que `RS485Slave::begin()` (`RS485.cpp:11-27`) reinicializa `Serial1` con los pines correctos y pone `RS485_ENABLE_PIN` de nuevo en `LOW` (modo recepción normal), devolviendo el bus exactamente al estado operativo previo a `enableForUpload()`.
+
+**Validación en banco:** al probar en una de las 4 unidades con WiFi históricamente problemático, el log serie mostró un reset completo del MCU (USB CDC se desenumera/reenumera, seguido de logs de arranque normal incluyendo calibración de Motor) al iniciar `WiFi.begin()`, en vez de conectar o llegar al timeout de 10s. Esto descarta que el back-feed de GPIO8 siga siendo la causa en esa unidad concreta — apunta a un brown-out por sag del riel 3V3 en el pico de consumo RF de la radio, el segundo escenario ya anticipado en la nota de validación del brief original. Ver fila de pendientes arriba.
+
+**Riesgo:** MEDIO (RS485 + timing de arranque WiFi, pero aditivo y acotado a `enableForUpload()`).
+
+**Próximo paso:** repetir la prueba en las otras 3 unidades problemáticas; si alguna conecta limpiamente, el fix de back-feed era suficiente para ella. Para la unidad con sospecha de brown-out: osciloscopio en 3V3 durante `WiFi.begin()` antes de decidir intervención hardware (bulk cap).
 
 ---
 
@@ -1943,6 +1986,13 @@ Todos los valores de brillo de pantalla hardcodeados (255/70/0/200) movidos a de
 ---
 
 ### Upload log S2
+- `2026-08-21 20:02` · Flash S2 · **FW 0.6.56** · `lolin_s2_mini`
+- `2026-08-21 19:46` · Flash S2 · **FW 0.6.55** · `lolin_s2_mini`
+- `2026-08-21 19:39` · Flash S2 · **FW 0.6.54** · `lolin_s2_mini`
+- `2026-08-21 19:27` · Flash S2 · **FW 0.6.53** · `lolin_s2_mini`
+- `2026-08-21 18:57` · Flash S2 · **FW 0.6.52** · `lolin_s2_mini`
+- `2026-08-21 18:57` · Flash S2 · **FW 0.6.51** · `lolin_s2_mini`
+- `2026-08-21 18:43` · Flash S2 · **FW 0.6.50** · `lolin_s2_mini`
 - `2026-08-19 16:29` · Flash S2 · **FW 0.6.49** · `lolin_s2_mini`
 - `2026-08-19 16:28` · Flash S2 · **FW 0.6.48** · `lolin_s2_mini`
 - `2026-08-13 12:33` · Commit S2 · **FW 0.6.47** (sin upload)

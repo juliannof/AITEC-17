@@ -87,7 +87,25 @@ void OtaManager::enableForUpload(bool otaOnlyMode) {
         return;
     }
 
-    // 2. Conectar WiFi
+    // ════════════════════════════════════════════════════════════════
+    //  AVISO — NO BORRAR ESTE BLOQUE
+    //  Neutraliza el back-feed de RS485 en GPIO8 (RS485_TX_PIN) antes de
+    //  arrancar la radio. El pull-up a 5V del bus inyecta ~4.6V en GPIO8
+    //  cuando el transceptor no está deshabilitado, y eso BLOQUEA el
+    //  arranque del WiFi en las unidades con desacoplo marginal.
+    //  Confirmado físicamente y documentado en CHANGELOG_20260413.
+    //  Este fix ya se perdió una vez en la reescritura de may-2026 y dejó
+    //  4 unidades sin WiFi. Si se reescribe enableForUpload(), CONSERVAR
+    //  esta secuencia justo antes de WiFi.mode()/WiFi.begin().
+    //  (La resistencia 100Ω en serie GPIO8→DI NO resolvió — no reintroducir.)
+    // ════════════════════════════════════════════════════════════════
+    Serial1.end();
+    pinMode(RS485_TX_PIN, OUTPUT);
+    digitalWrite(RS485_TX_PIN, LOW);        // GPIO8 → LOW: mata el back-feed
+    pinMode(RS485_ENABLE_PIN, OUTPUT);
+    digitalWrite(RS485_ENABLE_PIN, HIGH);   // EN HIGH: transceptor deshabilitado
+
+    // 3. Conectar WiFi
     WiFi.mode(WIFI_STA);
     Serial.printf("[OTA] Namespace: '%s'\n", NVS_NS);
     Serial.printf("[OTA] Conectando a %s...\n", ssid);
@@ -103,6 +121,16 @@ void OtaManager::enableForUpload(bool otaOnlyMode) {
 
     if (WiFi.status() != WL_CONNECTED) {
         Serial.printf("[OTA] WiFi failed after 10s\n");
+        // NO BORRAR: contrapartida del bloque anti back-feed del PASO 1.
+        // Si el WiFi no conecta, el transceptor RS485 quedó deshabilitado
+        // (EN HIGH) y Serial1 cerrado. Reactivar el bus para operación normal.
+        {
+            Preferences prefs;
+            prefs.begin(NVS_NS, true);
+            uint8_t trackId = prefs.getUChar("trackId", 1);
+            prefs.end();
+            rs485.begin(trackId);
+        }
         _status("WiFi: no conectado.");
         return;
     }
