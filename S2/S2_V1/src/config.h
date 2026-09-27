@@ -229,11 +229,12 @@ static uint16_t           _stallProtectLastADC = 0;
 static constexpr uint32_t STALL_COOLDOWN_MS    = 2000;  // ms de reposo obligatorio tras un STALL
 static uint32_t           _stallCooldownUntil  = 0;      // timestamp: no re-armar movimiento antes de esto
 
-// SAT — test automático MIN/MAX (2026-08-23): límite por tramo antes de marcarlo
-// TIMEOUT en vez de esperar indefinidamente — tras un STALL real, Motor::_motor_state
-// se queda en MOVING_TO_TARGET para siempre (nunca pasa a AT_TARGET), así que el test
-// necesita un límite propio, independiente del estado del Motor.
-static constexpr uint32_t SAT_MOTOR_SWEEP_TIMEOUT_MS = 8000;
+// SAT — test automático "Tiempo Min/Max" (2026-08-23 v2): red de seguridad exterior
+// por ciclo de calibración (Motor::requestCalibration()/requestCalibrationForcedMin()).
+// La calibración real ya tiene su propio límite (CALIB_TIMEOUT=6000ms × CALIB_MAX_RETRIES=3
+// reintentos ≈ 18s en el peor caso) — este valor se sube a 20s para no cortar un ciclo
+// real en curso antes de que agote sus propios reintentos.
+static constexpr uint32_t SAT_MOTOR_SWEEP_TIMEOUT_MS = 20000;
 // WHY: si el STALL fue por el usuario resistiendo al motor (AUTO_READ/OFF,
 //      "DAW absoluto"), en cuanto suelta ya no hay obstáculo — no tiene
 //      sentido esperar el cooldown completo. Si el STALL fue solo (tope

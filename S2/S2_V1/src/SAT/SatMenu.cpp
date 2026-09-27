@@ -122,6 +122,12 @@ void SatMenu::update() {
         /* Motor::setADC(faderADC.getFaderPos()); */
     }
 
+    // MOTOR_POS es "live" → _tickMotorPos() se llama dos veces por vuelta (desde
+    // _render() con Btn::NONE, y desde el switch de abajo con el b real). Sin este
+    // guard, la máquina de fases + Motor::update() corrían dos veces por vuelta —
+    // el dibujo (idempotente) no necesita el guard. (2026-08-23)
+    _motorPosLogicDone = false;
+
     Btn b = _readBtn();
 
     if (_scr == Scr::TOAST) {
@@ -625,14 +631,16 @@ void SatMenu::_hMotor(Btn b) {
                 _goto(Scr::EDIT_PWMMIN);
                 break;
             case 2:
-                // Test automático total (2026-08-23): arranca solo al entrar, sin
-                // teclas salvo BACK — ver _tickMotorPos().
+                // "Tiempo Min/Max" v2 (2026-08-23): arranca solo al entrar, sin
+                // teclas salvo BACK — ver _tickMotorPos(). Test A: calibración real
+                // con PWM normal (NVS).
                 _goto(Scr::MOTOR_POS);
-                _testPhase      = 0;
-                _toMaxMs        = -1;
-                _toMinMs        = -1;
-                _testPhaseStart = millis();
-                Motor::setTargetForced(Motor::getADCMax());
+                _testPhase          = 0;
+                _testPhaseStart     = millis();
+                _calibSubPhaseStart = millis();
+                _lastCalibState     = 0;  // Motor::CalibState::IDLE
+                _upTimeA = _downTimeA = _upTimeB = _downTimeB = -1;
+                Motor::requestCalibration();
                 break;
         }
     }
@@ -931,94 +939,142 @@ void SatMenu::showStatus(const char* msg) {
 // ─────────────────────────────────────────────────────────────
 //  MOTOR POSICIÓN
 // ─────────────────────────────────────────────────────────────
-// MOTOR POS — sweep MIN/MAX calibrado (NVS) + cronómetro de tránsito (2026-08-23)
-// WHAT: envía el motor al mínimo o máximo ya calibrados (Motor::getADCMin/Max,
-//       origen NVS) y mide cuánto tarda en llegar, para diagnosticar si el PWM
-//       mínimo actual es insuficiente en algún tramo del recorrido real.
-// WHY:  usa API pública de Motor (setTargetForced/getState/getRawADC). Llama
-//       Motor::update() explícitamente (2026-08-23) — main.cpp NO lo hace
-//       mientras el SAT está abierto (return temprano en loop()), así que sin
-//       esto el target armado por setTargetForced() nunca movía el PWM real.
-//       Seguro aquí (a diferencia del extinto Test Mode) porque este test solo
-//       usa la máquina de estados normal, no control manual de bajo nivel.
+// MOTOR POS — "Tiempo Min/Max" v2 (2026-08-23): valida el PWM real de NVS
+// llamando a la calibración de producción, sin reimplementar movimiento.
+// WHAT: dos ciclos completos de Motor::requestCalibration() (Test A, PWM normal)
+//       y Motor::requestCalibrationForcedMin() (Test B, PWM mínimo forzado de
+//       punta a punta), midiendo subida y bajada de cada uno vía
+//       Motor::getCalibState() (CALIB_UP/CALIB_DOWN/DONE/ERROR).
+// WHY:  Motor::update() no corre mientras el SAT está abierto (return temprano
+//       en main.cpp::loop()), así que sin llamarlo aquí _calibUpdate() nunca
+//       avanza. Riesgo conocido: si el PWM mínimo de NVS no basta, el Test B
+//       puede terminar en CalibPhase::ERROR tras sus reintentos (~18s) — el
+//       motor queda SIN CALIBRAR al terminar, no solo con mal tiempo; hay que
+//       recalibrar con PWM normal después (mismo riesgo que ya existe en
+//       producción si el PWM es insuficiente, no es nuevo de este test).
 void SatMenu::_tickMotorPos(Btn b) {
     int W = _spr.width(), H = _spr.height();
 
+    // BACK deja la calibración en curso tal cual — no hay forma limpia de
+    // abortarla a medias sin dejar el motor en un estado raro.
     if (b == Btn::BACK) { _goto(Scr::MOTOR); return; }
 
-    // main.cpp NO llama Motor::update() mientras el SAT está abierto (return
-    // temprano en loop()) — faderADC.update()/Motor::setADC() sí siguen corriendo
-    // ahí (ver comentario "SIEMPRE, incluso en SAT" en main.cpp), pero sin esta
-    // llamada el target armado por setTargetForced() nunca se traduce en PWM real.
-    // Único caso hoy que necesita el motor realmente en movimiento dentro del SAT.
-    Motor::update();
+    // Guard anti-doble-ejecución (2026-08-23): MOTOR_POS está en `live`, así que
+    // update() llama esta función dos veces por vuelta (desde _render() con
+    // Btn::NONE, y desde el switch de manejo con el b real) — sin esto, la
+    // transición de fase se procesaría dos veces por vuelta.
+    bool isFirstCallThisFrame = !_motorPosLogicDone;
+    _motorPosLogicDone = true;
 
-    uint16_t adcMin = Motor::getADCMin();
-    uint16_t adcMax = Motor::getADCMax();
-    uint16_t pos    = Motor::getRawADC();
-    uint16_t span   = (adcMax > adcMin) ? (adcMax - adcMin) : 1;
-    float    pct    = constrain((float)(pos - adcMin) / span, 0.f, 1.f);
+    if (isFirstCallThisFrame) Motor::update();  // _calibUpdate() vive detrás de esto
 
-    Motor::MotorState st       = Motor::getState();
-    bool               atTarget = (st == Motor::MotorState::AT_TARGET);
-    bool               timedOut = (millis() - _testPhaseStart > SAT_MOTOR_SWEEP_TIMEOUT_MS);
+    unsigned long now = millis();
+    uint8_t cs = (uint8_t)Motor::getCalibState();  // 0=IDLE 1=CALIB_UP 2=CALIB_DOWN 3=DONE 4=ERROR (orden del enum en Motor.h)
 
-    // Máquina de 3 fases, 100% automática — solo BACK interrumpe (2026-08-23).
-    if (_testPhase == 0) {              // yendo a MAX
-        Motor::setTargetForced(adcMax);
-        if (atTarget || timedOut) {
-            _toMaxMs        = timedOut ? -1 : (long)(millis() - _testPhaseStart);
-            _testPhase      = 1;
-            _testPhaseStart = millis();
-            Motor::setTargetForced(adcMin);
-        }
-    } else if (_testPhase == 1) {       // yendo a MIN
-        Motor::setTargetForced(adcMin);
-        if (atTarget || timedOut) {
-            _toMinMs   = timedOut ? -1 : (long)(millis() - _testPhaseStart);
-            _testPhase = 2;              // terminado
+    if (isFirstCallThisFrame) {
+        if (_testPhase == 0 || _testPhase == 2) {          // Test A o Test B en curso
+            bool timedOut = (now - _testPhaseStart > SAT_MOTOR_SWEEP_TIMEOUT_MS);
+
+            if (cs != _lastCalibState) {
+                // CALIB_UP → CALIB_DOWN: fin de subida, arranca cronómetro de bajada.
+                if (_lastCalibState == (uint8_t)Motor::CalibState::CALIB_UP &&
+                    cs == (uint8_t)Motor::CalibState::CALIB_DOWN) {
+                    long upMs = (long)(now - _calibSubPhaseStart);
+                    if (_testPhase == 0) _upTimeA = upMs; else _upTimeB = upMs;
+                    _calibSubPhaseStart = now;
+                }
+                _lastCalibState = cs;
+            }
+
+            bool finished = (cs == (uint8_t)Motor::CalibState::DONE ||
+                              cs == (uint8_t)Motor::CalibState::ERROR);
+            if (finished || timedOut) {
+                long downMs = timedOut ? -1 : (long)(now - _calibSubPhaseStart);
+                if (_testPhase == 0) {
+                    _downTimeA      = downMs;
+                    _testPhase      = 1;           // cooldown antes de Test B
+                    _testPhaseStart = now;
+                } else {
+                    _downTimeB = downMs;
+                    _testPhase = 3;                 // terminado
+                }
+            }
+        } else if (_testPhase == 1) {               // cooldown antes de Test B
+            // Margen sobre CALIB_COOLDOWN_MS (2000ms, config.h) — startCalib()
+            // ignora en silencio una nueva calibración pedida antes de que expire.
+            if (now - _testPhaseStart >= (CALIB_COOLDOWN_MS + 300)) {
+                _testPhase          = 2;
+                _testPhaseStart     = now;
+                _calibSubPhaseStart = now;
+                _lastCalibState     = (uint8_t)Motor::CalibState::IDLE;
+                Motor::requestCalibrationForcedMin();
+            }
         }
     }
 
     _spr.fillScreen(C_BG);
-    _drawHdr("TIEMPO MIN/MAX");
+    char hdrBuf[24];
+    snprintf(hdrBuf, sizeof(hdrBuf), "TIEMPO MIN/MAX T%u", _cfg.trackId);
+    _drawHdr(hdrBuf);
 
     int y = SAT_HDR_H + 8;
     char buf[48];
 
     _spr.setTextColor(C_CYAN, C_BG); _spr.setTextSize(1);
     _spr.setTextDatum(textdatum_t::top_left);
-    snprintf(buf, 48, "Min=%u Max=%u  pos=%u", adcMin, adcMax, pos);
+    snprintf(buf, 48, "PWM NVS: min=%u max=%u", Motor::getPWMMin(), Motor::getPWMMax());
     _spr.drawString(buf, 4, y); y+=14;
-    _drawHBar(4, y, W-8, 12, pct, C_GREEN); y+=18;
+    snprintf(buf, 48, "pos=%u  Min=%u Max=%u", Motor::getRawADC(), Motor::getADCMin(), Motor::getADCMax());
+    _spr.setTextColor(C_TEXT, C_BG);
+    _spr.drawString(buf, 4, y); y+=18;
+
+    const char* csStr = "IDLE";
+    switch ((Motor::CalibState)cs) {
+        case Motor::CalibState::CALIB_UP:   csStr = "SUBIENDO"; break;
+        case Motor::CalibState::CALIB_DOWN: csStr = "BAJANDO";  break;
+        case Motor::CalibState::DONE:       csStr = "DONE";     break;
+        case Motor::CalibState::ERROR:      csStr = "ERROR";    break;
+        default: break;
+    }
 
     _spr.setTextColor(C_YELLOW, C_BG);
-    if (_testPhase == 0) {
-        snprintf(buf, 48, "-> MAX: en curso %lu ms", millis() - _testPhaseStart);
-        _spr.drawString(buf, 4, y); y+=16;
+    snprintf(buf, 48, "TEST A (PWM normal): %s", (_testPhase == 0) ? csStr : "-");
+    _spr.drawString(buf, 4, y); y+=14;
+    if (_testPhase >= 1) {
+        if (_upTimeA >= 0)   snprintf(buf, 48, "  subida=%ld ms", _upTimeA);
+        else                 snprintf(buf, 48, "  subida=TIMEOUT");
+        _spr.drawString(buf, 4, y); y+=14;
+        if (_downTimeA >= 0) snprintf(buf, 48, "  bajada=%ld ms", _downTimeA);
+        else                 snprintf(buf, 48, "  bajada=TIMEOUT");
+        _spr.drawString(buf, 4, y); y+=14;
     } else {
-        if (_toMaxMs >= 0) snprintf(buf, 48, "-> MAX: %ld ms", _toMaxMs);
-        else               snprintf(buf, 48, "-> MAX: TIMEOUT");
-        _spr.drawString(buf, 4, y); y+=16;
-    }
-    if (_testPhase == 1) {
-        snprintf(buf, 48, "MAX -> MIN: en curso %lu ms", millis() - _testPhaseStart);
-        _spr.setTextColor(C_YELLOW, C_BG);
-        _spr.drawString(buf, 4, y); y+=16;
-    } else if (_testPhase == 2) {
-        if (_toMinMs >= 0) snprintf(buf, 48, "MAX -> MIN: %ld ms", _toMinMs);
-        else               snprintf(buf, 48, "MAX -> MIN: TIMEOUT");
-        _spr.setTextColor(C_YELLOW, C_BG);
-        _spr.drawString(buf, 4, y); y+=16;
-    }
-    if (_testPhase == 2) {
-        _spr.setTextColor(C_GREEN, C_BG);
-        _spr.drawString("TEST COMPLETO", 4, y); y+=16;
+        snprintf(buf, 48, "  en curso (%lu ms)", now - _testPhaseStart);
+        _spr.drawString(buf, 4, y); y+=14;
     }
 
-    if (!Motor::isCalibrated()) {
-        _spr.setTextColor(C_ACCENT, C_BG);
-        _spr.drawString("!! SIN CALIBRAR !!", 4, y);
+    y += 4;
+    snprintf(buf, 48, "TEST B (PWM MIN forzado): %s",
+             (_testPhase == 1) ? "esperando..." : (_testPhase == 2) ? csStr : (_testPhase == 3) ? "-" : "-");
+    _spr.drawString(buf, 4, y); y+=14;
+    if (_testPhase == 3) {
+        if (_upTimeB >= 0)   snprintf(buf, 48, "  subida=%ld ms", _upTimeB);
+        else                 snprintf(buf, 48, "  subida=TIMEOUT");
+        _spr.drawString(buf, 4, y); y+=14;
+        if (_downTimeB >= 0) snprintf(buf, 48, "  bajada=%ld ms", _downTimeB);
+        else                 snprintf(buf, 48, "  bajada=TIMEOUT");
+        _spr.drawString(buf, 4, y); y+=14;
+    } else if (_testPhase == 2) {
+        snprintf(buf, 48, "  en curso (%lu ms)", now - _testPhaseStart);
+        _spr.drawString(buf, 4, y); y+=14;
+    }
+
+    if (_testPhase == 3) {
+        _spr.setTextColor(C_GREEN, C_BG);
+        _spr.drawString("TEST COMPLETO", 4, y); y+=16;
+        if (!Motor::isCalibrated()) {
+            _spr.setTextColor(C_ACCENT, C_BG);
+            _spr.drawString("!! SIN CALIBRAR — recalibrar con PWM normal !!", 4, y);
+        }
     }
 
     _drawHints("","","Atras","");

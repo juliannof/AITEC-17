@@ -51,6 +51,9 @@ namespace Motor {
 
     // Máquina de estados v2 (2026-05-16) — S3 commands
     void       requestCalibration();          // FLAG_CALIB desde S3 → inicia calib o goToMin si necesario
+    void       requestCalibrationForcedMin(); // igual que requestCalibration() pero fuerza PWM_MIN de punta
+                                               // a punta en el ciclo (2026-08-23) — solo para el test SAT
+                                               // "Tiempo Min/Max", nunca usado en producción
     void       setTargetFromS3(uint16_t adc); // setTarget desde S3 (ADC ya mapeado, respeta guard usuario)
     void       setTargetForced(uint16_t adc); // setTarget DAW absoluto — bypass guard usuario (AUTO_OFF/READ) (2026-05-30 09:35)
     void       setUserDropTarget(uint16_t adc); // Usuario soltó fader en posición ADC

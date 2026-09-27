@@ -61,6 +61,19 @@ void RS485Master::taskEntry(void* param) {
 
 void RS485Master::runTask() {
     _stateTimer = micros();
+    // Red de seguridad anti-inanición (2026-08-23): esta tarea corre en Core 1
+    // prioridad 5, por encima de loopTask/setup() y de la tarea IDLE. Si todos
+    // los esclavos agotan el timeout en cada vuelta (bus sin respuesta — p.ej.
+    // transceptor con el pin ENABLE roto), el barrido completo supera
+    // POLL_CYCLE_MS y el único vTaskDelay() real del bucle (en _nextSlave(),
+    // al cerrar la vuelta) deja de dispararse: el Core 1 queda monopolizado
+    // sin ceder nunca a IDLE ni a setup(), que se congela justo tras
+    // rs485.startTask() (WDT / arranque colgado, confirmado con NUM_SLAVES=6).
+    // Este contador fuerza un vTaskDelay(1) real cada ~2ms como máximo, pase lo
+    // que pase con los esclavos — no toca timeouts ni el camino normal (bus
+    // sano: las respuestas llegan mucho antes de esos 2ms, así que en la
+    // práctica no se nota).
+    uint32_t _lastRealYield = millis();
     for (;;) {
         switch (_busState) {
 
@@ -96,7 +109,13 @@ void RS485Master::runTask() {
                 }
                 break;
         }
-        taskYIELD();
+
+        if (millis() - _lastRealYield >= 2) {
+            vTaskDelay(1);
+            _lastRealYield = millis();
+        } else {
+            taskYIELD();
+        }
     }
 }
 
@@ -327,8 +346,17 @@ const ChannelData& RS485Master::getChannel(uint8_t id) {
 
 void RS485Master::printStats() const {
     float rate = _txCount > 0 ? (float)_rxCount / _txCount * 100.0f : 0.0f;
-    log_i("[RS485] TX:%u RX:%u TO:%u CRC_ERR:%u Exito:%.1f%%",
-          _txCount, _rxCount, _timeouts, _crcErrors, rate);
+    log_i("[RS485] ═════════════════════════════════════");
+    log_i("[RS485] TX:%u  RX:%u  TIMEOUT:%u  CRC_ERR:%u", _txCount, _rxCount, _timeouts, _crcErrors);
+    log_i("[RS485] Tasa éxito: %.1f%%  (RX/TX)", rate);
+    for (uint8_t i = 1; i <= _numSlaves; i++) {
+        if (xSemaphoreTake((SemaphoreHandle_t)_mutex, pdMS_TO_TICKS(2)) == pdTRUE) {
+            const char* status = _ch[i].calibrated ? "OK" : "---";
+            log_i("[RS485] Slave %d: %-3s  responded:%s", i, status, _ch[i].responded ? "Y" : "N");
+            xSemaphoreGive((SemaphoreHandle_t)_mutex);
+        }
+    }
+    log_i("[RS485] ═════════════════════════════════════");
 }
 
 void RS485Master::resetStats() {

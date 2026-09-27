@@ -11,6 +11,7 @@
 #include "display/UIOffline.h"
 #include "display/UIHeader.h"
 #include "display/UIVPotPopup.h"
+#include "Elevator/Elevator.h"
 #include <LittleFS.h>
 
 #include <Preferences.h>
@@ -126,6 +127,7 @@ void taskCore0(void* pvParameters) {
         }
 
         tickCalibracion();
+        elevatorTick();  // homing/calibración/automatismo del elevador de pantalla (2026-09-12)
 
         // Enlace serie hacia S3: aplica canales recibidos + heartbeat (2026-08-16)
         s3Link.update();
@@ -207,6 +209,13 @@ void setup() {
     randomSeed(esp_random());  // ← AÑADIR al principio
     Serial.begin(115200);
     log_i("=== BOOT P4 Master ===");
+
+    // 0. Elevador de pantalla — arranque seguro (IN1/IN2 a LOW) ANTES de
+    // cualquier init que pueda demorarse, y arranca el homing de arranque
+    // (2026-09-12)
+    log_i("0. elevatorInit()...");
+    elevatorInit();
+    log_i("   Elevator OK");
 
     // 1. USB (primero — evita perder el handshake si Logic ya está abierto
     // cuando arranca el P4; antes iba detrás de LittleFS/Display y esa

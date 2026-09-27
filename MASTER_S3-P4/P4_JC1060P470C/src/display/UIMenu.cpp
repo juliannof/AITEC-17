@@ -5,6 +5,7 @@
 #include "lvgl.h"
 #include <Arduino.h>
 #include <Preferences.h>
+#include "../Elevator/Elevator.h"
 
 // ── Estado ───────────────────────────────────────────────
 static lv_obj_t*   s_ham_btn    = NULL;
@@ -52,12 +53,15 @@ static void slider_cb(lv_event_t* e) {
 }
 
 // ── Helper: crea botón simple sin lv_list ────────────────
+// cb por defecto = btn_cb (comportamiento original, ej. "Reiniciar"); los
+// botones del panel de elevador pasan su propio callback (2026-09-12).
 static lv_obj_t* make_btn(lv_obj_t* parent,
                            int32_t x, int32_t y,
                            int32_t w, int32_t h,
                            const char* label,
                            uint32_t bg_col,
-                           uint32_t txt_col) {
+                           uint32_t txt_col,
+                           lv_event_cb_t cb = btn_cb) {
     lv_obj_t* btn = lv_obj_create(parent);
     lv_obj_set_pos(btn, x, y);
     lv_obj_set_size(btn, w, h);
@@ -75,8 +79,120 @@ static lv_obj_t* make_btn(lv_obj_t* parent,
     lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
     lv_obj_center(lbl);
 
-    lv_obj_add_event_cb(btn, btn_cb, LV_EVENT_CLICKED, (void*)label);
+    lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, (void*)label);
     return btn;
+}
+
+// ── Panel de calibración del elevador (2026-09-12) ───────
+static lv_obj_t*   s_elev_status_lbl     = NULL;
+static lv_obj_t*   s_elev_pwm_lbl        = NULL;
+static lv_obj_t*   s_elev_net_lbl        = NULL;
+static lv_obj_t*   s_elev_save_btn       = NULL;
+static lv_obj_t*   s_elev_toast_lbl      = NULL;
+static lv_timer_t* s_elev_refresh_timer  = NULL;
+static lv_timer_t* s_elev_toast_timer    = NULL;
+
+static void elev_up_cb(lv_event_t* e)    { elevatorPanelExtend(); }
+static void elev_down_cb(lv_event_t* e)  { elevatorPanelRetract(); }
+static void elev_stop_cb(lv_event_t* e)  { elevatorPanelStop(); }
+static void elev_plus_cb(lv_event_t* e)  { elevatorPanelAdjustPwm(1); }
+static void elev_minus_cb(lv_event_t* e) { elevatorPanelAdjustPwm(-1); }
+static void elev_save_cb(lv_event_t* e)  { elevatorPanelSaveCalibration(); }
+
+static void elev_hide_toast_cb(lv_timer_t* t) {
+    if (s_elev_toast_lbl) lv_obj_add_flag(s_elev_toast_lbl, LV_OBJ_FLAG_HIDDEN);
+    s_elev_toast_timer = NULL;
+}
+
+static void elev_show_toast(const char* text) {
+    if (!s_elev_toast_lbl) return;
+    lv_label_set_text(s_elev_toast_lbl, text);
+    lv_obj_clear_flag(s_elev_toast_lbl, LV_OBJ_FLAG_HIDDEN);
+    if (s_elev_toast_timer) lv_timer_del(s_elev_toast_timer);
+    s_elev_toast_timer = lv_timer_create(elev_hide_toast_cb, 4000, NULL);
+}
+
+static void elev_refresh_cb(lv_timer_t* t) {
+    if (!s_elev_status_lbl) return;
+
+    const char* statusStr = "Sin calibrar";
+    if      (elevatorIsError())       statusStr = "ERROR";
+    else if (elevatorIsHoming())      statusStr = "Homing...";
+    else if (elevatorIsCalibrated())  statusStr = "Calibrado";
+    lv_label_set_text(s_elev_status_lbl, statusStr);
+
+    lv_label_set_text_fmt(s_elev_pwm_lbl, "PWM: %u", elevatorGetPanelPwm());
+    lv_label_set_text_fmt(s_elev_net_lbl, "Recorrido: %ld ms", (long)elevatorGetNetExtendMs());
+
+    bool canSave = (elevatorGetMotorState() == ElevatorMotorState::IDLE) &&
+                   (elevatorGetNetExtendMs() > 0);
+    if (s_elev_save_btn) {
+        if (canSave) {
+            lv_obj_add_flag(s_elev_save_btn, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_set_style_bg_opa(s_elev_save_btn, LV_OPA_COVER, 0);
+        } else {
+            lv_obj_clear_flag(s_elev_save_btn, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_set_style_bg_opa(s_elev_save_btn, LV_OPA_50, 0);
+        }
+    }
+
+    ElevatorSaveResult sr = elevatorConsumeSaveResult();
+    if (sr.pending) {
+        char buf[96];
+        if (sr.ok) {
+            snprintf(buf, sizeof(buf), "Guardado OK: subida %ldms / bajada %ldms",
+                     (long)sr.tExtend, (long)sr.tRetract);
+        } else {
+            snprintf(buf, sizeof(buf), "Rechazado: subida %ldms / bajada %ldms",
+                     (long)sr.tExtend, (long)sr.tRetract);
+        }
+        elev_show_toast(buf);
+    }
+    if (elevatorConsumeSafetyCutoff()) {
+        elev_show_toast("Corte de seguridad - PWM sostenido");
+    }
+}
+
+// Ocupa el hueco libre del panel entre "Reiniciar" (x:40-260) y el slider de
+// brillo (x:864-904) — mismo panel s_panel, sin objeto contenedor propio.
+static void elevatorPanelBuildUI(lv_obj_t* parent) {
+    const int32_t x0 = 300;
+
+    lv_obj_t* title = lv_label_create(parent);
+    lv_label_set_text(title, "ELEVADOR DE PANTALLA");
+    lv_obj_set_style_text_color(title, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
+    lv_obj_set_pos(title, x0, 20);
+
+    s_elev_status_lbl = lv_label_create(parent);
+    lv_obj_set_style_text_color(s_elev_status_lbl, lv_color_hex(COL_TEXT_DIM), 0);
+    lv_obj_set_style_text_font(s_elev_status_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_pos(s_elev_status_lbl, x0, 44);
+
+    make_btn(parent, x0,       74, 50, 40, "-", 0x333333, 0xFFFFFF, elev_minus_cb);
+    s_elev_pwm_lbl = lv_label_create(parent);
+    lv_obj_set_style_text_color(s_elev_pwm_lbl, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_font(s_elev_pwm_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_pos(s_elev_pwm_lbl, x0 + 60, 84);
+    make_btn(parent, x0 + 170, 74, 50, 40, "+", 0x333333, 0xFFFFFF, elev_plus_cb);
+
+    make_btn(parent, x0,       130, 150, 60, "Subir", 0x103A10, 0x44FF44, elev_up_cb);
+    make_btn(parent, x0 + 160, 130, 150, 60, "Bajar", 0x103A3A, 0x44DDFF, elev_down_cb);
+    make_btn(parent, x0 + 320, 130, 120, 60, "Stop",  0x3A1010, 0xFF4444, elev_stop_cb);
+
+    s_elev_net_lbl = lv_label_create(parent);
+    lv_obj_set_style_text_color(s_elev_net_lbl, lv_color_hex(COL_TEXT_DIM), 0);
+    lv_obj_set_style_text_font(s_elev_net_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_pos(s_elev_net_lbl, x0, 210);
+
+    s_elev_save_btn = make_btn(parent, x0, 250, 320, 60, "Guardar calibracion",
+                                0x1A3A1A, 0xFFFFFF, elev_save_cb);
+
+    s_elev_toast_lbl = lv_label_create(parent);
+    lv_obj_set_style_text_color(s_elev_toast_lbl, lv_color_hex(0xFFCC00), 0);
+    lv_obj_set_style_text_font(s_elev_toast_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_pos(s_elev_toast_lbl, x0, 330);
+    lv_obj_add_flag(s_elev_toast_lbl, LV_OBJ_FLAG_HIDDEN);
 }
 
 void uiMenuInit(lv_obj_t* parent) {
@@ -150,6 +266,9 @@ void uiMenuInit(lv_obj_t* parent) {
     lv_obj_set_style_bg_color(s_slider, lv_color_hex(COL_FADER_THUMB), LV_PART_INDICATOR);
     lv_obj_set_style_bg_color(s_slider, lv_color_hex(COL_FADER_THUMB), LV_PART_KNOB);
     lv_obj_add_event_cb(s_slider, slider_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    // ── Panel de calibración del elevador (2026-09-12) ──
+    elevatorPanelBuildUI(s_panel);
 }
 
 void uiMenuOpen() {
@@ -159,6 +278,13 @@ void uiMenuOpen() {
     lv_obj_move_foreground(s_panel);
     lv_obj_move_foreground(s_ham_btn);
     lv_label_set_text(s_ham_lbl, LV_SYMBOL_CLOSE);
+
+    // Aislamiento de la medida: suspende el automatismo del elevador mientras
+    // el panel esté abierto (2026-09-12)
+    elevatorPanelOpen();
+    if (s_elev_refresh_timer) lv_timer_del(s_elev_refresh_timer);
+    s_elev_refresh_timer = lv_timer_create(elev_refresh_cb, 200, NULL);
+    elev_refresh_cb(NULL);   // primer refresco inmediato, sin esperar 200ms
 }
 
 void uiMenuClose() {
@@ -166,6 +292,16 @@ void uiMenuClose() {
     s_menu_open = false;
     lv_obj_add_flag(s_panel, LV_OBJ_FLAG_HIDDEN);
     lv_label_set_text(s_ham_lbl, LV_SYMBOL_LIST);
+
+    elevatorPanelClose();
+    if (s_elev_refresh_timer) {
+        lv_timer_del(s_elev_refresh_timer);
+        s_elev_refresh_timer = NULL;
+    }
+    if (s_elev_toast_timer) {
+        lv_timer_del(s_elev_toast_timer);
+        s_elev_toast_timer = NULL;
+    }
 }
 
 void uiMenuDestroy() {
@@ -174,8 +310,16 @@ void uiMenuDestroy() {
         lv_timer_del(s_save_timer);
         s_save_timer = NULL;
     }
+    if (s_elev_refresh_timer) {
+        lv_timer_del(s_elev_refresh_timer);
+        s_elev_refresh_timer = NULL;
+    }
+    if (s_elev_toast_timer) {
+        lv_timer_del(s_elev_toast_timer);
+        s_elev_toast_timer = NULL;
+    }
     if (s_panel) {
-        lv_obj_del(s_panel);
+        lv_obj_del(s_panel);   // borra también los hijos (botones/labels del elevador)
         s_panel = NULL;
     }
     if (s_ham_btn) {
@@ -185,4 +329,9 @@ void uiMenuDestroy() {
     s_ham_lbl    = NULL;
     s_slider     = NULL;
     s_slider_lbl = NULL;
+    s_elev_status_lbl = NULL;
+    s_elev_pwm_lbl    = NULL;
+    s_elev_net_lbl    = NULL;
+    s_elev_save_btn   = NULL;
+    s_elev_toast_lbl  = NULL;
 }

@@ -30,6 +30,15 @@ using Motor::MotorState;
 static uint8_t _pwm_min = 0;
 static uint8_t _pwm_max = 0;
 
+// ─── Forzado de PWM mínimo en calibración (2026-08-23) — SOLO para el test SAT
+// "Tiempo Min/Max" (requestCalibrationForcedMin()). Nunca se activa en producción
+// (requestCalibration() normal no lo toca). CRÍTICO: se resetea a false en los
+// 3 puntos donde _calibUpdate() deja _motor_phase en DONE o ERROR — si no, la
+// siguiente calibración real (boot, o pedida por S3) heredaría el forzado sin
+// que nadie se entere.
+static bool _calibForceMinOnly = false;
+static inline uint8_t _calDrivePwmMax() { return _calibForceMinOnly ? _pwm_min : _pwm_max; }
+
 // ─── Máquina de estados Motor v2 (2026-05-16 10:52) ──────────
 // Arquitectura: S3 es master, usuario puede soltar fader
 // Variables declaradas en config.h (fuente única de verdad)
@@ -121,6 +130,7 @@ static void _calibUpdate() {
             Motor::goToMin();
         } else {
             _motor_phase = CalibPhase::ERROR;
+            _calibForceMinOnly = false;  // fin de ciclo (2026-08-23) — nunca heredar el forzado
             log_e("[CALIB] TIMEOUT — ERROR tras %d intentos", _motor_calibRetries);
         }
         return;
@@ -158,10 +168,10 @@ static void _calibUpdate() {
     case CalibPhase::GOING_UP: {
         if (now < _motor_calibMinDetect) break;
 
-        // PWM adaptativo: MAX hasta 26000, luego MIN para refinamiento
-        uint8_t pwmGoing = (pos < 26000) ? _pwm_max : _pwm_min;
+        // PWM adaptativo: MAX (o MIN forzado, ver _calDrivePwmMax) hasta 26000, luego MIN para refinamiento
+        uint8_t pwmGoing = (pos < 26000) ? _calDrivePwmMax() : _pwm_min;
         if (_motor_currentPWM != pwmGoing) {
-            if (pos < 26000) _hwUp(_pwm_max);
+            if (pos < 26000) _hwUp(_calDrivePwmMax());
             else _hwUp(_pwm_min);
             _motor_currentPWM = pwmGoing;
         }
@@ -210,7 +220,7 @@ static void _calibUpdate() {
             _motor_settleMin      = 27000;
             _motor_settleMax      = 0;
             _motor_phase          = CalibPhase::KICK_DOWN;
-            _hwDown(_pwm_max);
+            _hwDown(_calDrivePwmMax());
             _motor_phaseStart     = now;
         }
         break;
@@ -250,9 +260,9 @@ static void _calibUpdate() {
         // de cálculo (200) — el motor perdía fuerza (PWM_MIN) desde 1000 cuentas de
         // distancia, mucho antes de acercarse al fondo real, y se atascaba sin llegar al
         // tope físico verdadero (detectaba "stuck" muy por encima del mínimo real).
-        uint8_t pwmDown = (pos > 200) ? _pwm_max : _pwm_min;
+        uint8_t pwmDown = (pos > 200) ? _calDrivePwmMax() : _pwm_min;
         if (_motor_currentPWM != pwmDown) {
-            if (pos > 200) _hwDown(_pwm_max);
+            if (pos > 200) _hwDown(_calDrivePwmMax());
             else _hwDown(_pwm_min);
             _motor_currentPWM = pwmDown;
         }
@@ -317,6 +327,7 @@ static void _calibUpdate() {
             _motor_lastCalibDone = millis();  // Registrar timestamp (2026-05-16 07:48)
             _motor_phase     = CalibPhase::DONE;
             _motor_calibRetries = 0;
+            _calibForceMinOnly  = false;  // fin de ciclo (2026-08-23) — nunca heredar el forzado
             log_i("[CALIB] OK  MIN=%d MAX=%d span=%d target=%d",
                   _calibratedFaderMin, _calibratedFaderMax, _motor_adcSpan, _motor_targetADC);
         } else {
@@ -333,6 +344,7 @@ static void _calibUpdate() {
                 Motor::goToMin();
             } else {
                 _motor_phase = CalibPhase::ERROR;
+                _calibForceMinOnly = false;  // fin de ciclo (2026-08-23) — nunca heredar el forzado
                 log_e("[CALIB] ERROR — amputada tras %d intentos  top=%d bot=%d span=%d",
                       _motor_calibRetries, _motor_adcTop, adcBot, _tentativeSpan);
             }
@@ -752,8 +764,8 @@ void startCalib() {
     _motor_stableStart    = now;
     _motor_phaseStart     = now;
     _motor_phase          = CalibPhase::KICK_UP;
-    _hwUp(_pwm_max);
-    log_i("[CALIB] Iniciada");
+    _hwUp(_calDrivePwmMax());
+    log_i("[CALIB] Iniciada%s", _calibForceMinOnly ? " (PWM MIN forzado — test SAT)" : "");
 }
 
 void goToMin() {
@@ -804,6 +816,14 @@ void requestCalibration() {
             log_i("[MOTOR] requestCalibration: ≠ 0, goToMin() bajando (pendingCalib armado)...");
         }
     }
+}
+
+// Solo para el test SAT "Tiempo Min/Max" (2026-08-23) — nunca usado en producción.
+// Reutiliza requestCalibration() tal cual (mismo manejo de "no está en 0, bajar
+// primero"), solo arma el forzado de PWM mínimo antes de arrancar.
+void requestCalibrationForcedMin() {
+    _calibForceMinOnly = true;
+    requestCalibration();
 }
 
 void setTargetFromS3(uint16_t adcTarget) {

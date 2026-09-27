@@ -195,10 +195,17 @@ private:
     static const Item _diagItems[];
     static const int  _mainN, _identN, _motorN, _touchN, _diagN;
     unsigned long _neoMuteHoldT = 0;
-    // MOTOR_POS — test automático total MIN/MAX (2026-08-23): sin teclas salvo
-    // BACK. Al entrar arranca solo: va a MAX, mide, vuelve a MIN, mide, reporta.
-    uint8_t       _testPhase = 0;              // 0=yendo a MAX, 1=yendo a MIN, 2=terminado
-    unsigned long _testPhaseStart = 0;         // millis() al arrancar la fase actual
-    long          _toMaxMs = -1;               // ms del tramo inicio→MAX, -1 = aún no medido/timeout
-    long          _toMinMs = -1;               // ms del tramo MAX→MIN, -1 = aún no medido/timeout
+    // MOTOR_POS — "Tiempo Min/Max" v2 (2026-08-23): llama a la calibración real
+    // (Motor::requestCalibration()/requestCalibrationForcedMin()), nunca reimplementa
+    // movimiento. Dos ciclos completos de calibración: Test A con PWM normal (NVS),
+    // Test B con PWM mínimo forzado de punta a punta. Sin teclas salvo BACK.
+    uint8_t       _testPhase = 0;              // 0=Test A, 1=cooldown antes de B, 2=Test B, 3=terminado
+    unsigned long _testPhaseStart = 0;         // millis() al arrancar la fase/test actual (timeout y cooldown)
+    unsigned long _calibSubPhaseStart = 0;     // millis() al entrar en la sub-fase actual (subida o bajada)
+    uint8_t       _lastCalibState = 0;         // último Motor::CalibState visto, para detectar transiciones
+    long          _upTimeA   = -1;             // ms de subida, Test A (PWM normal), -1 = no medido/timeout
+    long          _downTimeA = -1;             // ms de bajada, Test A
+    long          _upTimeB   = -1;             // ms de subida, Test B (PWM mínimo forzado)
+    long          _downTimeB = -1;             // ms de bajada, Test B
+    bool          _motorPosLogicDone = false;  // guard anti-doble-ejecución por vuelta (2026-08-23)
 };

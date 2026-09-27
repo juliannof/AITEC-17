@@ -8,7 +8,8 @@
 #if defined(DEVICE_P4_MASTER)
     #define DEVICE_FAMILY       0x14
     #define VERSION_REPLY_CMD   0x14
-    #define NUM_SLAVES          0
+    #define NUM_SLAVES          6
+
 
 #elif defined(DEVICE_S3_EXTENDER)
     #define DEVICE_FAMILY       0x15
@@ -50,6 +51,25 @@
 #define TOUCH_I2C_ADDR 0x5D
 
 // NOTA: la JC1060P470C NO lleva NeoTrellis (defines TRELLIS_* eliminados 2026-06-09)
+
+// ── Elevador de pantalla (motor N20 + DRV8833, EN/nSLEEP fijo a 5V por HW,
+// sin GPIO de control; sin encoder/ADC — no hay lazo cerrado) (2026-09-12) ──
+#define MOTOR_IN1          46
+#define MOTOR_IN2          47
+// ⚠️ PLACEHOLDER SIN CONFIRMAR contra el esquemático — mismo estado que los
+// pines de RS485 bus A (ver docs/RS485_P4.md). Validar continuidad con
+// multímetro antes de fiarse de este pin en hardware real.
+#define LIMIT_SWITCH_PIN   45
+#define LIMIT_SWITCH_ACTIVE_LEVEL LOW   // pulsado (retraído) = LOW, pull-up interno
+
+#define ELEVATOR_HOMING_PWM_DEFAULT    40    // usado solo si no hay elevatorPwm en NVS
+#define ELEVATOR_HOMING_TIMEOUT_MS     8000
+#define ELEVATOR_TEST_PWM_START        40    // fallback si no hay elevatorPwm guardado
+#define ELEVATOR_TEST_PWM_STEP         10
+#define ELEVATOR_TEST_PWM_MIN          0
+#define ELEVATOR_TEST_PWM_MAX          255
+#define ELEVATOR_CALIB_TOLERANCE_PCT   15
+#define ELEVATOR_PANEL_IDLE_TIMEOUT_MS 10000 // corte de seguridad: PWM sostenido en panel
 
 // --- Timing RS485 ---
 #define RS485_TX_ENABLE_US    10
