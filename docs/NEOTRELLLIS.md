@@ -217,6 +217,57 @@ for (int i = 0; i < 32; i++) {
 
 ---
 
+## 7. ExPressif — REPOSO Y TECLAS L0 / L5 (2026-10-11 19:25)
+
+Aplica al proyecto `MASTER_S3-P4/P4_JC4880P433C/` (ExPressif). Panel izquierdo (0x2F).
+
+| Tecla | Función | LED |
+|-------|---------|-----|
+| **L0** | Dormir / despertar | Metrónomo (parpadea con MIDI Clock); en reposo, latido tenue |
+| **L5** | HOLD (toggle) | Estado de HOLD |
+
+**Reposo = pantalla a 0 + todos los NeoTrellis apagados** (el MCU sigue activo).
+
+- **Latido de L0 en reposo (2026-10-11 19:39):** seno con gamma 2, pico = `brLevel(TRELLIS_DIM_ABS)` (~3, tenue), ciclo 3 s. Sigma-delta temporal actualizado a 5 ms (200 Hz): en reposo `taskCore0` corre a 5 ms; las teclas se leen cada 20 ms. (19:36: pico = mitad del activo, 20 ms → demasiado luminoso y con escalones.)
+- **Entra:** L0, o inactividad de `SLEEP_TIMEOUT_MS` (5 min, `config.h`) sin tecla ni toque.
+- **No duerme solo** mientras entra MIDI Clock (Logic en marcha). L0 sí duerme siempre.
+- **Sale:** L0 o toque en pantalla. El toque que despierta se descarta hasta soltar el dedo.
+- **En reposo:** el resto de teclas y el touch no generan acciones ni MIDI.
+- **Con Bank abierto:** L0 duerme; la página anterior sigue en L4/L8/L12.
+- **Estado:** `g_sleeping`, `g_lastActivityMs`, `g_trellis_sleepToggle`, `g_touchWake` (`config.h`/`main.cpp`).
+- **Threading:** Core1 decide dormir/despertar y fija el brillo; Core0 repinta los LEDs al ver el cambio de `g_sleeping` (el bus I2C no se comparte entre cores).
+- **Validado en banco (2026-10-11 19:25):** dormir/despertar con L0 y touch, HOLD en L5, metrónomo en L0.
+
+### 7.1 Brillo (L2/L6) escala también los NeoTrellis (2026-10-11 19:28)
+
+- Nivel LED = `base × g_displayBrightness / TRELLIS_BR_REF` (`TRELLIS_BR_REF = 80`), mínimo 1, máximo 255. Con el brillo por defecto (80 %) los niveles son los de `TRELLIS_BRIGHTNESS`/`TRELLIS_DIM_ABS`.
+- Aplica a LEDs activos, en reposo, metrónomo y latido del reposo.
+- **Siempre**, también con el Bank abierto: `neotrellisBankShowPage()` guarda caché de la última página y `neotrellisUpdate()` (Core0) la repinta al cambiar el brillo. Sin cambios en `UIBank.cpp`.
+- Al despertar del reposo se repinta Bank o Kaoss según `g_bankOpen` (antes pisaba el Bank con LEDs Kaoss).
+
+### 7.2 Popup de preset (2026-10-11 19:32)
+
+- Al pulsar una tecla de preset del NeoTrellis (R0-R15, L3/L7/L11/L15) aparece un popup centrado ~2,4 s (2026-10-11 19:36, antes 1,2 s): `PRESET n` (1-20) + nombre X + nombre Y (`kaoss.nameX()/nameY()`).
+- Código: `display/UIPresetPopup.{h,cpp}` (mismo patrón que `UIBrightnessPopup`); se invoca en `main.cpp` tras `kaoss.setPreset()` en el bloque `g_trellis_setPreset`.
+- Solo NeoTrellis; el botón PRESET táctil no lo dispara.
+- Se crea después del popup de brillo (z-order topmost).
+
+### 7.3 Secuencia de encendido "matrix azul" (2026-10-11 19:44)
+
+- Solo al encender: `neotrellisInit()` la arranca y dura `NEO_INTRO_MS` (3000 ms, = `BOOT_SCREEN_MS`), en paralelo a la pantalla de arranque. **No** se repite al despertar del reposo.
+- Efecto (2026-10-11 19:48): las 4 filas son carriles; una gota por carril avanza de **izquierda a derecha**, cabeza `NEO_INTRO_HEAD` y estela `NEO_INTRO_COL` de 4 columnas que se atenúa. Lenta: 1..2,5 columnas/s, con entrada escalonada por fila. Fundido en los últimos 400 ms y repintado normal al terminar. (19:44: caía de arriba a abajo a 5..11 filas/s.)
+- **No interrumpible:** durante la secuencia las teclas se ignoran.
+- Escala con el brillo de pantalla (`brLevel`). Código: `introTick()` en `NeoTrellis.cpp`, ejecutado en Core0.
+
+---
+
 ## Últimas Actualizaciones
 
 - **(2026-05-16)** Creado NEOTRELLLIS.md como documento P4-específico, extraído de CLAUDE.md
+- **(2026-10-11 19:25)** ExPressif: reposo (L0) y HOLD movido a L5, ver §7
+- **(2026-10-11 19:28)** ExPressif: L2/L6 escalan los NeoTrellis (incl. Bank), repintado correcto al despertar, ver §7.1
+- **(2026-10-11 19:32)** ExPressif: popup de preset al pulsar teclas de preset, ver §7.2
+- **(2026-10-11 19:36)** ExPressif: popup de preset 2,4 s; latido de reposo fluido (seno + sigma-delta)
+- **(2026-10-11 19:39)** ExPressif: latido de reposo más tenue (pico = nivel de reposo) y más fluido (dithering a 200 Hz)
+- **(2026-10-11 19:44)** ExPressif: secuencia de encendido "matrix azul" en NeoTrellis (solo al arrancar), ver §7.3
+- **(2026-10-11 19:48)** ExPressif: lluvia de encendido de izquierda a derecha y mucho más lenta

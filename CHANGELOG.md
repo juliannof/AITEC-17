@@ -50,6 +50,25 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 ---
 
+### SESIÓN 2026-10-11 19:52 — ExPressif (P4_JC4880P433C): reposo, brillo en NeoTrellis, popup de preset y secuencia de encendido
+
+**MCU afectadas:** solo P4 ExPressif (`MASTER_S3-P4/P4_JC4880P433C/`). S2, S3 y P4_JC1060P470C sin cambios. **Riesgo: BAJO.** Sin compilar (directiva); pendiente validar en banco los puntos marcados.
+
+1. **Reposo (pantalla + NeoTrellis apagados).** L0 alterna dormir/despertar; también por inactividad (`SLEEP_TIMEOUT_MS` = 5 min en `config.h`, sin tecla ni toque). No duerme solo mientras entra MIDI Clock. Despierta con L0 o tocando la pantalla; el toque que despierta se descarta hasta soltar el dedo (`Display.cpp`). En reposo las demás teclas y el touch no generan acciones ni MIDI. Latido de L0 en reposo: seno con gamma 2, pico = nivel de reposo, sigma-delta a 200 Hz (en reposo `taskCore0` corre a 5 ms; lectura de teclas a 20 ms). Estado nuevo en `config.h`/`main.cpp`: `g_sleeping`, `g_lastActivityMs`, `g_trellis_sleepToggle`, `g_touchWake`. Validado en banco por el usuario.
+2. **HOLD pasa de L0 a L5** (LED incluido); L0 hereda además el metrónomo visual. Con Bank abierto L0 duerme; la página anterior sigue en L4/L8/L12.
+3. **Los botones de brillo (L2/L6) escalan también los NeoTrellis, siempre, incluso con Bank abierto.** Nivel = `base × g_displayBrightness / TRELLIS_BR_REF` (80), mín. 1, máx. 255 (`brLevel()`). `neotrellisBankShowPage()` guarda caché de la última página y `neotrellisUpdate()` repinta en Core0 (`repaintAll()`), sin tocar `UIBank.cpp`. Corregido de paso: al despertar con el Bank abierto se pisaban los LEDs del Bank con los de Kaoss.
+4. **Popup de preset** (`display/UIPresetPopup.{h,cpp}`, nuevo): al pulsar una tecla de preset del NeoTrellis muestra `PRESET n` (1-20) + nombre X/Y durante 2,4 s. Se invoca en `main.cpp` tras `kaoss.setPreset()`.
+5. **Secuencia de encendido "matrix azul"** (`introTick()` en `NeoTrellis.cpp`): solo al arrancar, 3 s (`NEO_INTRO_MS`, = `BOOT_SCREEN_MS`), 4 carriles (filas) con gota de izquierda a derecha, lenta (1-2,5 col/s), cabeza `NEO_INTRO_HEAD` y estela `NEO_INTRO_COL`. No interrumpible (teclas ignoradas). **Pendiente validar en banco** (sentido, velocidad, color).
+
+**Pendiente / no implementado (decisión del usuario, 2026-10-11 19:52):**
+- **Ilustración del equipo al seleccionar el synth.** Infraestructura existente: JPEG desde LittleFS a PSRAM (patrón del logo en `UIBoot.cpp`, `LV_USE_TJPGD=1`; PNG no habilitado). Sin imágenes: las fuentes oficiales (Roland, Yamaha, Korg, retailers) devuelven 403/404 a descargas automáticas; la única foto libre encontrada (JV-2080, Wikimedia Commons, CC BY-SA 2.0, Daniel Kohan) es un primer plano en ángulo con ruido, no apta. Opciones abiertas: fotos aportadas por el usuario, o ilustraciones esquemáticas dibujadas con LVGL. Si se usan fotos con copyright, no commitearlas en repo público.
+- **U-110 no existe en el proyecto.** Añadirlo como séptimo synth implica `ExSynth`, `NUM_SYNTHS=7`, color, nombre, memorias Kaos (20 slots NVS), descriptor de Bank; no queda tecla NeoTrellis libre para selección directa (L8/9/10/12/13/14 ya son los 6 synths; se ciclaría con L4/SYNTH).
+- "WAVE" (`ExSynth::WAVE`): modelo exacto sin concretar.
+
+Documentación: `docs/NEOTRELLLIS.md` §7, §7.1, §7.2, §7.3.
+
+---
+
 ### SESIÓN 2026-08-23 11:04 — P4+S3: detección de cierre "silencioso" de Logic Pro (sin `0x0F` ni faders-a-0)
 
 **Origen:** la sesión 2026-08-18 20:28 ya había cubierto el caso "Logic manda faders-a-0 antes de cerrar", pero con USB conectado (a diferencia de desconectar el cable) ese burst de reset no siempre aparece — capturas MIDI Monitor del cierre real de Logic (Cmd+Q, USB conectado) mostraron cierres donde ni `0x0F` ni faders-a-0 se producían, dejando P4 y S3 congelados en `CONNECTED` indefinidamente.

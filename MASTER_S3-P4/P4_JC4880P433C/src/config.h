@@ -30,6 +30,10 @@
 #define TRELLIS_ADDR_R     0x2E
 #define TRELLIS_BRIGHTNESS   25   // 0-255: nivel max-canal LEDs activos
 #define TRELLIS_DIM_ABS       3   // 0-255: nivel max-canal LEDs en reposo
+#define NEO_INTRO_MS       3000   // secuencia "matrix azul" al encender (= BOOT_SCREEN_MS) (2026-10-11 19:41)
+#define NEO_INTRO_COL   0x0033FFu // azul de la estela
+#define NEO_INTRO_HEAD  0xAACCFFu // cabeza de la gota (azul casi blanco)
+#define TRELLIS_BR_REF       80   // % de brillo pantalla en el que BRIGHTNESS/DIM_ABS valen tal cual; L2/L6 escalan (2026-10-11 19:28)
 
 // ── MIDI ──────────────────────────────────────────────────────────────
 #define MIDI_CH           1
@@ -114,6 +118,15 @@ extern volatile bool   g_trellis_brightUp;    // L6 — brillo pantalla + (2026-
 
 // ── Brillo de pantalla ──────────────────────────────────────────────────
 extern volatile uint8_t g_displayBrightness;  // 10-100%, paso 10, ajustable con L2/L6 NeoTrellis (2026-07-14)
+
+// ── Reposo (pantalla + NeoTrellis apagados) (2026-10-11 19:22) ──────────
+// Entra con L0 o por inactividad; sale con L0 o tocando la pantalla.
+// Duerme solo si no hay MIDI Clock entrante (Logic en marcha).
+#define SLEEP_TIMEOUT_MS   300000UL          // 5 min sin toque/tecla → reposo
+extern volatile bool     g_trellis_sleepToggle;  // L0 — alterna reposo/despierto
+extern volatile bool     g_sleeping;             // true = pantalla y NeoTrellis apagados
+extern volatile uint32_t g_lastActivityMs;       // millis() de la última tecla/toque
+extern volatile bool     g_touchWake;            // touch pidió despertar (Core1 lo consume)
 
 // ── Bank / Canal MIDI ─────────────────────────────────────────────────────
 extern volatile uint8_t g_midiChannel;   // canal MIDI activo — fijo en 1 (2026-07-12): Logic enruta por track, no el firmware

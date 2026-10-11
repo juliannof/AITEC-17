@@ -170,7 +170,23 @@ void initDisplay() {
         uint16_t x, y, strength;
         uint8_t count = 0;
         esp_lcd_touch_read_data(tp);
-        if (esp_lcd_touch_get_coordinates(tp, &x, &y, &strength, &count, 1) && count > 0) {
+        bool touching = esp_lcd_touch_get_coordinates(tp, &x, &y, &strength, &count, 1) && count > 0;
+
+        // Reposo (2026-10-11 19:22): el toque que despierta se traga hasta
+        // soltar el dedo, para que no llegue a LVGL como acción.
+        static bool s_swallow = false;
+        if (touching) {
+            g_lastActivityMs = millis();
+            if (g_sleeping) { s_swallow = true; g_touchWake = true; }
+        } else {
+            s_swallow = false;
+        }
+        if (s_swallow || g_sleeping) {
+            data->state = LV_INDEV_STATE_RELEASED;
+            return;
+        }
+
+        if (touching) {
             data->point.x = x;
             data->point.y = y;
             data->state = LV_INDEV_STATE_PRESSED;

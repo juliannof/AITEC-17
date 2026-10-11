@@ -14,6 +14,7 @@
 #include "display/UIBank.h"
 #include "display/UIKaosEdit.h"
 #include "display/UIBrightnessPopup.h"
+#include "display/UIPresetPopup.h"
 #include "nvs/FavStore.h"
 #include "nvs/KaosStore.h"
 
@@ -45,6 +46,12 @@ volatile bool    g_trellis_brightUp   = false;   // L6 (2026-07-14)
 
 volatile uint8_t g_displayBrightness  = 80;      // 10-100%, ajustable con L2/L6 (2026-07-14)
 
+// ── Reposo (2026-10-11 19:22) ─────────────────────────────────────────
+volatile bool     g_trellis_sleepToggle = false;  // L0
+volatile bool     g_sleeping            = false;
+volatile uint32_t g_lastActivityMs      = 0;
+volatile bool     g_touchWake           = false;
+
 // ── Sintetizador activo ───────────────────────────────────────────────
 volatile ExSynth g_currentSynth = ExSynth::JV2080;
 
@@ -61,9 +68,11 @@ TaskHandle_t taskCore1Handle = NULL;
 // ── Core 0 — periféricos ──────────────────────────────────────────────
 void taskCore0(void* pv) {
     for (;;) {
-        midiClockPoll();   // metrónomo visual L5 (2026-07-14) — único lector de MIDI entrante
+        midiClockPoll();   // metrónomo visual L0 (2026-07-14) — único lector de MIDI entrante
         neotrellisUpdate();
-        vTaskDelay(pdMS_TO_TICKS(20));
+        // 5 ms en reposo para el latido fluido de L0 (2026-10-11 19:39); la
+        // lectura de teclas sigue a 20 ms dentro de neotrellisUpdate().
+        vTaskDelay(pdMS_TO_TICKS(g_sleeping ? 5 : 20));
     }
 }
 
@@ -82,6 +91,27 @@ void taskCore1(void* pv) {
         if (now - s_lastBankFlush >= 60000) {
             s_lastBankFlush = now;
             bankLastSelFlushIfDirty();
+        }
+
+        // ── Reposo (2026-10-11 19:22) ────────────────────────────────────
+        // Dormir: L0 o inactividad. Despertar: L0 o touch. Los LEDs del
+        // NeoTrellis los repinta Core0 al ver el cambio de g_sleeping.
+        if (g_touchWake) {
+            g_touchWake = false;
+            g_trellis_sleepToggle = true;      // touch = misma ruta que L0
+        }
+        if (g_bootDone && uiReady) {
+            if (!g_sleeping && midiClockIsRunning()) g_lastActivityMs = now;  // Logic en marcha → no duerme solo
+            bool autoSleep = !g_sleeping && (now - g_lastActivityMs >= SLEEP_TIMEOUT_MS);
+            if (g_trellis_sleepToggle || autoSleep) {
+                g_trellis_sleepToggle = false;
+                g_sleeping = !g_sleeping;
+                g_lastActivityMs = now;
+                displaySetBrightness(g_sleeping ? 0 : g_displayBrightness);
+                log_i("[SLEEP] %s", g_sleeping ? "reposo" : "despierto");
+            }
+        } else {
+            g_trellis_sleepToggle = false;
         }
 
         // ── Flags NeoTrellis (pueden llegar en cualquier momento) ────────
@@ -125,6 +155,8 @@ void taskCore1(void* pv) {
                 g_trellis_setPreset = -1;
                 kaoss.setPreset(target);
                 uiKaossUpdatePreset();
+                // Popup de preset (2026-10-11 19:32): índice 0-19 → se muestra 1-20
+                uiPresetPopupShow((uint8_t)(target + 1), kaoss.nameX(), kaoss.nameY());
             }
             if (g_trellis_nextSynth) {
                 g_trellis_nextSynth = false;
@@ -160,6 +192,7 @@ void taskCore1(void* pv) {
             uiBankCreate(displayGetRoot());          // oculto por defecto
             uiKaosEditCreate(displayGetRoot());      // oculto por defecto (2026-07-14)
             uiBrightnessPopupCreate(displayGetRoot()); // topmost, oculto por defecto (2026-07-14)
+            uiPresetPopupCreate(displayGetRoot());     // topmost, oculto por defecto (2026-10-11 19:32)
             uiKaossStartScroll();
             uiReady = true;
         }

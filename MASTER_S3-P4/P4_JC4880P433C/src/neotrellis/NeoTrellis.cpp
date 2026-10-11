@@ -3,8 +3,8 @@
 // Layout (4 filas × 8 columnas):
 //   Panel izq 0x2F  │  Panel der 0x2E
 //   Col: 0  1  2  3 │  4  5  6  7
-//   Row0:HOLD PAN BR+ PRE│ PRE PRE PRE PRE   ← BR=brillo pantalla, PRE=preset directo
-//   Row1:SYNT --  BR- PRE│ PRE PRE PRE PRE
+//   Row0:SLP  PAN BR+ PRE│ PRE PRE PRE PRE   ← BR=brillo pantalla, PRE=preset directo
+//   Row1:SYNT HOLD BR- PRE│ PRE PRE PRE PRE
 //   Row2:SYNT SYNT SYNT PRE│ PRE PRE PRE PRE
 //   Row3:SYNT SYNT SYNT PRE│ PRE PRE PRE PRE
 //
@@ -13,7 +13,7 @@
 // R0-R15 completo (panel der) = 4 + 16 = 20. Fórmula: preset = fila×5 + (0 si
 // es Lx, o 1+col si es Rx).
 // L2/L6 (2026-07-14) — brillo de pantalla +/− (ver UIBrightnessPopup.cpp),
-// popup en pantalla con el número. L5 (2026-07-14) — metrónomo visual,
+// popup en pantalla con el número. L0 (2026-10-11) — metrónomo visual + dormir/despertar (antes L5; HOLD pasó a L5),
 // parpadea sincronizado al MIDI Clock USB entrante (ver metronomeUpdate()).
 //
 // Modelo de brillo (dos constantes independientes en config.h):
@@ -47,11 +47,31 @@ static uint32_t scaleCol(uint32_t col, uint8_t level) {
             (uint32_t)(b * level / m);
 }
 
-// LED activo: canal máximo = TRELLIS_BRIGHTNESS
-static uint32_t bright(uint32_t col) { return scaleCol(col, TRELLIS_BRIGHTNESS); }
+// Nivel base escalado por el brillo de pantalla (2026-10-11 19:28):
+// base × g_displayBrightness / TRELLIS_BR_REF, mínimo 1 (los LEDs en reposo
+// no desaparecen), máximo 255. Con el brillo por defecto (80 %) = base.
+static uint8_t brLevel(uint8_t base) {
+    uint32_t v = (uint32_t)base * g_displayBrightness / TRELLIS_BR_REF;
+    if (v < 1)   v = 1;
+    if (v > 255) v = 255;
+    return (uint8_t)v;
+}
 
-// LED en reposo: canal máximo = TRELLIS_DIM_ABS (independiente de BRIGHTNESS)
-static uint32_t dim(uint32_t col)    { return scaleCol(col, TRELLIS_DIM_ABS); }
+// LED activo: canal máximo = TRELLIS_BRIGHTNESS (escalado por brillo pantalla)
+static uint32_t bright(uint32_t col) { return scaleCol(col, brLevel(TRELLIS_BRIGHTNESS)); }
+
+// LED en reposo: canal máximo = TRELLIS_DIM_ABS (escalado por brillo pantalla)
+static uint32_t dim(uint32_t col)    { return scaleCol(col, brLevel(TRELLIS_DIM_ABS)); }
+
+// ── Secuencia de entrada "matrix azul" (2026-10-11 19:41) ──────────────────
+// Estado compartido entre callbacks y neotrellisUpdate(), ambos en Core0.
+static uint32_t s_introStart   = 0;
+static uint32_t s_introDur     = 0;       // 0 = inactiva (solo se activa en neotrellisInit)
+
+static void introStart(uint32_t ms) {
+    s_introStart = millis();
+    s_introDur   = ms;
+}
 
 // ── Modo Bank — mapeo por tríos (2026-07-04) ──────────────────────────
 // Columna 0 (L0,L4,L8,L12) = página anterior; columna 7 (R3,R7,R11,R15) =
@@ -132,11 +152,11 @@ static int8_t presetIndexRight(uint8_t k) {
 
 // ── LED refresh ────────────────────────────────────────────────────────
 static void refreshLeft() {
-    s_left.pixels.setPixelColor(0, (bool)g_holdMode ? bright(COL_FUNC_HOLD) : dim(COL_FUNC_HOLD));
+    s_left.pixels.setPixelColor(5, (bool)g_holdMode ? bright(COL_FUNC_HOLD) : dim(COL_FUNC_HOLD));
     s_left.pixels.setPixelColor(1, dim(COL_FUNC_PANIC));
     s_left.pixels.setPixelColor(2, dim(COL_ACCENT));   // brillo pantalla + (2026-07-14, antes SCALE)
     s_left.pixels.setPixelColor(4, dim(synthColor()));
-    s_left.pixels.setPixelColor(5, 0u);                 // metrónomo — apagado en reposo, ver metronomeUpdate()
+    s_left.pixels.setPixelColor(0, 0u);                 // metrónomo — apagado en reposo, ver metronomeUpdate()
     s_left.pixels.setPixelColor(6, dim(COL_ACCENT));   // brillo pantalla − (2026-07-14)
 
     uint8_t  preset = kaoss.getPreset();
@@ -162,6 +182,16 @@ static TrellisCallback cb_left(keyEvent evt) {
     uint8_t k    = evt.bit.NUM;
     bool pressed = (evt.bit.EDGE == SEESAW_KEYPAD_EDGE_RISING);
     log_d("[TR-L] k=%d %s", k, pressed ? "DN" : "UP");
+
+    // Reposo (2026-10-11 19:22): L0 alterna dormir/despertar. En reposo el
+    // resto de teclas se ignoran (L0 es la única que despierta desde aquí).
+    g_lastActivityMs = millis();
+    if (s_introDur) return 0;            // intro de encendido activa: teclas ignoradas, no se interrumpe (2026-10-11 19:44)
+    if (k == 0) {
+        if (pressed) g_trellis_sleepToggle = true;
+        return 0;
+    }
+    if ((bool)g_sleeping) return 0;
 
     if (k == 4) {
         // SYNTH con Bank cerrado (tap=cicla synth) / atrás+abre-cierra con
@@ -193,11 +223,11 @@ static TrellisCallback cb_left(keyEvent evt) {
         return 0;
     }
 
-    if (k == 0) {                                    // HOLD — toggle
+    if (k == 5) {                                    // HOLD — toggle
         if (pressed) {
             g_trellis_holdToggle = true;
             bool futureHold = !(bool)g_holdMode;
-            s_left.pixels.setPixelColor(0, futureHold ? bright(COL_FUNC_HOLD) : dim(COL_FUNC_HOLD));
+            s_left.pixels.setPixelColor(5, futureHold ? bright(COL_FUNC_HOLD) : dim(COL_FUNC_HOLD));
             s_left.pixels.show();
         }
     } else if (k == 1) {                             // PANIC
@@ -229,6 +259,10 @@ static TrellisCallback cb_right(keyEvent evt) {
     bool pressed = (evt.bit.EDGE == SEESAW_KEYPAD_EDGE_RISING);
     log_d("[TR-R] k=%d %s", k, pressed ? "DN" : "UP");
 
+    g_lastActivityMs = millis();            // reposo (2026-10-11 19:22)
+    if (s_introDur) return 0;               // intro de encendido activa: teclas ignoradas (2026-10-11 19:44)
+    if ((bool)g_sleeping) return 0;
+
     if ((bool)g_bankOpen) {
         if (k == 3 || k == 7 || k == 11 || k == 15) { // columna 7 — página siguiente
             if (pressed) g_trellis_bankNext = true;
@@ -246,7 +280,12 @@ static TrellisCallback cb_right(keyEvent evt) {
 }
 
 // ── API Bank (llamado desde UIBank.cpp, Core1) ────────────────────────
-void neotrellisBankShowPage(const uint8_t* state, int count) {
+// Caché de la última página Bank (2026-10-11 19:28): permite repintar con el
+// nuevo brillo desde Core0 sin tocar UIBank.cpp.
+static uint8_t s_bankState[8] = {};
+static int     s_bankCount    = 0;
+
+static void paintBank(const uint8_t* state, int count) {
     uint32_t nav = dim(COL_BANK_NAV);
     for (int row = 0; row < 4; row++) {
         s_left.pixels.setPixelColor(row * 4 + 0, nav);    // L0,4,8,12  — atrás
@@ -270,6 +309,22 @@ void neotrellisBankShowPage(const uint8_t* state, int count) {
     }
     s_left.pixels.show();
     s_right.pixels.show();
+}
+
+void neotrellisBankShowPage(const uint8_t* state, int count) {
+    s_bankCount = (count > 8) ? 8 : count;
+    for (int i = 0; i < 8; i++) s_bankState[i] = (i < s_bankCount) ? state[i] : 0;
+    paintBank(s_bankState, s_bankCount);
+}
+
+// Repinta según el modo activo: Bank abierto → caché Bank, si no → Kaoss.
+static void repaintAll() {
+    if ((bool)g_bankOpen) {
+        paintBank(s_bankState, s_bankCount);
+    } else {
+        refreshLeft();
+        refreshRight();
+    }
 }
 
 void neotrellisRestoreKaoss() {
@@ -300,11 +355,12 @@ void neotrellisInit() {
 
     refreshLeft();
     refreshRight();
+    introStart(NEO_INTRO_MS);   // matrix azul durante la pantalla de arranque (2026-10-11 19:41)
     log_i("[NeoTrellis] Init OK — SDA=%d SCL=%d  L=0x%02X R=0x%02X",
           TRELLIS_SDA_PIN, TRELLIS_SCL_PIN, TRELLIS_ADDR_L, TRELLIS_ADDR_R);
 }
 
-// ── Metrónomo visual — L5, sincronizado a MIDI Clock entrante (2026-07-14) ──
+// ── Metrónomo visual — L0, sincronizado a MIDI Clock entrante (2026-07-14) ──
 // midiClockPoll() ya se llamó este ciclo (taskCore0, main.cpp) — aquí solo
 // se consume el beat y se dibuja el flash con decay, mismo patrón que
 // s_glow_t del pad XY (UIKaoss.cpp).
@@ -317,24 +373,81 @@ static void metronomeUpdate() {
     if (!running) {
         if (s_metroGlow != 0.0f) {
             s_metroGlow = 0.0f;
-            s_left.pixels.setPixelColor(5, 0u);
+            s_left.pixels.setPixelColor(0, 0u);
             s_left.pixels.show();
         }
         return;
     }
     if (s_metroGlow <= 0.0f) return;
 
-    uint8_t lvl = (uint8_t)((float)TRELLIS_BRIGHTNESS * s_metroGlow);
-    s_left.pixels.setPixelColor(5, scaleCol(COL_ACCENT, lvl));
+    uint8_t lvl = (uint8_t)((float)brLevel(TRELLIS_BRIGHTNESS) * s_metroGlow);
+    s_left.pixels.setPixelColor(0, scaleCol(COL_ACCENT, lvl));
     s_left.pixels.show();
 
     s_metroGlow -= 0.25f;   // ~4 ticks × 20ms = 80ms de flash
     if (s_metroGlow < 0.0f) s_metroGlow = 0.0f;
 }
 
+// Lluvia "matrix azul" (2026-10-11 19:41): las 8 columnas físicas (4 por panel)
+// son columnas de lluvia; cada una tiene una gota con cabeza clara y estela
+// azul que sube atenuándose. Velocidad y fase distintas por columna. Fundido
+// a negro en los últimos 400 ms. Devuelve true mientras sigue activa.
+static bool introTick() {
+    uint32_t now = millis();
+    uint32_t el  = now - s_introStart;
+    if (el >= s_introDur) {
+        s_introDur = 0;
+        repaintAll();
+        return false;
+    }
+
+    static uint32_t s_lastFrame = 0;
+    if ((now - s_lastFrame) < 30) return true;   // ~33 fps
+    s_lastFrame = now;
+
+    // 2026-10-11 19:48: la lluvia avanza de IZQUIERDA a DERECHA y mucho más
+    // lenta (antes caía de arriba a abajo a 5..11 filas/s). Cada una de las
+    // 4 filas es un carril: gota con cabeza a la derecha y estela a su
+    // izquierda; velocidad 1..2,5 columnas/s y entrada escalonada por fila.
+    const float TAIL = 4.0f;                      // columnas de estela
+    const float CYC  = 8.0f + TAIL;               // 8 columnas visibles + salida
+    float t    = (float)el / 1000.0f;
+    uint32_t rem = s_introDur - el;
+    float fade = (rem < 400) ? (float)rem / 400.0f : 1.0f;
+    uint8_t base = brLevel(TRELLIS_BRIGHTNESS);
+
+    for (int r = 0; r < 4; r++) {
+        float speed = 1.0f + 0.5f * (float)((r * 37) % 4);          // 1.0..2.5 col/s
+        float head  = speed * t - 1.5f * (float)((r * 3) % 4);      // entra escalonado (fuera por la izquierda)
+        if (head >= 0.0f) head = fmodf(head, CYC);
+        for (int c = 0; c < 8; c++) {
+            float d = head - (float)c;                              // distancia tras la cabeza
+            uint32_t col = 0;
+            if (d >= 0.0f && d < TAIL) {
+                float I = 1.0f - d / TAIL;
+                I = I * I * fade;
+                uint8_t lvl = (uint8_t)((float)base * I + 0.5f);
+                if (lvl) col = scaleCol((d < 1.0f) ? NEO_INTRO_HEAD : NEO_INTRO_COL, lvl);
+            }
+            Adafruit_NeoTrellis& dev = (c < 4) ? s_left : s_right;
+            dev.pixels.setPixelColor(r * 4 + (c % 4), col);
+        }
+    }
+    s_left.pixels.show();
+    s_right.pixels.show();
+    return true;
+}
+
 void neotrellisUpdate() {
-    s_left.read();
-    s_right.read();
+    // En reposo el bucle de Core0 corre a 5 ms (latido fluido, ver más abajo);
+    // las teclas se siguen leyendo cada 20 ms como siempre.
+    static uint32_t s_lastRead = 0;
+    uint32_t nowMs = millis();
+    if (!g_sleeping || (nowMs - s_lastRead) >= 20) {
+        s_lastRead = nowMs;
+        s_left.read();
+        s_right.read();
+    }
 
     static uint8_t  s_lastPreset = 255;
     static bool     s_lastHold   = false;
@@ -343,6 +456,60 @@ void neotrellisUpdate() {
     bool    curHold   = (bool)g_holdMode;
     ExSynth curSynth  = g_currentSynth;
 
+    // Reposo (2026-10-11 19:22): LEDs apagados salvo L0 con "latido" tenue
+    // (0..2×TRELLIS_DIM_ABS, ciclo 3 s). Los pinta Core0 al detectar el
+    // cambio de g_sleeping, así el bus I2C no se comparte entre cores.
+    static bool     s_wasSleeping = false;
+    static uint8_t  s_pulseLvl    = 255;
+    if (g_sleeping) {
+        if (!s_wasSleeping) {
+            s_wasSleeping = true;
+            s_metroGlow   = 0.0f;
+            s_pulseLvl    = 255;
+            for (int i = 0; i < NEO_TRELLIS_NUM_KEYS; i++) {
+                s_left.pixels.setPixelColor(i, 0u);
+                s_right.pixels.setPixelColor(i, 0u);
+            }
+            s_right.pixels.show();
+        }
+        // Latido fluido (2026-10-11 19:36): onda senoidal con gamma 2 y pico
+        // = mitad del nivel activo (antes triángulo de solo 7 pasos 0..6).
+        // Con tan pocos niveles de 8 bits los saltos se ven, así que se
+        // reparte la parte fraccional en el tiempo (sigma-delta, el nivel
+        // alterna entre floor y ceil cada 20 ms) → brillo efectivo continuo.
+        static float s_acc = 0.0f;
+        float x   = 0.5f - 0.5f * cosf(6.2831853f * (float)(millis() % 3000) / 3000.0f);
+        // 2026-10-11 19:39: pico = nivel de reposo (TRELLIS_DIM_ABS, ~3), antes
+        // la mitad del activo (~12, demasiado luminoso). Actualización a 5 ms
+        // (200 Hz) → el dithering ya no se percibe como escalones.
+        float tgt = (float)brLevel(TRELLIS_DIM_ABS) * x * x;
+        s_acc += tgt;
+        uint8_t lvl = (uint8_t)s_acc;
+        s_acc -= (float)lvl;
+        if (lvl != s_pulseLvl) {
+            s_pulseLvl = lvl;
+            s_left.pixels.setPixelColor(0, scaleCol(COL_ACCENT, lvl));
+            s_left.pixels.show();
+        }
+        return;
+    }
+    if (s_wasSleeping) {                 // acaba de despertar → repinta (Bank o Kaoss)
+        s_wasSleeping = false;
+        repaintAll();
+    }
+
+    // Secuencia de encendido (2026-10-11 19:44): solo al arrancar, ocupa los
+    // LEDs hasta que termina; al acabar repinta (introTick → repaintAll).
+    if (s_introDur && introTick()) return;
+
+    // Brillo de pantalla (L2/L6) → también escala los NeoTrellis (2026-10-11 19:28)
+    static uint8_t s_lastBr = 0;
+    uint8_t curBr = g_displayBrightness;
+    if (curBr != s_lastBr) {
+        s_lastBr = curBr;
+        repaintAll();
+    }
+
     if (curPreset != s_lastPreset) {
         s_lastPreset = curPreset;
         refreshRight();
@@ -350,7 +517,7 @@ void neotrellisUpdate() {
     }
     if (curHold != s_lastHold) {
         s_lastHold = curHold;
-        s_left.pixels.setPixelColor(0, curHold ? bright(COL_FUNC_HOLD) : dim(COL_FUNC_HOLD));
+        s_left.pixels.setPixelColor(5, curHold ? bright(COL_FUNC_HOLD) : dim(COL_FUNC_HOLD));
         s_left.pixels.show();
     }
     if (curSynth != s_lastSynth) {
@@ -365,5 +532,5 @@ void neotrellisUpdate() {
         refreshRight();
     }
 
-    metronomeUpdate();   // L5 — parpadeo sincronizado a MIDI Clock (2026-07-14)
+    metronomeUpdate();   // L0 — parpadeo sincronizado a MIDI Clock (2026-07-14)
 }
