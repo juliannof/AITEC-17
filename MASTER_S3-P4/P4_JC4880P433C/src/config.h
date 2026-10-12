@@ -16,7 +16,7 @@
 //  HOLD pos(240, 0)   240×160  →  izq-arriba (screen x:0→160,   y:0→240)
 //  PAD  pos(0,   160) 480×480  →  centro     (screen x:160→640, y:0→480)
 //  SCALE pos(240,640) 240×160  →  der-arriba (screen x:640→800, y:0→240)
-//  PANIC pos(0,  640) 240×160  →  der-abajo  (screen x:640→800, y:240→480)
+//  MODO  pos(0,  640) 240×160  →  der-abajo  (screen x:640→800, y:240→480)
 //
 #define PAD_START_Y   150   // LVGL y donde empieza el pad (= 150px strip lateral en pantalla)
 #define PAD_SIZE      500   // pad: extensión LVGL y (= 500px ancho en pantalla)
@@ -67,6 +67,14 @@ enum class ExMode : uint8_t {
     ARPEGGIATOR = 2
 };
 
+// ── Modos de interfaz (2026-10-12 13:22) ────────────────────────────────────────
+// Dos modos: EXPRESSIF (Kaos + Banco, la interfaz de siempre) y LIGHTS.
+// Botón de función (antes PANIC): L1 NeoTrellis y botón "MODO" táctil.
+// El Banco es una superposición DENTRO de ExPressif (L4 largo), no un modo.
+enum class UiMode : uint8_t { EXPRESSIF = 0, LIGHTS = 1 };
+#define COL_UIMODE_EXPRESSIF 0x00AAFF   // azul    — LED de L1 en modo ExPressif
+#define COL_UIMODE_LIGHTS    0xFFDD00   // amarillo — LED de L1 en modo Lights
+
 // ── Colores NeoTrellis (RGB 24-bit) ───────────────────────────────────
 #define COL_MODE_KAOSS    0xFF1100
 #define COL_MODE_GRID     0x00FF44
@@ -74,7 +82,6 @@ enum class ExMode : uint8_t {
 #define COL_SCALE_ROOT    0xFFFFFF
 #define COL_SCALE_NOTE    0x004488
 #define COL_FUNC_HOLD     0xFFAA00
-#define COL_FUNC_PANIC    0xFF0000
 #define COL_TRELLIS_OFF   0x000000
 
 // ── Colores UI LVGL ───────────────────────────────────────────────────
@@ -86,7 +93,7 @@ enum class ExMode : uint8_t {
 #define COL_BTN_BG        0x0A0F18
 #define COL_BTN_ACTIVE    0x1A2840
 #define COL_BTN_HOLD      0x332200
-#define COL_BTN_PANIC     0x330000
+#define COL_BTN_MODE      0x0A1A2A   // botón táctil MODO (2026-10-12 13:22, antes COL_BTN_PANIC)
 #define COL_BTN_SCALE     0x002200
 #define COL_BTN_TAP       0x001433
 #define COL_TEXT          0xCCDDEE
@@ -105,7 +112,7 @@ extern volatile bool    g_bootDone;
 
 // ── Flags cross-core NeoTrellis→LVGL (Core0→Core1) ───────────────────
 extern volatile bool   g_trellis_holdToggle;  // toggle g_holdMode
-extern volatile bool   g_trellis_panic;       // CC reset a 64
+extern volatile bool   g_trellis_modeNext;    // L1 — alterna ExPressif↔Lights (2026-10-12 13:22, antes g_trellis_panic)
 extern volatile int8_t g_trellis_setPreset;   // -1=none, 0-19=preset directo (2026-07-14, antes 0-3)
 extern volatile bool   g_trellis_nextSynth;   // cicla sintetizador activo
 extern volatile int8_t g_trellis_setSynth;    // -1=none, selección directa L8,9,10,12,13,14 (solo modo Kaoss, 2026-07-12)
@@ -130,6 +137,7 @@ extern volatile bool     g_touchWake;            // touch pidió despertar (Core
 
 // ── Bank / Canal MIDI ─────────────────────────────────────────────────────
 extern volatile uint8_t g_midiChannel;   // canal MIDI activo — fijo en 1 (2026-07-12): Logic enruta por track, no el firmware
+extern volatile bool    g_lightsOpen;    // pantalla LIGHTS visible (2026-10-12 13:22)
 extern volatile bool    g_bankOpen;      // UIBank visible
 extern volatile uint8_t g_bankTab;       // pestaña activa (0=FAV 1=SON 2=PERFORM) (2026-07-04: antes 2=CH)
 
@@ -207,6 +215,23 @@ enum class JVSoundMode : uint8_t { PERFORMANCE = 0, PATCH = 1 };
 #define TRITON_MODE_PROG   0x02
 
 #define NUM_SYNTHS       6
+
+// ── Iluminación WLED por WiFi (Fase 1, 2026-10-12 13:32) ───────────────────────────
+// Ver docs/EXPRESSIF_WLED.md. WiFi del P4 vía ESP32-C6 (esp-hosted, SDIO con
+// los pines por defecto del core: CLK18 CMD19 D0-D3 14-17 RST54).
+// Las credenciales NO van aquí: src/secrets.h (ignorado por git).
+#define WLED_ENABLE            1                  // 0 = desactiva todo el módulo (WiFi incluido)
+#define WLED_IP_MAIN           "192.168.1.191"    // principal
+#define WLED_IP_WS             "192.168.1.195"    // workstation (ESP32-S2: peticiones pequeñas)
+#define WLED_START_DELAY_MS    5000               // deja arrancar UI/USB-MIDI antes de iniciar WiFi
+#define WLED_WIFI_TIMEOUT_MS   20000              // espera máx. a asociar
+#define WLED_HTTP_TIMEOUT_MS   2000               // por petición
+#define WLED_POLL_MS           30000              // Fase 1: lectura periódica de diagnóstico
+#define WLED_TASK_STACK        8192
+#define WIFI_SSID_MAX          32                 // longitud máx. SSID (802.11)
+#define WLED_SCAN_TIMEOUT_MS   15000              // máx. espera del barrido (2026-10-12 14:25); la librería esperaría 60 s
+#define WLED_SCAN_MAX          12                 // redes máx. en la lista del barrido (2026-10-12 13:58)
+#define WIFI_PASS_MAX          63                 // longitud máx. clave WPA2 (2026-10-12 13:50: credenciales por pantalla → NVS)
 #define COL_SYNTH_JV     0x0044FF
 #define COL_SYNTH_TRI    0x8800FF
 #define COL_SYNTH_TG     0x00CC00

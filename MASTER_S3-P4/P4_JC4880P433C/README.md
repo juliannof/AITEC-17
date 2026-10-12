@@ -68,7 +68,7 @@ El color del texto y de los dots sigue el **sintetizador activo** (`COL_SYNTH_*`
 | **HOLD** | Congela XY al soltar — la nota suena hasta nuevo toque | ON / OFF |
 | **TAP** | Tap tempo *(v2)* | — |
 | **PRESET** *(antes SCALE, 2026-07-14)* | Muestra el nombre de los parámetros X/Y de la memoria activa. Al tocarlo abre el editor en pantalla (ver [Sistema de memorias Kaos](#sistema-de-memorias-kaos-parámetros-configurables-2026-07-14)) | Nombre parámetro X / Y |
-| **PANIC** | All Notes Off (CC 123) — o CC64/64 (centro) en los ejes de la memoria activa, si hay una configurada | — |
+| **MODO** (antes PANIC, 2026-10-12 13:22) | Botón de función: alterna los modos **ExPressif ↔ Lights**. En NeoTrellis es L1 | — |
 
 ---
 
@@ -156,7 +156,7 @@ Panel derecho   (las 16 teclas):  preset = fila × 5 + 1 + columna
 | 3 | **Synth D-110**(k12) · **Synth WAVE**(k13) · **Synth MOTIF**(k14) · **Preset 15**(k15) | **Preset 16-19** (k0-k3) |
 
 - **HOLD** — toggle congelar XY del pad
-- **PANIC** — All Notes Off (CC 123 — pendiente, ver Roadmap) o reset a centro (CC64/64) en los ejes de la memoria activa, por el canal MIDI guardado en esa memoria
+- **MODO** (2026-10-12 13:22, antes PANIC) — botón de función: alterna **ExPressif ↔ Lights**. PANIC (reset de ejes a 64/64) **se ha retirado** de la interfaz
 - **SYNTH** — tap cicla sintetizador activo; long-press ≥600ms abre `UIBank`
 - **L8-L10, L12-L14** — selección directa de sintetizador (sin ciclar), solo activo en modo Kaoss (`g_bankOpen==false`)
 - **L3, L7, L11, L15, R0-R15** — preset directo 0-19 (`g_trellis_setPreset`), tecla se ilumina con el color del **sintetizador activo** (`COL_SYNTH_*`) si es el preset seleccionado — mismo color que las teclas de selección de synth y que la rejilla de dots del pad táctil (2026-07-14)
@@ -432,3 +432,15 @@ src/
 ---
 
 *ExPressif — expressif · Espressif · ESP32*
+
+---
+
+## WiFi y luces (2026-10-12 15:17)
+
+El ExPressif usa el **ESP32-C6** de la placa (ESP-Hosted por SDIO) como radio WiFi. Hoy lee el estado de
+los dos WLED de casa; el control de luces (Fase 2) está pendiente. Credenciales por pantalla
+(modo **Lights** → CONFIGURAR WIFI), guardadas en NVS; barrido de redes incluido.
+
+- Documentación técnica: [`docs/WIFI_EXPRESSIF.md`](../../docs/WIFI_EXPRESSIF.md)
+- Brief y plan de control: [`docs/EXPRESSIF_WLED.md`](../../docs/EXPRESSIF_WLED.md)
+- Interruptor: `WLED_ENABLE` en `src/config.h`

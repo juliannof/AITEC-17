@@ -98,52 +98,99 @@ int favFindIndex(ExSynth synth, uint8_t ch, uint8_t msb, uint8_t lsb, uint8_t pc
 // cambios (ver FavStore.h para el porqué).
 struct BankLastSel { ExSynth synth; uint8_t msb; uint8_t lsb; uint8_t pc; };
 #define BANK_LASTSEL_MAX 48   // 6 synths × hasta 8 bancos (MOTIF-RACK, el máximo actual)
-static BankLastSel s_bankLastSel[BANK_LASTSEL_MAX];
-static int  s_bankLastSelCount = 0;
-static bool s_bankLastSelDirty = false;
+
+// Dos roles (2026-10-12 13:27): [0]=Sonidos (claves "bls"/"blsn", las de siempre),
+// [1]=Performances ("blc"/"blcn").
+static BankLastSel s_bankLastSel[2][BANK_LASTSEL_MAX];
+static int         s_bankLastSelCount[2] = {0, 0};
+static bool        s_bankLastSelDirty[2] = {false, false};
+static const char* const kBlsKey[2]  = {"bls",  "blc"};
+static const char* const kBlsnKey[2] = {"blsn", "blcn"};
+
+// Banco activo por instrumento y rol (2026-10-12 13:27). 0xFF = sin registro.
+struct ActiveBank { uint8_t msb; uint8_t lsb; };
+static ActiveBank s_activeBank[NUM_SYNTHS][2];
+static bool       s_activeBankDirty = false;
 
 static void bankLastSelLoad() {
-    int n = s_prefs.getInt("blsn", 0);
-    if (n < 0) n = 0;
-    if (n > BANK_LASTSEL_MAX) n = BANK_LASTSEL_MAX;
-    size_t want = sizeof(BankLastSel) * (size_t)n;
-    size_t got  = s_prefs.getBytes("bls", s_bankLastSel, want);
-    s_bankLastSelCount = (got == want) ? n : 0;   // corrupto/ausente → vacío, no reventar
-    s_bankLastSelDirty = false;
+    for (int r = 0; r < 2; r++) {
+        int n = s_prefs.getInt(kBlsnKey[r], 0);
+        if (n < 0) n = 0;
+        if (n > BANK_LASTSEL_MAX) n = BANK_LASTSEL_MAX;
+        size_t want = sizeof(BankLastSel) * (size_t)n;
+        size_t got  = (want > 0) ? s_prefs.getBytes(kBlsKey[r], s_bankLastSel[r], want) : 0;
+        s_bankLastSelCount[r] = (got == want) ? n : 0;   // corrupto/ausente → vacío, no reventar
+        s_bankLastSelDirty[r] = false;
+    }
+    for (int i = 0; i < NUM_SYNTHS; i++)
+        for (int r = 0; r < 2; r++) s_activeBank[i][r] = {0xFF, 0xFF};
+    size_t want = sizeof(s_activeBank);
+    if (s_prefs.getBytesLength("sab") == want) s_prefs.getBytes("sab", s_activeBank, want);
+    s_activeBankDirty = false;
 }
 
-void bankLastSelSet(ExSynth synth, uint8_t msb, uint8_t lsb, uint8_t pc) {
-    for (int i = 0; i < s_bankLastSelCount; i++) {
-        if (s_bankLastSel[i].synth == synth && s_bankLastSel[i].msb == msb && s_bankLastSel[i].lsb == lsb) {
-            if (s_bankLastSel[i].pc == pc) return;   // sin cambio real, no marcar dirty
-            s_bankLastSel[i].pc = pc;
-            s_bankLastSelDirty = true;
+void bankLastSelSet(ExSynth synth, uint8_t msb, uint8_t lsb, uint8_t pc, bool perf) {
+    int r = perf ? 1 : 0;
+    for (int i = 0; i < s_bankLastSelCount[r]; i++) {
+        BankLastSel& e = s_bankLastSel[r][i];
+        if (e.synth == synth && e.msb == msb && e.lsb == lsb) {
+            if (e.pc == pc) return;   // sin cambio real, no marcar dirty
+            e.pc = pc;
+            s_bankLastSelDirty[r] = true;
             return;
         }
     }
-    if (s_bankLastSelCount < BANK_LASTSEL_MAX) {
-        s_bankLastSel[s_bankLastSelCount++] = {synth, msb, lsb, pc};
-        s_bankLastSelDirty = true;
+    if (s_bankLastSelCount[r] < BANK_LASTSEL_MAX) {
+        s_bankLastSel[r][s_bankLastSelCount[r]++] = {synth, msb, lsb, pc};
+        s_bankLastSelDirty[r] = true;
     }
     // Si se llena BANK_LASTSEL_MAX, se ignoran bancos nuevos en silencio —
     // no debería pasar en la práctica (48 > cualquier combinación real hoy).
 }
 
-bool bankLastSelGet(ExSynth synth, uint8_t msb, uint8_t lsb, uint8_t& pc) {
-    for (int i = 0; i < s_bankLastSelCount; i++) {
-        if (s_bankLastSel[i].synth == synth && s_bankLastSel[i].msb == msb && s_bankLastSel[i].lsb == lsb) {
-            pc = s_bankLastSel[i].pc;
+bool bankLastSelGet(ExSynth synth, uint8_t msb, uint8_t lsb, uint8_t& pc, bool perf) {
+    int r = perf ? 1 : 0;
+    for (int i = 0; i < s_bankLastSelCount[r]; i++) {
+        const BankLastSel& e = s_bankLastSel[r][i];
+        if (e.synth == synth && e.msb == msb && e.lsb == lsb) {
+            pc = e.pc;
             return true;
         }
     }
     return false;
 }
 
+void synthActiveBankSet(ExSynth synth, bool perf, uint8_t msb, uint8_t lsb) {
+    int i = (int)synth;
+    if (i < 0 || i >= NUM_SYNTHS) return;
+    ActiveBank& a = s_activeBank[i][perf ? 1 : 0];
+    if (a.msb == msb && a.lsb == lsb) return;   // sin cambio real
+    a.msb = msb;
+    a.lsb = lsb;
+    s_activeBankDirty = true;
+}
+
+bool synthActiveBankGet(ExSynth synth, bool perf, uint8_t& msb, uint8_t& lsb) {
+    int i = (int)synth;
+    if (i < 0 || i >= NUM_SYNTHS) return false;
+    const ActiveBank& a = s_activeBank[i][perf ? 1 : 0];
+    if (a.msb == 0xFF) return false;
+    msb = a.msb;
+    lsb = a.lsb;
+    return true;
+}
+
 void bankLastSelFlushIfDirty() {
-    if (!s_bankLastSelDirty) return;
-    size_t sz = sizeof(BankLastSel) * (size_t)s_bankLastSelCount;
-    if (s_prefs.putBytes("bls", s_bankLastSel, sz) == sz) {
-        s_prefs.putInt("blsn", s_bankLastSelCount);
-        s_bankLastSelDirty = false;
+    for (int r = 0; r < 2; r++) {
+        if (!s_bankLastSelDirty[r]) continue;
+        size_t sz = sizeof(BankLastSel) * (size_t)s_bankLastSelCount[r];
+        if (s_prefs.putBytes(kBlsKey[r], s_bankLastSel[r], sz) == sz) {
+            s_prefs.putInt(kBlsnKey[r], s_bankLastSelCount[r]);
+            s_bankLastSelDirty[r] = false;
+        }
+    }
+    if (s_activeBankDirty) {
+        if (s_prefs.putBytes("sab", s_activeBank, sizeof(s_activeBank)) == sizeof(s_activeBank))
+            s_activeBankDirty = false;
     }
 }

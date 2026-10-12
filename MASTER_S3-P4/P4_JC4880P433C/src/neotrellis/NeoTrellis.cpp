@@ -150,10 +150,15 @@ static int8_t presetIndexRight(uint8_t k) {
     return (int8_t)(row * 5 + 1 + col);
 }
 
+// Color del LED de L1 según el modo de interfaz (2026-10-12 13:22)
+static uint32_t modeColor() {
+    return (bool)g_lightsOpen ? COL_UIMODE_LIGHTS : COL_UIMODE_EXPRESSIF;
+}
+
 // ── LED refresh ────────────────────────────────────────────────────────
 static void refreshLeft() {
     s_left.pixels.setPixelColor(5, (bool)g_holdMode ? bright(COL_FUNC_HOLD) : dim(COL_FUNC_HOLD));
-    s_left.pixels.setPixelColor(1, dim(COL_FUNC_PANIC));
+    s_left.pixels.setPixelColor(1, dim(modeColor()));   // botón de función: color del modo (2026-10-12 13:22, antes PANIC)
     s_left.pixels.setPixelColor(2, dim(COL_ACCENT));   // brillo pantalla + (2026-07-14, antes SCALE)
     s_left.pixels.setPixelColor(4, dim(synthColor()));
     s_left.pixels.setPixelColor(0, 0u);                 // metrónomo — apagado en reposo, ver metronomeUpdate()
@@ -208,7 +213,7 @@ static TrellisCallback cb_left(keyEvent evt) {
             s_left.pixels.show();
             if (millis() - s_press_ms >= 600)     g_trellis_openBank  = true;
             else if ((bool)g_bankOpen)            g_trellis_bankPrev  = true;
-            else                                   g_trellis_nextSynth = true;
+            else if (!(bool)g_lightsOpen)          g_trellis_nextSynth = true;   // en Lights no cicla synth (2026-10-12 13:22)
         }
         return 0;
     }
@@ -223,6 +228,8 @@ static TrellisCallback cb_left(keyEvent evt) {
         return 0;
     }
 
+    if ((bool)g_lightsOpen && k != 1 && k != 2 && k != 6) return 0;   // pantalla LIGHTS: solo modo y brillo (2026-10-12 13:22)
+
     if (k == 5) {                                    // HOLD — toggle
         if (pressed) {
             g_trellis_holdToggle = true;
@@ -230,10 +237,10 @@ static TrellisCallback cb_left(keyEvent evt) {
             s_left.pixels.setPixelColor(5, futureHold ? bright(COL_FUNC_HOLD) : dim(COL_FUNC_HOLD));
             s_left.pixels.show();
         }
-    } else if (k == 1) {                             // PANIC
-        s_left.pixels.setPixelColor(1, pressed ? bright(COL_FUNC_PANIC) : dim(COL_FUNC_PANIC));
+    } else if (k == 1) {                             // botón de función: siguiente modo (2026-10-12 13:22, antes PANIC)
+        s_left.pixels.setPixelColor(1, pressed ? bright(modeColor()) : dim(modeColor()));
         s_left.pixels.show();
-        if (pressed) g_trellis_panic = true;
+        if (pressed) g_trellis_modeNext = true;
     } else if (k == 2) {                              // brillo pantalla + (2026-07-14, antes SCALE)
         s_left.pixels.setPixelColor(2, pressed ? bright(COL_ACCENT) : dim(COL_ACCENT));
         s_left.pixels.show();
@@ -262,6 +269,7 @@ static TrellisCallback cb_right(keyEvent evt) {
     g_lastActivityMs = millis();            // reposo (2026-10-11 19:22)
     if (s_introDur) return 0;               // intro de encendido activa: teclas ignoradas (2026-10-11 19:44)
     if ((bool)g_sleeping) return 0;
+    if ((bool)g_lightsOpen) return 0;        // pantalla LIGHTS: teclas del panel derecho inactivas (2026-10-12 13:22)
 
     if ((bool)g_bankOpen) {
         if (k == 3 || k == 7 || k == 11 || k == 15) { // columna 7 — página siguiente
@@ -501,6 +509,18 @@ void neotrellisUpdate() {
     // Secuencia de encendido (2026-10-11 19:44): solo al arrancar, ocupa los
     // LEDs hasta que termina; al acabar repinta (introTick → repaintAll).
     if (s_introDur && introTick()) return;
+
+    // LED de L1 = color del modo de interfaz (2026-10-12 13:22). En Banco L1 es
+    // un slot de contenido, así que solo se toca fuera de Banco.
+    static uint32_t s_lastModeCol = 0;
+    uint32_t mCol = modeColor();
+    if (mCol != s_lastModeCol) {
+        s_lastModeCol = mCol;
+        if (!(bool)g_bankOpen) {
+            s_left.pixels.setPixelColor(1, dim(mCol));
+            s_left.pixels.show();
+        }
+    }
 
     // Brillo de pantalla (L2/L6) → también escala los NeoTrellis (2026-10-11 19:28)
     static uint8_t s_lastBr = 0;

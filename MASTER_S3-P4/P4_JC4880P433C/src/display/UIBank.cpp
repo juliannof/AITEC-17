@@ -382,6 +382,34 @@ static int ctxMaxPages(SoundTabCtx& ctx) {
     int pages = (ctxBankSize(ctx) + UIBANK_GRID_PER_PAGE - 1) / UIBANK_GRID_PER_PAGE;
     return pages < 1 ? 1 : pages;
 }
+// Restaura el banco activo y el sonido exacto de ESTE instrumento y rol desde
+// la memoria por instrumento (2026-10-12 13:27). Solo escribe si hay registro válido
+// (el banco guardado debe pertenecer a los bancos del synth activo); si no,
+// deja el estado tal cual lo puso el llamante.
+static void restoreCtxForSynth(SoundTabCtx& ctx) {
+    const BankDef* banks = ctxBanks(ctx);
+    int count = ctxBankCount(ctx);
+    uint8_t m, l, pc;
+    if (!banks || !synthActiveBankGet(g_currentSynth, ctx.perfMode, m, l)) return;
+    bool valid = false;
+    for (int i = 0; i < count; i++)
+        if (banks[i].msb == m && banks[i].lsb == l) { valid = true; break; }
+    if (!valid) return;
+    ctx.msb = m;
+    ctx.lsb = l;
+    if (bankLastSelGet(g_currentSynth, m, l, pc, ctx.perfMode)) {
+        ctx.lastMsb = m;
+        ctx.lastLsb = l;
+        ctx.lastPc  = pc;
+    }
+}
+
+// Página donde está el sonido seleccionado de este contexto (0 si no hay).
+static int ctxRestorePage(SoundTabCtx& ctx) {
+    if (ctx.lastPc == 0xFF || ctx.lastMsb != ctx.msb || ctx.lastLsb != ctx.lsb) return 0;
+    return ctx.lastPc / UIBANK_GRID_PER_PAGE;
+}
+
 static const char* ctxPatchName(SoundTabCtx& ctx, uint8_t pc) {
     auto fn = ctx.perfMode ? activeDesc().combiName : activeDesc().progName;
     return fn ? fn(ctx.msb, ctx.lsb, pc) : nullptr;
@@ -560,7 +588,9 @@ static void soundtab_click_pc(SoundTabCtx& ctx, uint8_t pc) {
     // bankLastSelSet() tampoco escribe NVS aquí — solo RAM, dirty flag
     // (2026-07-13, ver FavStore.h) para que cambiar de banco luego salte a
     // este PC en vez de a la página 0.
-    if (!ctx.perfMode) bankLastSelSet(g_currentSynth, ctx.msb, ctx.lsb, pc);
+    // (2026-10-12 13:27) Sonidos Y Performances, por instrumento: sonido exacto + banco activo.
+    bankLastSelSet(g_currentSynth, ctx.msb, ctx.lsb, pc, ctx.perfMode);
+    synthActiveBankSet(g_currentSynth, ctx.perfMode, ctx.msb, ctx.lsb);
     sendPatchSelect(ctx.msb, ctx.lsb, pc);
     // soundtab_update_selection() en vez de soundtab_render_page() completo
     // (2026-07-13) — misma página, mismo banco: solo cambian 1-2 botones de
@@ -579,17 +609,16 @@ static void bank_select(SoundTabCtx& ctx, uint8_t idx) {
 
     // Salta al último sonido usado en este banco (PC 0 si es la primera vez)
     // y lo envía por MIDI — el synth debe sonar lo mismo que se resalta en
-    // pantalla (2026-07-13). Solo Sonidos (Program); Performances se queda
-    // en página 0 sin auto-enviar, igual que favSaveLastSel().
+    // pantalla (2026-07-13). (2026-10-12 13:27) Ahora también Performances: cada banco
+    // de cada instrumento recuerda su sonido exacto, en ambos roles.
     uint8_t pc = 0;
-    if (!ctx.perfMode) bankLastSelGet(g_currentSynth, ctx.msb, ctx.lsb, pc);   // pc=0 si no hay memoria
+    bankLastSelGet(g_currentSynth, ctx.msb, ctx.lsb, pc, ctx.perfMode);   // pc=0 si no hay memoria
     ctx.lastMsb = ctx.msb;
     ctx.lastLsb = ctx.lsb;
     ctx.lastPc  = pc;
-    if (!ctx.perfMode) {
-        sendPatchSelect(ctx.msb, ctx.lsb, pc);
-        bankLastSelSet(g_currentSynth, ctx.msb, ctx.lsb, pc);   // primera vez → registra PC 0 como "último"
-    }
+    sendPatchSelect(ctx.msb, ctx.lsb, pc);
+    bankLastSelSet(g_currentSynth, ctx.msb, ctx.lsb, pc, ctx.perfMode);   // primera vez → registra PC 0 como "último"
+    synthActiveBankSet(g_currentSynth, ctx.perfMode, ctx.msb, ctx.lsb);
     soundtab_render_page(ctx, pc / UIBANK_GRID_PER_PAGE);
 }
 
@@ -667,7 +696,8 @@ static void apply_recall(const FavEntry& e) {
     // Igual que en soundtab_click_pc() (2026-07-13): sin favSaveLastSel() aquí,
     // se persiste una sola vez en uiBankHide(). bankLastSelSet() sí, pero solo
     // marca dirty en RAM (ver FavStore.h).
-    if (!wantPerf) bankLastSelSet(e.synth, e.msb, e.lsb, e.pc);
+    bankLastSelSet(e.synth, e.msb, e.lsb, e.pc, wantPerf);   // (2026-10-12 13:27) ambos roles
+    synthActiveBankSet(e.synth, wantPerf, e.msb, e.lsb);
 
     soundtab_render_page(ctx, e.pc / UIBANK_GRID_PER_PAGE);
     sendPatchSelect(e.msb, e.lsb, e.pc);
@@ -705,14 +735,14 @@ static void ensure_tab_built(uint32_t tab) {
         ctxBankRefreshBtns(s_son);
         memset(s_son.bankFav, 0, sizeof(s_son.bankFav));
         favMarkBank(g_currentSynth, (uint8_t)g_midiChannel, s_son.msb, s_son.lsb, ctxRole(s_son), s_son.bankFav, ctxBankSize(s_son));
-        soundtab_render_page(s_son, 0);
+        soundtab_render_page(s_son, ctxRestorePage(s_son));   // página del sonido exacto (2026-10-12)
     } else if (tab == 2 && !s_perf.built) {
         s_perf.built = true;
         build_sound_tab(s_perf, s_tab_perf, perf_bank_cb);
         ctxBankRefreshBtns(s_perf);
         memset(s_perf.bankFav, 0, sizeof(s_perf.bankFav));
         favMarkBank(g_currentSynth, (uint8_t)g_midiChannel, s_perf.msb, s_perf.lsb, ctxRole(s_perf), s_perf.bankFav, ctxBankSize(s_perf));
-        soundtab_render_page(s_perf, 0);
+        soundtab_render_page(s_perf, ctxRestorePage(s_perf)); // idem (2026-10-12)
     }
 }
 
@@ -749,6 +779,11 @@ void uiBankCreate(lv_obj_t* parent) {
         s_perf.msb = ctxBanks(s_perf)[0].msb;
         s_perf.lsb = ctxBanks(s_perf)[0].lsb;
     }
+    // Memoria por instrumento (2026-10-12): si hay registro del synth activo,
+    // tiene prioridad sobre el "último global" de favLoadLastSel() y cubre
+    // también Performances.
+    restoreCtxForSynth(s_son);
+    restoreCtxForSynth(s_perf);
 
     s_cont = lv_obj_create(parent);
     lv_obj_set_size(s_cont, P4_W, P4_H);
@@ -893,6 +928,10 @@ static void syncBankSelToSynth() {
     const BankDef* cb = ctxBanks(s_perf);
     if (cb) { s_perf.msb = cb[0].msb; s_perf.lsb = cb[0].lsb; }
     s_perf.lastMsb = s_perf.lastLsb = s_perf.lastPc = 0xFF;
+
+    // (2026-10-12 13:27) memoria por instrumento: vuelve a su banco y a su sonido exacto.
+    restoreCtxForSynth(s_son);
+    restoreCtxForSynth(s_perf);
 }
 
 // Se llama desde main.cpp cuando g_currentSynth cambia (tap/selección directa
@@ -910,14 +949,14 @@ void uiBankSynthChanged() {
         ctxBankRefreshBtns(s_son);
         memset(s_son.bankFav, 0, sizeof(s_son.bankFav));
         if (banks) favMarkBank(g_currentSynth, (uint8_t)g_midiChannel, s_son.msb, s_son.lsb, ctxRole(s_son), s_son.bankFav, ctxBankSize(s_son));
-        soundtab_render_page(s_son, 0);
+        soundtab_render_page(s_son, ctxRestorePage(s_son));   // vuelve a la página de su sonido (2026-10-12)
     }
     if (s_perf.built) {
         const BankDef* banks = ctxBanks(s_perf);
         ctxBankRefreshBtns(s_perf);
         memset(s_perf.bankFav, 0, sizeof(s_perf.bankFav));
         if (banks) favMarkBank(g_currentSynth, (uint8_t)g_midiChannel, s_perf.msb, s_perf.lsb, ctxRole(s_perf), s_perf.bankFav, ctxBankSize(s_perf));
-        soundtab_render_page(s_perf, 0);
+        soundtab_render_page(s_perf, ctxRestorePage(s_perf));
     }
     if (s_fav_built) fav_render_page(0);   // repagina sobre los favoritos del nuevo synth
 

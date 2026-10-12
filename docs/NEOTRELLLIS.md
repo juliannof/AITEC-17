@@ -259,6 +259,25 @@ Aplica al proyecto `MASTER_S3-P4/P4_JC4880P433C/` (ExPressif). Panel izquierdo (
 - **No interrumpible:** durante la secuencia las teclas se ignoran.
 - Escala con el brillo de pantalla (`brLevel`). Código: `introTick()` en `NeoTrellis.cpp`, ejecutado en Core0.
 
+### 7.4 Botón de función L1 y modos ExPressif / Lights (2026-10-12 13:22)
+
+- **L1 ya no es PANIC.** Es el **botón de función**: alterna entre los dos modos, **ExPressif ↔ Lights**. PANIC (reset de ejes a 64/64) se ha retirado de NeoTrellis y de la pantalla.
+- **ExPressif** es la interfaz de siempre (Kaos + Banco). **El Banco no es un modo**: sigue siendo una superposición dentro de ExPressif, con L4 pulsación larga como hasta ahora.
+- **Botón táctil:** el antiguo PANIC/"ALL OFF" ahora es **MODO** (sub-label "LIGHTS >") y hace lo mismo que L1. Solo es visible en ExPressif.
+- **LED de L1** = color del modo: ExPressif azul `COL_UIMODE_EXPRESSIF`, Lights amarillo `COL_UIMODE_LIGHTS`.
+- **Desde el Banco:** en Banco L1 es un slot de contenido. Para ir a Lights se cierra primero el Banco (L4 largo) y luego L1.
+- **Pantalla LIGHTS: de relleno** ("LIGHTS / proximamente"). Valida la lógica de modos; tocar la pantalla vuelve a ExPressif. El contenido real (WLED por WiFi) está en `docs/EXPRESSIF_WLED.md`.
+- **En Lights** solo responden L0 (reposo), L1 (modo) y L2/L6 (brillo); el resto de teclas están inactivas y L4 largo no abre el Banco.
+- **Código:** `display/UIMode.{h,cpp}` (`uiModeNext()`, `uiModeBankToggle()`; el modo se deriva del estado real de la pantalla Lights), `display/UILights.{h,cpp}` (relleno). Flags: `g_trellis_modeNext` (antes `g_trellis_panic`), `g_lightsOpen`. Colores y `UiMode` en `config.h`.
+
+### 7.5 Memoria del sonido exacto por instrumento (2026-10-12 13:27)
+
+- **Cada instrumento (synth) recuerda su sonido exacto**: banco (MSB/LSB) + PC, **en Sonidos y en Performances**. Al volver a un synth, el Banco abre en **su** banco, en **la página** de su sonido y con **ese sonido marcado**. No se reenvía ningún Program Change al cambiar de synth: el instrumento conserva su sonido y solo se restaura la interfaz.
+- **Por banco:** cada banco de cada instrumento y rol recuerda su último sonido (`bankLastSel*`, ahora con parámetro `perf`). Cambiar de banco salta a ese sonido y lo envía (antes solo Sonidos; ahora también Performances).
+- **Banco activo por instrumento y rol:** nuevo `synthActiveBankSet/Get` (`nvs/FavStore.*`), array `[NUM_SYNTHS][2]`.
+- **Persistencia:** RAM al elegir; NVS al cerrar el Banco y cada ~60 s (`bankLastSelFlushIfDirty()`). Claves NVS: `bls`/`blsn` (Sonidos, las de siempre, **sin migración**), `blc`/`blcn` (Performances, nueva), `sab` (banco activo, nueva).
+- **Restauración:** `restoreCtxForSynth()` en `UIBank.cpp`, al cambiar de synth (`syncBankSelToSynth()`) y al crear el Banco; el banco guardado se valida contra los bancos del synth activo.
+
 ---
 
 ## Últimas Actualizaciones
@@ -271,3 +290,5 @@ Aplica al proyecto `MASTER_S3-P4/P4_JC4880P433C/` (ExPressif). Panel izquierdo (
 - **(2026-10-11 19:39)** ExPressif: latido de reposo más tenue (pico = nivel de reposo) y más fluido (dithering a 200 Hz)
 - **(2026-10-11 19:44)** ExPressif: secuencia de encendido "matrix azul" en NeoTrellis (solo al arrancar), ver §7.3
 - **(2026-10-11 19:48)** ExPressif: lluvia de encendido de izquierda a derecha y mucho más lenta
+- **(2026-10-12 13:22)** ExPressif: L1 = botón de función ExPressif↔Lights (sin PANIC), pantalla Lights de relleno, ver §7.4
+- **(2026-10-12 13:27)** ExPressif: memoria del sonido exacto por instrumento (Sonidos y Performances), ver §7.5

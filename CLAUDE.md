@@ -413,7 +413,9 @@ ESP32-S3  ←→  RS485 bus B  ←→  8× ESP32-S2 (PTxx Track)
 │   ├── TOUCH.md                      ← GT911 capacitivo I2C, calibración (2026-05-16)
 │   ├── NEOTRELLLIS.md                ← 2× seesaw 4×4 RGB, I2C (2026-05-16)
 │   ├── RS485_P4.md                   ← Bus A pines pendientes confirmar, 9 slaves (2026-06-11)
-│   └── S3LINK.md                     ← Enlace serie S3↔P4 (Serial2): datos de canal + heartbeat (2026-08-16)
+│   ├── S3LINK.md                     ← Enlace serie S3↔P4 (Serial2): datos de canal + heartbeat (2026-08-16)
+│   ├── EXPRESSIF_WLED.md             ← Control WLED por WiFi desde ExPressif: plan en 2 fases, Fase 1 validada (2026-10-12 15:17)
+│   └── WIFI_EXPRESSIF.md             ← WiFi del ExPressif (P4+C6 esp-hosted): arquitectura, API, UI, trampas, diagnóstico (2026-10-12 15:17)
 ├── CHANGELOG.md                       ← Historial de cambios
 ├── README.md                          ← Intro repo
 └── platformio.ini                     ← Índice de subproyectos
@@ -445,6 +447,10 @@ ESP32-S3  ←→  RS485 bus B  ←→  8× ESP32-S2 (PTxx Track)
 
 **Enlace S3↔P4:**
 - **S3LINK.md** — UART punto a punto (Serial2, independiente de RS485): S3 reenvía nombre/REC/MUTE/SOLO/SELECT/VU de sus 8 canales al P4; P4 envía heartbeat y detecta al S3 desconectado (2026-08-16)
+
+**Iluminación (ExPressif):**
+- **EXPRESSIF_WLED.md** — Plan para controlar los WLED (191 principal, 195 workstation) por WiFi vía C6; selector Todas/Principal/Workstation; reposo apaga luces. **Sin implementar** (2026-10-11 19:59)
+- **WIFI_EXPRESSIF.md** — Capa WiFi del ExPressif validada en banco: hardware (C6/SDIO), tarea WLED en Core0, barrido, credenciales en NVS, pantalla de configuración, lecciones aprendidas y diagnóstico (2026-10-12 15:17)
 
 **Directivas:**
 - **CLAUDE.md** — Directivas vinculantes únicamente (no duplicar técnica)

@@ -15,6 +15,10 @@
 #include "display/UIKaosEdit.h"
 #include "display/UIBrightnessPopup.h"
 #include "display/UIPresetPopup.h"
+#include "display/UILights.h"
+#include "display/UIWifiCfg.h"
+#include "display/UIMode.h"
+#include "lights/WledClient.h"
 #include "nvs/FavStore.h"
 #include "nvs/KaosStore.h"
 
@@ -33,7 +37,7 @@ volatile bool    g_bootDone      = false;
 
 // ── Flags NeoTrellis → LVGL (Core 0 → Core 1) ────────────────────────
 volatile bool    g_trellis_holdToggle = false;
-volatile bool    g_trellis_panic      = false;
+volatile bool    g_trellis_modeNext   = false;   // L1 (2026-10-12 13:22, antes g_trellis_panic)
 volatile int8_t  g_trellis_setPreset  = -1;   // -1=none, 0-19=preset directo (2026-07-14)
 volatile bool    g_trellis_nextSynth  = false;
 volatile int8_t  g_trellis_setSynth   = -1;
@@ -60,6 +64,7 @@ volatile ExSynth g_currentSynth = ExSynth::JV2080;
 // track, no el firmware. Ver UIBank.cpp:activate_sound_mode().
 volatile uint8_t g_midiChannel = 1;
 volatile bool    g_bankOpen    = false;
+volatile bool    g_lightsOpen   = false;   // pantalla LIGHTS (2026-10-12 13:22)
 volatile uint8_t g_bankTab     = 0;
 
 TaskHandle_t taskCore0Handle = NULL;
@@ -115,24 +120,15 @@ void taskCore1(void* pv) {
         }
 
         // ── Flags NeoTrellis (pueden llegar en cualquier momento) ────────
-        if (g_trellis_panic) {
-            g_trellis_panic = false;
-            if (kaoss.hasPreset()) {
-                uint8_t ch = kaoss.getChannel();
-                sendCC(ch, kaoss.getCCX(), 64);
-                sendCC(ch, kaoss.getCCY(), 64);
-            }
-            g_lastCCX = 64;
-            g_lastCCY = 64;
-            g_touched = false;
+        // ── Botón de función (L1): ExPressif ↔ Lights (2026-10-12 13:22) ──
+        if (g_trellis_modeNext) {
+            g_trellis_modeNext = false;
+            if (uiReady) uiModeNext();
         }
         // ── Flag Bank (abre/cierra sin importar uiReady) ─────────────────
         if (g_trellis_openBank) {
             g_trellis_openBank = false;
-            if (uiReady) {
-                if (uiBankIsOpen()) uiBankHide();
-                else                uiBankShow();
-            }
+            if (uiReady) uiModeBankToggle();   // abre/cierra Banco, solo en modo ExPressif (2026-10-12 13:22)
         }
         // ── Slot NeoTrellis en modo Bank ─────────────────────────────────
         if (g_trellis_bankSlot >= 0 && uiReady) {
@@ -191,6 +187,8 @@ void taskCore1(void* pv) {
             uiKaossCreate(displayGetRoot());
             uiBankCreate(displayGetRoot());          // oculto por defecto
             uiKaosEditCreate(displayGetRoot());      // oculto por defecto (2026-07-14)
+            uiLightsCreate(displayGetRoot());        // oculto por defecto, antes de los popups (2026-10-12 13:22)
+            uiWifiCfgCreate(displayGetRoot());       // SSID/clave por pantalla, oculta, encima de Lights (2026-10-12 13:50)
             uiBrightnessPopupCreate(displayGetRoot()); // topmost, oculto por defecto (2026-07-14)
             uiPresetPopupCreate(displayGetRoot());     // topmost, oculto por defecto (2026-10-11 19:32)
             uiKaossStartScroll();
@@ -234,6 +232,8 @@ void setup() {
 
     xTaskCreatePinnedToCore(taskCore0, "Periph", 8192,  NULL, 2, &taskCore0Handle, 0);
     xTaskCreatePinnedToCore(taskCore1, "UI",    16384,  NULL, 1, &taskCore1Handle, 1);
+
+    wledInit();   // WiFi + WLED en tarea propia (Core0, prioridad baja) — Fase 1 (2026-10-12 13:32)
 
     log_i("=== ExPressif ACTIVO ===");
 }

@@ -11,6 +11,8 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 
 | Prioridad | Tarea | Notas |
 |-----------|-------|-------|
+| 🟡 Media | **ExPressif: control de iluminación WLED por WiFi, SIN IMPLEMENTAR — plan acordado, a la espera de "hazlo" (2026-10-11 19:55)** | Objetivo del usuario: controlar el WLED desde el ExPressif (encender/apagar, brillo, presets/playlists, color/efecto). **Dos WLED confirmados por el usuario (2026-10-11 19:58): `http://192.168.1.191/` = principal; `http://192.168.1.195/` = ilumina la workstation (es el que ya maneja el C3_PowerRelay).** Pendiente decidir si el ExPressif controla uno, el otro o ambos (y si como un grupo o por separado). Vía: WiFi directo desde ExPressif. **Hoy el ExPressif no tiene WiFi** (cero código en `P4_JC4880P433C`); el P4 no lleva radio propia, usa el **ESP32-C6 de la placa por SDIO (esp-hosted)** — el usuario confirma que el C6 existe. Pines SDIO probables (por analogía con Guition P4-M3-Dev / Waveshare P4-WiFi6, **sin confirmar para la JC4880P433C**): CLK=18, CMD=19, D0-D3=14-17, reset C6=54; sin conflicto con los GPIO usados hoy (5, 7, 8, 23, 31, 33). **Sin verificar:** si el C6 trae firmware esp-hosted esclavo y de qué versión. **Plan en 2 fases:** (1) prueba mínima de WiFi — `src/lights/WledClient.{h,cpp}`, tarea en Core0 (nunca en LVGL), `GET /json/state` al WLED y log `[WLED] conectado, on=… bri=…`; (2) pantalla táctil "LUCES" en LVGL con `POST /json/state` (on, bri, ps, seg/col/fx); NeoTrellis no tiene teclas libres, va por touch. **Decidido por el usuario (2026-10-11 20:00):** (a) selector en pantalla **Todas / Principal (191) / Workstation (195)**; "Todas" manda HTTP a ambos directamente, sin depender del sync UDP; (b) **el reposo del ExPressif apaga las luces** (nightlight de WLED, apagado progresivo; al despertar vuelven a su estado anterior) — matiz: L0 pasaría a dormir ExPressif + luces. **Datos reales leídos de los WLED (solo lectura):** 191 "Lamparita" = ESP32, 697 LEDs, ≥10 segmentos, AudioReactive I2S activo, sync UDP grupo 1 envía+recibe; 195 "Led Ordenador" = ESP32-S2 (~67 KB heap libre → peticiones pequeñas, sin polling agresivo), 83 LEDs, 4 segmentos, sync solo recibe; ambos WLED 0.15.0 con 187 efectos y 71 paletas. **Fase 1 implementada 2026-10-12 13:36 (sin validar), ver sesión de arriba. Brief: `docs/EXPRESSIF_WLED.md`.** **Decisiones aún pendientes:** credenciales WiFi (recomendado `secrets.h` ignorado por git; alternativa NVS desde pantalla), mDNS vs IP fija; empezar por Fase 1. **Aviso de seguridad:** `C3_PowerRelay/src/config.h` contiene SSID y contraseña WiFi en claro dentro del repo — rotar la clave si el repo es público y no copiarla al ExPressif. |
+| 🟢 Baja | **ExPressif: ilustración del equipo al seleccionar el synth + U-110, SIN IMPLEMENTAR (2026-10-11 19:55)** | Ver sesión 2026-10-11 19:52 abajo. Falta decidir: fuente de imágenes (aportadas por el usuario vs. esquemas LVGL), dónde se muestran (popup, fija en Kaoss, cabecera de Bank) y qué es "WAVE". U-110 = séptimo synth completo (no hay tecla NeoTrellis libre) o solo ilustración. |
 | 🟡 Media | **S2: `POSITION_FINE_PWM_K=0.5→0.2` + timeout STALL ×4 en zona fina, PENDIENTE VALIDAR LIMPIO (2026-08-20 17:39)** | Ver sesión 2026-08-20 17:39 abajo — ajuste del suelo de PWM en frenado fino + ampliación del guard STALL específicamente en `MOVING_TO_TARGET` con `absErr<POSITION_CRUISE_ERR`. Aplicado y probado en banco, pero las últimas capturas estaban contaminadas por una unidad buck defectuosa (ya sustituida) que corrompía lecturas ADC/RS485 — pendiente repetir la prueba (subir el fader hasta el tope superior desde Logic) con el hardware ya sano para saber si el fix real es suficiente. |
 | 🟡 Media | **S2: jitter anti-cascada en `setTargetFromS3`/`setTargetForced` implementado, sin validar en banco (2026-08-13 15:10)** | `MOVING_JITTER_MAX_MS=150` + helper `_readyToMove()` aplicado (mismo patrón que `GOTOMIN_JITTER_MAX_MS`). Pendiente cargar un proyecto real y confirmar que baja/desaparece el `[RS485] ID MISMATCH` (era aleatorio entre slaves, no un slave fijo). Ver sesión 2026-08-13 15:10 abajo, punto 10. |
 | 🟢 Baja — **RESUELTO (causa probable: cable), cerrado por el usuario (2026-08-20 18:57)** | **S3: posición 8 del bus B nunca respondía (`printStats()`), swap test confirmó que era la posición, no la unidad — causa: cable de esa posición (2026-08-20 18:48 → 18:57)** | Con el rig completo (8 slaves), `printStats()` mostró tasa de éxito 87.5% (`TX:90830 RX:79459 TIMEOUT:11652`) — el cálculo (~11.354 esperados solo del slave 8 si nunca responde) coincide casi exacto con el total de timeouts: prácticamente todo el fallo del bus viene de un único slave, los otros 7 están al ~99%. El fader de esa posición se comporta con normalidad (recibe comandos, motor actúa) — confirma que el enlace TX (S3→S2) funciona, solo la respuesta (S2→S3) nunca llega. Descartado por código: filtrado de ID en el S2 (`_rxBuf[1] != _myId`, `RS485.cpp`), dimensionado de `_ch[NUM_SLAVES+1]` (S3), ciclo de `_nextSlave()` — todo correcto, no hay bug de software encontrado. **Descartado por hardware:** el usuario sustituyó la unidad S2 física de esa posición por otra — el fallo se quedó en la posición 8, no viajó con la unidad. Apunta a cableado/conector/terminación de esa posición concreta del bus, no a un componente electrónico. Se añadió instrumentación temporal (`log_i` con `rxAvail`/`rxGot` en el timeout, `RS485.cpp`) para diferenciar "nunca llega nada" de "llega incompleto" — revertida a `log_d` tras cerrar el caso, no hizo falta usarla. **Cerrado por el usuario: causa probable, cable de esa posición.** No se tocó nada por firmware — era hardware/instalación. |
@@ -47,6 +49,133 @@ Formato: [Keep a Changelog](https://keepachangelog.com/)
 | 🔴 Alta | **P4+S3: ni el P4 ni el S3 detectaban el cierre de Logic Pro — Logic manda faders-a-0 + `0x21` pegados y el `0x21` revertía la desconexión, SIN VALIDAR EN BANCO (2026-08-18 20:28)** | Diagnosticado con capturas MIDI Monitor reales del cierre de Logic (dos veces, mismo patrón exacto): al cerrar, Logic manda el burst de reset (VU + Pitch Wheel a 0 en 10 canales + CC a 0) que sí dispara la heurística de "faders a mínimo" (`DISCONNECT_THRESHOLD=9`/`DISCONNECT_WINDOW_MS`) — pero milisegundos después manda `0x21` (GoOnline) otra vez, y `case 0x21` en ambos firmwares reconectaba de forma incondicional en cuanto el estado no era ya `CONNECTED`, deshaciendo la desconexión que la propia heurística acababa de marcar. Confirmado por descarte: `DEVICE_FAMILY` igual en ambas unidades (0x14, directiva explícita del usuario) no es la causa — la guarda de familia (`device_family != DEVICE_FAMILY`) nunca bloqueaba nada. Fix: nueva firma compuesta "faders-a-0 + 0x21 pegados" = confirmación real de cierre (no reconexión) — `lastFaderDisconnectTime` se marca cuando la heurística dispara `DISCONNECTED`; si el `0x21` siguiente llega dentro de `DISCONNECT_CONFIRM_WINDOW_MS=500ms` desde esa marca, `case 0x21` NO reconecta (solo manda el eco `21 01` que Logic espera siempre). Un `0x21` fuera de esa ventana (reconexión real, sin faders-a-0 precediéndolo) sigue reconectando igual que antes — no se toca el fix de reconexión silenciosa de la sesión 19:30. Ver sesión 2026-08-18 20:28 abajo. Pendiente: cerrar Logic en banco y confirmar `DISCONNECTED` estable en ambas unidades (log `[MCU] 0x21 tras faders-a-0 (firma cierre) — permanece DISCONNECTED`); reabrir Logic y confirmar reconexión normal sin regresión. |
 | 🟡 Media | **S2: OTA WiFi — 1 de 4 unidades sigue sin levantar WiFi tras reinsertar el fix anti back-feed, sospecha de brown-out por sag de 3V3 (HARDWARE), SIN CONFIRMAR CON OSCILOSCOPIO (2026-08-21 20:23)** | Ver sesión 2026-08-21 abajo — el fix de `CHANGELOG_20260413` (neutralizar back-feed RS485 en GPIO8 antes de `WiFi.begin()`) se reinsertó en `OtaManager.cpp::enableForUpload()` tras haberse perdido en la reescritura de mayo. En una de las unidades con WiFi marginal, el log serie muestra reset completo del MCU (USB CDC se desenumera y reenumera, seguido de logs de arranque normal — calibración de Motor) justo al iniciar `WiFi.begin()`, no un simple timeout. Coincide con el segundo escenario anticipado en el brief: sag del riel 3V3 en el pico de consumo RF provocando brown-out. **No es un fallo del fix aplicado** — el back-feed de GPIO8 ya no bloquea, esto es un problema de alimentación/desacoplo distinto. Pendiente (hardware, no tocar por firmware): osciloscopio en 3V3 durante `WiFi.begin()` en esa unidad para confirmar el sag antes de decidir si se añade un bulk cap (220–470µF). Repetir la prueba en las otras 3 unidades problemáticas. |
 | 🔴 Alta | **P4+S3: detección de cierre "silencioso" de Logic Pro (Cmd+Q con USB conectado, sin `0x0F` ni faders-a-0), SIN VALIDAR EN BANCO (2026-08-23 11:04)** | Verificado con MIDI Monitor: al cerrar Logic con el cable USB conectado, ninguna de las dos firmas previas (mensaje `0x0F` explícito, o heurística de faders-a-mínimo de la sesión 2026-08-18 20:28) se dispara de forma fiable. Único patrón común encontrado entre apertura y cierre: Logic blanquea los 8 nombres de canal a la vez en ambos casos (`case 0x12`) — la diferencia es que en apertura llegan nombres reales justo después, y en cierre no llega nada más. Fix: `case 0x12` arma `awaitingCloseConfirm` al detectar blanqueo total de los 8 canales; nueva función `checkLogicCloseSignature()` (llamada cada ciclo en `taskCore0()`) fuerza `DISCONNECTED` (mismo reset que `case 0x0F`) si no llega ningún nombre real dentro de `CLOSE_CONFIRM_WINDOW_MS=4000` desde el blanqueo. Cualquier nombre real recibido, o cualquier otra vía de desconexión ya existente (heurística de faders, `checkUsbLink()`, `case 0x0F`), desarma `awaitingCloseConfirm` para evitar disparos obsoletos. Implementado en paralelo en P4 (`MIDIProcessor.cpp/.h`, `config.h`, `main.cpp`) y S3 (mismos ficheros, `CLOSE_CONFIRM_WINDOW_MS` como `static const` local por no tener el mismo `config.h`). Pendiente: cerrar Logic en banco con USB conectado y confirmar `DISCONNECTED` estable en ambas unidades tras ~4s (log `[MCU] Cierre de Logic confirmado...`); confirmar que abrir un proyecto nuevo (blanqueo + nombres reales) NO dispara una desconexión falsa. |
+
+---
+
+### SESIÓN 2026-10-12 15:17 — Documentación de la capa WiFi del ExPressif
+
+Nuevo **`docs/WIFI_EXPRESSIF.md`**: hardware (C6, SDIO, pines del core y evidencia), arquitectura (tarea WLED en Core0, reglas), máquina de estados, barrido y códigos de error, API pública, pantalla de configuración, constantes de `config.h`, datos de los dos WLED, **7 trampas encontradas** (LVGL `remove_style_all`, `lv_textarea` rotado lento, `lv_keyboard` y rotación, NVS NOT_FOUND, barrido mientras asocia…), diagnóstico por síntoma, seguridad, validación y cómo extender. Enlazado desde `CLAUDE.md` (árbol e índice), `docs/EXPRESSIF_WLED.md` y el README de ExPressif. Solo documentación, sin cambios de código.
+
+---
+
+### SESIÓN 2026-10-12 15:14 — ExPressif: FASE 1 WLED VALIDADA EN BANCO
+
+Log del usuario: `ASSOC_LEAVE` (desconexión propia al guardar credenciales / barrer) → dos lecturas fallidas `Host is unreachable` → `conectando a '<tu SSID>'` → `WiFi conectado, IP=192.168.1.54 RSSI=-38` → `191 principal on=0 bri=255 ps=-1`, `195 workstation on=0 bri=255 ps=-1`. Contrastado con `GET /json/state` real de ambos: coincide (el estado de las luces cambió desde la mañana, no es fallo del parser). **Validado:** esp-hosted/C6 en esta placa con los pines por defecto, asociación, lectura de ambos WLED, credenciales por pantalla en NVS, barrido.
+Mejora menor: el bucle de lectura corta si la conexión cae a mitad (`WledClient.cpp`), para no emitir `Host is unreachable`. **Pendiente:** Fase 2 (control + pantalla Lights real + apagado en reposo).
+
+---
+
+### SESIÓN 2026-10-12 15:12 — ExPressif: bloqueo de mayúsculas en el teclado WiFi
+
+`UIWifiCfg.cpp`: MAYUS pasa a 3 estados — 1er toque = una mayúscula (resaltada, vuelve a minúsculas tras una letra), 2º toque = **BLOQ MAYUS** (botón en color de acento con texto "BLOQ", se mantiene), 3er toque = minúsculas. `?123` y reabrir la pantalla lo desactivan. Sin compilar; sin validar en banco.
+
+---
+
+### SESIÓN 2026-10-12 15:05 — ExPressif: "no responde al tocar mi red" → botones sin geometría (bug mío)
+
+**Causa raíz CONFIRMADA en el código de LVGL 9.5 instalado:** `lv_obj_set_pos/size` guardan x/y/ancho/alto en el **estilo local** del objeto, y `lv_obj_remove_style_all()` **borra también el estilo local**. En `UIWifiCfg.cpp` llamaba a `put()` y DESPUÉS a `style_key()` (que hace `remove_style_all`), así que **todas las teclas y filas de la lista perdían posición y tamaño** (apiladas en (0,0), tamaño por defecto). El texto se pintaba bien (labels aparte) pero el botón que recibe el toque no estaba debajo → la lista se veía y no respondía. Introducido el 2026-10-12 14:00 al añadir `remove_style_all` en el arreglo de rendimiento.
+
+**Fix:** `style_key()` ANTES de `put()` en `make_key()` y en las filas del barrido (`UIWifiCfg.cpp`). Los otros usos (`box`, `s_scan_cont`) ya aplicaban la geometría después.
+
+**Validar en banco:** que la lista responda, y **todo el teclado**: puede que las teclas también hubieran estado desplazadas, comprobar cada fila de letras, MAYUS, ?123, BORRAR, VER, REDES, CANCELAR y GUARDAR.
+
+---
+
+### SESIÓN 2026-10-12 14:59 — ExPressif: ruido `nvs_open failed: NOT_FOUND` (WifiStore)
+
+Log del usuario: `[E][Preferences.cpp:47] begin(): nvs_open failed: NOT_FOUND`. **No es la causa del fallo de barrido**: `wifiStoreLoad()` abría el namespace `wifi` en solo lectura y, mientras no hay credenciales guardadas, no existe; la tarea WLED lo consulta cada 500 ms. Fix: abrir en lectura/escritura (crea el namespace vacío una vez). `nvs/WifiStore.cpp`. Sin compilar.
+
+---
+
+### SESIÓN 2026-10-12 14:55 — ExPressif: "el C6 no lanza el barrido" (error -2)
+
+**Riesgo: BAJO.** Sin compilar; **sin validar en banco**. Causa **probable** (el primer barrido sí funcionó): `esp_wifi_scan_start` falla con `ESP_ERR_WIFI_STATE` (-2) si la STA está asociando/reintentando; con `setAutoReconnect(true)` y credenciales erróneas o red fuera de alcance, el C6 reintenta en bucle y cualquier barrido posterior falla.
+
+**`lights/WledClient.cpp::doScan()`:** si no está conectado, desactiva el auto-reintento y hace `WiFi.disconnect()` antes de barrer; `scanDelete()` previo; un reintento si no se lanza; reactiva auto-reintento al terminar; log con el estado WiFi. La espera de conexión se interrumpe si hay un barrido pedido. Si sigue fallando, la hipótesis alternativa es que el C6 pierda el enlace SDIO tras el primer uso: habría que ver el log `ESP-Hosted`.
+
+---
+
+### SESIÓN 2026-10-12 14:49 — ExPressif: lista de redes con look & feel estándar (cambio mínimo)
+
+El barrido ya encuentra redes (confirmado por el usuario). Pedido: "quiero el look & feel, no que reescribas todo / nada más". **Solo aspecto**, sin tocar arquitectura: filas de la lista de `UIWifiCfg` con icono `LV_SYMBOL_WIFI`, separador de fila como `lv_list` estándar (borde inferior físico = lado izquierdo nativo) y sin radio. **Descartado a petición del usuario:** rotación nativa de LVGL, `lv_keyboard`/`lv_textarea`/`lv_list` estándar y reescritura de la pantalla WiFi. Sin compilar; sin validar en banco.
+
+---
+
+### SESIÓN 2026-10-12 14:25 — ExPressif: "no encuentra redes" → diagnóstico real del barrido
+
+**MCU afectadas:** solo P4 ExPressif. **Riesgo: BAJO.** Sin compilar; **sin validar en banco**. Causa raíz **aún sin determinar** (hace falta el log serie).
+
+1. **Problema reportado:** el barrido no encuentra redes. Se ocultaba el motivo: `scanNetworks()` devuelve **-2** (barrido no lanzado, típico de C6/esp-hosted sin respuesta) y el código lo trataba como "0 redes"; además la librería bloqueante espera **hasta 60 s** el evento de fin.
+2. **`lights/WledClient.cpp::doScan()`:** comprueba el resultado de `WiFi.mode(STA)`; barrido asíncrono con espera propia (`WLED_SCAN_TIMEOUT_MS`=15 s); `wledScanError()`: 0 ok · -1 `WiFi.mode` falló · -2 barrido no lanzado · -3 timeout. Log: `[WLED] barrido: N red(es) vistas por el C6, M válidas (err=...)`.
+3. **`display/UIWifiCfg.cpp`:** la pantalla muestra el motivo real en vez de "no se encontraron redes".
+4. **Hipótesis a descartar con el log:** (a) C6 sin firmware esp-hosted esclavo o de versión incompatible; (b) pines SDIO distintos de los del core; (c) el C6 solo ve **2.4 GHz** (si tu WiFi es solo 5 GHz no aparecerá).
+
+---
+
+### SESIÓN 2026-10-12 13:58 — ExPressif: teclado WiFi lento (fix de rendimiento) + barrido de redes
+
+**MCU afectadas:** solo P4 ExPressif. **Riesgo: MEDIO-BAJO.** Sin compilar (directiva); **sin validar en banco**.
+
+1. **Teclado táctil "muy, muy lento" (reportado):** causa **probable, no medida**: render PARCIAL en bandas de 100 líneas con búfers en PSRAM; LVGL re-transforma un objeto rotado una vez por banda, y dos `lv_textarea` rotados de 684×48 con cursor parpadeante (animación continua) saturaban el Core1; además el temporizador de estado reescribía un label rotado de 424 px cada 500 ms aunque no cambiase. **Cambios:** campos = caja `lv_obj` sin rotar + `lv_label` rotado (buffers propios, enmascarado con `*`, longitud máx. 32/63, cola visible si hay más de 52 caracteres, cursor `_` fijo sin animación); `lv_label_set_text` solo si el texto cambia; teclas con `lv_obj_remove_style_all()` (sin transiciones del tema).
+2. **Barrido de redes (pedido por el usuario: "solo poner la contraseña"):** `WledClient` ejecuta `WiFi.scanNetworks()` en su tarea (Core0, nunca en la UI): API `wledScanRequest/Busy/Seq/Get`, deduplica por SSID, ordena por RSSI, máx. `WLED_SCAN_MAX`=12 (la UI muestra 8). `UIWifiCfg`: panel con la lista (SSID, dBm, [clave]/[abierta]); tocar una red rellena el SSID y pasa directo a la CLAVE. Sin SSID guardado, al abrir la pantalla se barre automáticamente. Botón **REDES** en la fila de acciones, **ESCRIBIR A MANO** (redes ocultas) y **REESCANEAR** en el panel. Una red abierta se guarda sin clave.
+3. **Archivos:** `display/UIWifiCfg.cpp`, `lights/WledClient.{h,cpp}`, `config.h` (`WLED_SCAN_MAX`).
+
+**Validar en banco:** que el teclado responda fluido y escriba la letra tocada; barrido (~2-5 s) y lista; elegir red → solo clave → GUARDAR → `CONECTADO <IP>`; red abierta; ESCRIBIR A MANO; que el barrido no afecte a USB-MIDI. **Si sigue lento**, siguiente paso: medir con `LV_USE_PERF_MONITOR` y valorar búfer de dibujo en SRAM interna.
+
+---
+
+### SESIÓN 2026-10-12 13:50 — ExPressif: SSID y clave WiFi por pantalla (teclado en pantalla, NVS)
+
+**MCU afectadas:** solo P4 ExPressif. **Riesgo: MEDIO-BAJO** (UI nueva sin validar; geometría de primera pasada). Sin compilar (directiva); **sin validar en banco**.
+
+1. **`display/UIWifiCfg.{h,cpp}` (nuevo):** pantalla con campos **SSID** y **CLAVE** (`lv_textarea`: una línea, modo contraseña, longitud máx. `WIFI_SSID_MAX`=32 / `WIFI_PASS_MAX`=63, cursor, `add_char`/`delete_char` de la librería) y teclado en pantalla: 4 filas × 10 teclas (minúsculas / mayúscula de un solo uso / símbolos) + fila MAYUS, ?123, ESPACIO, BORRAR, VER, CANCELAR, GUARDAR. Precarga lo guardado; estado de conexión en vivo (timer 500 ms).
+2. **Por qué no `lv_keyboard`:** verificado en la LVGL 9.5.0 instalada: `lv_buttonmatrix.c::get_button_from_point()` usa `lv_indev_get_point()` en bruto y áreas sin transformar → dentro de un contenedor rotado tocaría una tecla distinta. Las teclas son `lv_button` + `lv_label` con `rot_label()` (patrón de `UIBank`), y el hit-test de objetos (`lv_indev_search_obj`) sí aplica la transformación.
+3. **`nvs/WifiStore.{h,cpp}` (nuevo):** NVS namespace `wifi`, claves `ssid`/`pass`. **Clave en claro** (NVS no cifrado).
+4. **`lights/WledClient.*`:** credenciales NVS primero, `secrets.h` de respaldo; si no hay ninguna espera (ya no termina la tarea) y conecta en cuanto se guardan, sin reiniciar. API nueva: `wledWifiState()`, `wledWifiIp()`, `wledCredentialsChanged()`. Reintento a los 10 s si falla.
+5. **Acceso:** modo Lights → botón **CONFIGURAR WIFI** (`UILights`). Al salir de Lights (L1 o toque) la pantalla WiFi se oculta.
+6. **`config.h`:** `WIFI_SSID_MAX`, `WIFI_PASS_MAX`.
+
+**Validar en banco:** que el texto salga legible y bien orientado; que cada tecla escriba **la letra que se toca** (punto crítico); BORRAR, MAYUS, ?123, VER; GUARDAR → reconexión y `CONECTADO <IP>` sin reiniciar; reiniciar y comprobar que persiste; CANCELAR no guarda; que USB-MIDI no se vea afectado.
+
+---
+
+### SESIÓN 2026-10-12 13:36 — ExPressif: modo Lights, Fase 1 (WiFi por C6 + lectura de estado WLED)
+
+**MCU afectadas:** solo P4 ExPressif. **Riesgo global: MEDIO** (WiFi nuevo, sin validar). Sin compilar (directiva); **sin validar en banco**. Desactivable: `WLED_ENABLE 0` en `config.h`.
+
+1. **Verificado en el core instalado** (Arduino-ESP32 3.3.7): WiFi del P4 vía esp-hosted ya habilitado (`CONFIG_ESP_WIFI_REMOTE_ENABLED=y`, esclavo ESP32-C6) y pines SDIO por defecto de la variante `esp32p4` = CLK18 CMD19 D0-D3 14-17 RST54. **Sin cambios en `platformio.ini`.**
+2. **`src/lights/WledClient.{h,cpp}` (nuevo):** tarea Core0 (prio 1), arranca a los 5 s; conecta al WiFi y cada 30 s hace `GET /json/state` a 191 (principal) y 195 (workstation), una petición a la vez (el 195 es un S2 con poca RAM); parsea `on`/`bri`/`ps` por `strstr` y lo registra: `[WLED] 191 principal on=0 bri=42 ps=1`. API: `wledInit()`, `wledWifiConnected()`, `wledGetCached()`.
+3. **Credenciales:** `src/secrets.h` (ignorado por git; `.gitignore` actualizado) + `src/secrets.h.example`. El `secrets.h` local trae placeholders (`TU_SSID`): **hay que rellenarlo**; con el placeholder el módulo no conecta y lo avisa.
+4. **`config.h`:** `WLED_ENABLE`, `WLED_IP_MAIN/WS`, timeouts, `WLED_POLL_MS`. `main.cpp`: `wledInit()` al final de `setup()`.
+5. **Pendiente:** Fase 2 (control + pantalla Lights real + apagado en reposo). La pantalla Lights sigue de relleno.
+
+**Validar en banco:** `[WLED] WiFi conectado` y las dos lecturas en el log; que **USB-MIDI y la UI no cambien** (MIDI Monitor); heap libre estable; que sin credenciales (placeholder) el arranque sea idéntico al de antes. Si el C6 no responde, el log lo dirá (`no se pudo asociar`): puede faltar firmware esp-hosted en el C6.
+
+---
+
+### SESIÓN 2026-10-12 13:27 — ExPressif: memoria del sonido exacto por instrumento (Sonidos y Performances)
+
+**MCU afectadas:** solo P4 ExPressif. **Riesgo: BAJO-MEDIO** (persistencia NVS + `UIBank.cpp`). Sin compilar (directiva); **sin validar en banco**.
+
+1. **Hueco encontrado:** `bankLastSel` ya recordaba un PC por (synth, banco) pero solo Sonidos, y al cambiar de synth `syncBankSelToSynth()` reiniciaba al primer banco y a "sin selección". Nadie recordaba cuál era el banco activo de cada instrumento.
+2. **`nvs/FavStore.*`:** `bankLastSelSet/Get` con parámetro `perf` (tablas separadas por rol; Sonidos conserva `bls`, Performances `blc`); nuevo `synthActiveBankSet/Get` (`sab`). Sin migración: la clave `bls` no cambia. Volcado en `bankLastSelFlushIfDirty()`.
+3. **`display/UIBank.cpp`:** se registra banco y sonido al elegir (tap, favorito, cambio de banco), también en Performances; `restoreCtxForSynth()` restaura banco, sonido y **página** al cambiar de synth y al arrancar. Cambiar de banco en Performances ahora también salta al último sonido y lo envía (antes quedaba en página 0 sin enviar).
+4. No se reenvía Program Change al cambiar de synth.
+
+**Validar en banco:** elegir sonido en JV-2080 (banco distinto del 1ª), cambiar a Triton y volver → mismo banco/página/sonido marcado; igual en Performances; reiniciar el equipo y comprobar que persiste; que el tap en grid no se note más lento; favoritos y "Sound Mode" (SysEx) siguen igual.
+
+---
+
+### SESIÓN 2026-10-12 13:22 — ExPressif: L1 pasa de PANIC a botón de función ExPressif ↔ Lights
+
+**MCU afectadas:** solo P4 ExPressif (`P4_JC4880P433C`). **Riesgo: BAJO-MEDIO.** Sin compilar (directiva); **sin validar en banco**.
+
+1. **PANIC retirado** de NeoTrellis (L1) y de la pantalla; `g_trellis_panic` → `g_trellis_modeNext`; `COL_FUNC_PANIC`/`COL_BTN_PANIC` eliminados. (PANIC no mandaba All Notes Off, sino CC X/Y = 64.)
+2. **Dos modos: ExPressif ↔ Lights** (decisión del usuario). L1 alterna; LED azul/amarillo. El botón táctil (antes PANIC/"ALL OFF") es ahora **MODO** ("LIGHTS >"). **El Banco no es un modo:** sigue siendo superposición dentro de ExPressif (L4 largo). Una primera versión del día usó Kaos→Banco→Luces; se corrigió.
+3. **Pantalla LIGHTS de relleno** (`UILights`), solo para validar la lógica; contenido real = WLED (ver `docs/EXPRESSIF_WLED.md`). En Lights solo responden L0, L1 y L2/L6.
+4. Nuevo: `display/UIMode.{h,cpp}`, `display/UILights.{h,cpp}`. Docs: `docs/NEOTRELLLIS.md` §7.4, README de ExPressif.
+
+**Validar en banco:** L1 y botón táctil alternan ExPressif↔Lights; LED de L1; teclas inactivas en Lights; reposo/despertar estando en Lights; el Banco sigue idéntico (L4 largo); desde Banco, cerrar y luego L1.
 
 ---
 

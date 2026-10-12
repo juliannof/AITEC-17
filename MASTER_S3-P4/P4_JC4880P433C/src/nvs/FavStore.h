@@ -53,6 +53,19 @@ int favFindIndex(ExSynth synth, uint8_t ch, uint8_t msb, uint8_t lsb, uint8_t pc
 // de escribir flash en cada tap (ver soundtab_click_pc). La escritura real
 // a NVS ocurre en bankLastSelFlushIfDirty(), llamada periódicamente (cada
 // ~60s si hay cambios) y al cerrar Bank — nunca en el camino del touch.
-void bankLastSelSet(ExSynth synth, uint8_t msb, uint8_t lsb, uint8_t pc);
-bool bankLastSelGet(ExSynth synth, uint8_t msb, uint8_t lsb, uint8_t& pc);
-void bankLastSelFlushIfDirty();
+//
+// (2026-10-12 13:27) `perf` = rol: false = Sonidos/Program, true = Performances/Combination.
+// Cada rol tiene su propia tabla (msb/lsb pueden coincidir entre roles). Los
+// datos de Sonidos conservan la clave NVS "bls" de siempre (sin migración);
+// Performances usa "blc". Por defecto perf=false, los llamantes antiguos no cambian.
+void bankLastSelSet(ExSynth synth, uint8_t msb, uint8_t lsb, uint8_t pc, bool perf = false);
+bool bankLastSelGet(ExSynth synth, uint8_t msb, uint8_t lsb, uint8_t& pc, bool perf = false);
+
+// Banco ACTIVO por instrumento y rol (2026-10-12 13:27) — cuál era el banco (msb/lsb)
+// seleccionado la última vez en cada synth. Junto con bankLastSelGet() da el
+// sonido exacto (banco + PC) de cada instrumento. Solo RAM al escribir;
+// se vuelca a NVS (clave "sab") en bankLastSelFlushIfDirty().
+void synthActiveBankSet(ExSynth synth, bool perf, uint8_t msb, uint8_t lsb);
+bool synthActiveBankGet(ExSynth synth, bool perf, uint8_t& msb, uint8_t& lsb);
+
+void bankLastSelFlushIfDirty();   // vuelca ambos roles + banco activo si hay cambios

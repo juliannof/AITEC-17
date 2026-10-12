@@ -7,7 +7,7 @@
 //   TAP    pos(0,   0)   BTN_W×BTN_H  → izq-abajo  (screen x:0→150,   y:240→480)
 //   PAD    pos(0,   150) P4_W×PAD_SIZE → centro     (screen x:150→650, y:0→480)
 //   PRESET pos(240, 650) BTN_W×BTN_H  → der-arriba (screen x:650→800, y:0→240) — antes SCALE (2026-07-14)
-//   PANIC  pos(0,   650) BTN_W×BTN_H  → der-abajo  (screen x:650→800, y:240→480)
+//   MODO   pos(0,   650) BTN_W×BTN_H  → der-abajo  (screen x:650→800, y:240→480)
 //
 // LED behavior:
 //   Idle:   todos los dots apagados (0%)
@@ -16,6 +16,7 @@
 //   Decay:  d=1/2/3 decrecen con el tiempo mientras se mantiene el toque
 
 #include "UIKaoss.h"
+#include "UIMode.h"
 #include "UIBank.h"
 #include "UIKaosEdit.h"
 #include "../config.h"
@@ -373,18 +374,8 @@ static void btn_event_cb(lv_event_t* e) {
                 case 2:                              // PRESET (antes SCALE) — abre editor (2026-07-14)
                     uiKaosEditShow();
                     break;
-                case 3:
-                    if (kaoss.hasPreset()) {
-                        uint8_t ch = kaoss.getChannel();
-                        sendCC(ch, kaoss.getCCX(), 64);
-                        sendCC(ch, kaoss.getCCY(), 64);
-                    }
-                    g_lastCCX  = 64;
-                    g_lastCCY  = 64;
-                    g_touched  = false;
-                    s_pressing = false;
-                    s_glow_t   = 0.0f;
-                    update_leds_draw();
+                case 3:                              // MODO (antes PANIC): ExPressif → Lights (2026-10-12 13:22)
+                    uiModeNext();
                     break;
                 default: break;
             }
@@ -511,7 +502,7 @@ void uiKaossCreate(lv_obj_t* parent) {
     rot_label(s_lbl_hold);
 
     s_btn[2] = make_btn(parent, BTN_W, PAD_START_Y + PAD_SIZE, "PRESET", synthColor(), darken(synthColor(), 20), COL_BTN_BG, 2);
-    s_btn[3] = make_btn(parent, 0,     PAD_START_Y + PAD_SIZE, "PANIC",  COL_FUNC_PANIC, COL_BTN_PANIC, COL_BTN_PANIC, 3);
+    s_btn[3] = make_btn(parent, 0,     PAD_START_Y + PAD_SIZE, "MODO",   COL_UIMODE_LIGHTS, COL_BTN_MODE, COL_BTN_MODE, 3);   // botón de función (2026-10-12 13:22, antes PANIC)
 
     s_lbl_preset = lv_label_create(s_btn[2]);
     lv_obj_set_style_text_color(s_lbl_preset, lv_color_hex(COL_TEXT_DIM), 0);
@@ -521,8 +512,8 @@ void uiKaossCreate(lv_obj_t* parent) {
     uiKaossUpdatePreset();
 
     lv_obj_t* lbl_panic = lv_label_create(s_btn[3]);
-    lv_label_set_text(lbl_panic, "ALL OFF");
-    lv_obj_set_style_text_color(lbl_panic, lv_color_hex(0xFF6666), 0);
+    lv_label_set_text(lbl_panic, "LIGHTS >");   // siguiente modo desde Kaos (2026-10-12 13:22, antes "ALL OFF")
+    lv_obj_set_style_text_color(lbl_panic, lv_color_hex(COL_UIMODE_LIGHTS), 0);
     lv_obj_set_style_text_font(lbl_panic, &lv_font_montserrat_14, 0);
     lv_obj_align(lbl_panic, LV_ALIGN_CENTER, -15, 0);
     rot_label(lbl_panic);
